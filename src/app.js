@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { createAdminRouter } from './admin/routes.js';
 import { createRecommendRouter, createStoreRouter } from './recommend/routes.js';
 import { createWeather } from './recommend/weather.js';
+import { createSizeRouter } from './size/size.js';
 
 // uploadDir holds product images only. Customer photos are never written anywhere.
 export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads', weather = createWeather() } = {}) {
@@ -18,6 +19,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/admin', createAdminRouter(db, { uploadDir }));
   api.use('/recommend', createRecommendRouter(db, { weather }));
   api.use('/stores', createStoreRouter(db, { weather }));
+  api.use('/size', createSizeRouter());
   api.use((req, res) => res.status(404).json({ error: 'Topilmadi' }));
   app.use('/api', api);
   app.use('/admin', express.static(fileURLToPath(new URL('../public/admin', import.meta.url))));

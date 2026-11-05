@@ -1,4 +1,5 @@
 import { watchIdle } from './idle.js';
+import { loadPose, measure } from './pose.js';
 
 // One app: /kiosk (big buttons, idle reset) and /m (phone, opened from the store QR).
 const kiosk = location.pathname.startsWith('/kiosk');
@@ -16,15 +17,15 @@ const form = $('form');
 
 // shortcut: in-memory cart stub (product + size); task 8 replaces it with the server cart and stock holds.
 let cart = [];
-let request = null;
+let request = null; // POST /api/recommend body
+let body = null; // { gender, height, weight } for POST /api/size
+let sizeInfo = null; // last /api/size answer: confidence for the results screen
 let store = null;
 
-for (const box of document.querySelectorAll('[data-sizes]')) {
-  box.append(...CLOTHES.map((s) => el('label', {}, el('input', { type: 'radio', name: box.dataset.sizes, value: s }), el('span', { textContent: s }))));
-}
 form.shoes.append(...SHOES.map((s) => el('option', { value: s, textContent: s })));
 
 function show(name) {
+  if (name !== 'camera') stopCamera();
   for (const s of document.querySelectorAll('[data-screen]')) s.hidden = s.dataset.screen !== name;
   $('home').hidden = name === 'start';
   window.scrollTo(0, 0);
@@ -87,23 +88,176 @@ form.addEventListener('submit', (e) => {
     [!f.gender.value, f.querySelector('[name=gender]'), 'Jinsingizni tanlang'],
     [!Number.isInteger(height) || height < 100 || height > 230, f.height, "Bo'yingizni 100–230 sm oralig'ida kiriting"],
     [weight !== null && (!Number.isInteger(weight) || weight < 30 || weight > 250), f.weight, "Vaznni 30–250 kg oralig'ida kiriting yoki bo'sh qoldiring"],
-    [!f.top.value, f.querySelector('[name=top]'), 'Ustki kiyim razmerini tanlang'],
-    [!f.bottom.value, f.querySelector('[name=bottom]'), 'Shim razmerini tanlang'],
     [budget !== null && (!Number.isInteger(budget) || budget < 1 || budget > 1e9), f.budget, "Byudjetni butun so'mda kiriting yoki bo'sh qoldiring"],
   ].find(([bad]) => bad);
   $('formError').textContent = check ? check[2] : '';
   if (check) return check[1].focus();
-  // Height and weight are kept for task 6 (size from photo); the rule engine only needs sizes.
-  request = { store_id: storeId, gender: f.gender.value, sizes: { top: f.top.value, bottom: f.bottom.value, shoes: f.shoes.value || null }, budget };
-  show('camera');
+  body = { gender: f.gender.value, height, weight };
+  request = { store_id: storeId, gender: f.gender.value, sizes: { top: null, bottom: null, shoes: f.shoes.value || null }, budget };
+  showCamera();
 });
 
 $('cameraBack').onclick = () => show('form');
 $('changeSizes').onclick = () => show('form');
-$('recommend').onclick = loadResults;
+
+// --- Screen 3: size from photo. Kiosk: 3 s countdown. Phone: 10 s timer (to step back) or a gallery photo.
+const COUNTDOWN = kiosk ? 3 : 10;
+const video = $('video');
+const cameraScreen = document.querySelector('[data-screen="camera"]');
+let stream = null;
+let timer = null;
+let busy = false;
+let attempt = 0; // bumped on every stop, so a late camera permission can't start a stale countdown
+
+function status(text) {
+  $('cameraStatus').hidden = !text;
+  $('cameraStatus').textContent = text || '';
+}
+
+function setBusy(on) {
+  busy = on;
+  for (const id of ['shoot', 'galleryBtn', 'noPhoto']) $(id).disabled = on;
+}
+
+function showCamera() {
+  status('');
+  $('shoot').textContent = 'Rasmga tushish';
+  $('galleryBtn').hidden = kiosk;
+  show('camera');
+  loadPose().catch(() => {}); // start the model download while the customer gets ready
+}
+
+function stopCamera() {
+  attempt += 1;
+  clearInterval(timer);
+  timer = null;
+  stream?.getTracks().forEach((t) => t.stop());
+  stream = null;
+  video.srcObject = null;
+  $('preview').hidden = true;
+  $('count').textContent = '';
+  setBusy(false);
+}
+
+$('shoot').onclick = async () => {
+  if (busy) return;
+  setBusy(true);
+  status('');
+  const mine = attempt;
+  let s;
+  try {
+    s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 1280 } }, audio: false });
+  } catch (err) {
+    // No mediaDevices at all on plain http (not localhost): the camera needs HTTPS.
+    stopCamera();
+    const why = err.name === 'NotAllowedError' ? 'Kameraga ruxsat berilmadi.' : 'Kamera ishlamayapti.';
+    return status(kiosk ? `${why} Rasmsiz davom eting.` : `${why} Galereyadan rasm tanlang yoki rasmsiz davom eting.`);
+  }
+  if (mine !== attempt) return s.getTracks().forEach((t) => t.stop()); // left the screen during the permission prompt
+  stream = s;
+  video.srcObject = stream;
+  $('preview').hidden = false;
+  await video.play().catch(() => {});
+  let left = COUNTDOWN;
+  $('count').textContent = left;
+  timer = setInterval(() => {
+    left -= 1;
+    $('count').textContent = left || '';
+    if (left > 0) return;
+    clearInterval(timer);
+    const canvas = document.createElement('canvas'); // in memory only, dropped right after measuring
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    stream.getTracks().forEach((t) => t.stop());
+    analyse(canvas, canvas.width, canvas.height).finally(() => { canvas.width = canvas.height = 0; });
+  }, 1000);
+};
+
+$('galleryBtn').onclick = () => $('gallery').click();
+$('gallery').onchange = async () => {
+  const file = $('gallery').files[0];
+  $('gallery').value = ''; // the same photo can be picked again after a retry
+  if (!file || busy) return;
+  setBusy(true);
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    setBusy(false);
+    return status("Bu rasmni ochib bo'lmadi. Boshqa rasm tanlang.");
+  }
+  try {
+    await analyse(bitmap, bitmap.width, bitmap.height);
+  } finally {
+    bitmap.close();
+  }
+};
+
+$('noPhoto').onclick = () => findSizes(null);
+
+async function analyse(source, w, h) {
+  status('Rasm tahlil qilinmoqda…');
+  let pose;
+  try {
+    pose = await measure(source, w, h);
+  } catch {
+    stopCamera();
+    return status("Rasmni tahlil qilib bo'lmadi (internet yo'q bo'lishi mumkin). Qayta urinib ko'ring yoki rasmsiz davom eting.");
+  }
+  stopCamera();
+  if (cameraScreen.hidden) return; // kiosk reset or "Orqaga" while the model was working
+  if (!pose) {
+    $('shoot').textContent = 'Qayta urinish';
+    return status("Butun tanangiz ko'rinmadi. Oyoqlarni yaqin qo'yib tik turing, boshdan oyoqqacha kadrga tushadigan qilib uzoqroq turing va yorug' joyda qayta urinib ko'ring.");
+  }
+  await findSizes(pose);
+}
+
+async function findSizes(pose) {
+  setBusy(true);
+  try {
+    sizeInfo = await api('/size', { ...body, pose });
+  } catch (err) {
+    setBusy(false);
+    $('shoot').textContent = 'Qayta urinish';
+    return status(err.message);
+  }
+  setBusy(false);
+  if (cameraScreen.hidden) return;
+  Object.assign(request.sizes, sizeInfo.sizes);
+  loadResults();
+}
+
+// --- Screen 4: results, with - / + to correct the estimated size.
+const CONFIDENCE = {
+  high: "Rasm va vazningiz bo'yicha aniqlandi.",
+  medium: 'Taxminiy razmer.',
+  low: "Taxminiy razmer: faqat bo'yingiz bo'yicha.",
+};
+
+function renderSizes() {
+  const stepper = (key, label) => {
+    const i = CLOTHES.indexOf(request.sizes[key]);
+    const move = (d) => () => {
+      request.sizes[key] = CLOTHES[i + d];
+      sizeInfo.manual = true;
+      loadResults();
+    };
+    return el('div', { className: 'stepper' }, el('span', { textContent: label }),
+      el('button', { type: 'button', textContent: '−', ariaLabel: `${label}: kichikroq razmer`, disabled: i <= 0, onclick: move(-1) }),
+      el('strong', { textContent: request.sizes[key] }),
+      el('button', { type: 'button', textContent: '+', ariaLabel: `${label}: kattaroq razmer`, disabled: i >= CLOTHES.length - 1, onclick: move(1) }));
+  };
+  $('sizeBar').replaceChildren(
+    el('div', { className: 'row' }, stepper('top', 'Ustki'), stepper('bottom', 'Shim')),
+    el('p', { className: 'meta', style: 'margin:.5rem 0 0', textContent: sizeInfo.manual ? "Razmerni o'zingiz tanladingiz." : `${CONFIDENCE[sizeInfo.confidence]} Mos kelmasa, − / + bilan o'zgartiring.` }),
+  );
+}
 
 async function loadResults() {
   show('results');
+  renderSizes();
   $('resultsWeather').textContent = '';
   $('results').replaceChildren(el('p', { className: 'muted', textContent: 'Obrazlar tanlanmoqda…' }));
   let r;
@@ -115,7 +269,7 @@ async function loadResults() {
   }
   $('resultsWeather').textContent = `Ob-havo: ${weatherLine(r.weather)}` + (r.budget ? ` · Byudjet: ${som(r.budget)}` : '');
   if (!r.outfits.length) {
-    $('results').replaceChildren(el('div', { className: 'notice warn', textContent: "Hozir sizning razmeringizda bugungi ob-havoga mos to'liq obraz yo'q. Boshqa razmer tanlab ko'ring yoki do'kon xodimidan so'rang." }));
+    $('results').replaceChildren(el('div', { className: 'notice warn', textContent: "Hozir sizning razmeringizda bugungi ob-havoga mos to'liq obraz yo'q. − / + bilan boshqa razmerni tanlab ko'ring yoki do'kon xodimidan so'rang." }));
     return;
   }
   $('results').replaceChildren(
@@ -171,7 +325,7 @@ $('home').onclick = () => { show('start'); loadStore(); };
 
 function reset() {
   cart = [];
-  request = null;
+  request = body = sizeInfo = null;
   form.reset();
   $('formError').textContent = '';
   $('results').replaceChildren();
