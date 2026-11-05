@@ -2,6 +2,7 @@ import express from 'express';
 import { sizesFor } from '../db/seed.js';
 import { fail } from '../admin/routes.js';
 import { filterCandidates, buildOutfits } from './engine.js';
+import { parsePhoto, applyStylist, withDeadline, TIMEOUT_MS } from './stylist.js';
 
 const pick = (v, allowed, label, required) => {
   if (v === undefined || v === null || v === '') {
@@ -13,9 +14,24 @@ const pick = (v, allowed, label, required) => {
   return s;
 };
 
-// Public: POST /api/recommend { store_id, gender, sizes: { top, bottom, shoes? }, budget? }
-export function createRecommendRouter(db, { weather }) {
+// shortcut: in-memory per-IP cap on paid Claude calls (over it → rules, never an error); one process only.
+const AI_PER_MINUTE = 30;
+
+// Public: POST /api/recommend { store_id, gender, sizes: { top, bottom, shoes? }, budget?, photo? }
+// stylist (task 7) is null without ANTHROPIC_API_KEY → rules only.
+export function createRecommendRouter(db, { weather, stylist = null, stylistTimeoutMs = TIMEOUT_MS }) {
   const r = express.Router();
+  const hits = new Map();
+  let windowEnd = 0;
+  const allowAi = (ip) => {
+    if (Date.now() > windowEnd) {
+      hits.clear();
+      windowEnd = Date.now() + 60_000;
+    }
+    hits.set(ip, (hits.get(ip) ?? 0) + 1);
+    return hits.get(ip) <= AI_PER_MINUTE;
+  };
+
   r.post('/', async (req, res) => {
     const b = req.body ?? {};
     if (!Number.isInteger(b.store_id) || b.store_id < 1) throw fail(400, "Do'kon noto'g'ri");
@@ -27,12 +43,26 @@ export function createRecommendRouter(db, { weather }) {
     };
     const budget = b.budget === undefined || b.budget === null || b.budget === 0 ? null : b.budget;
     if (budget !== null && (!Number.isInteger(budget) || budget < 1 || budget > 1e9)) throw fail(400, "Byudjet noto'g'ri");
+    const photo = parsePhoto(b.photo); // memory only: goes to Claude for this request, never stored or logged
 
     const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon');
     if (!store) throw fail(404, "Do'kon topilmadi");
     const w = await weather(store);
     const candidates = await filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature });
-    const { outfits, over_budget } = buildOutfits(candidates, { temperature: w.temperature, raining: w.raining, budget });
+    const ctx = { temperature: w.temperature, raining: w.raining, budget };
+    let result = { ...buildOutfits(candidates, ctx), style_guess: null, source: 'rules' };
+    // No rule outfit means a required category is empty, so Claude could not build one either.
+    if (stylist && result.outfits.length && allowAi(req.ip)) {
+      try {
+        const answer = await withDeadline((signal) => stylist({ photo, weather: w, sizes, budget, candidates }, signal), stylistTimeoutMs);
+        const ai = applyStylist(answer, candidates, ctx);
+        if (ai) result = { ...ai, source: 'ai' };
+        else console.warn('stylist: no valid outfit, using rules');
+      } catch (err) {
+        console.warn('stylist failed, using rules:', err.status ?? err.name ?? 'error'); // never the error body or the request
+      }
+    }
+    const { outfits, over_budget, style_guess, source } = result;
 
     // Stats (task 3) need product_ids as a JSON array of integers. No photo or body data here.
     await db('recommendation_logs').insert({
@@ -43,9 +73,9 @@ export function createRecommendRouter(db, { weather }) {
       sizes: JSON.stringify(sizes),
       budget,
       product_ids: JSON.stringify([...new Set(outfits.flatMap((o) => o.items.map((i) => i.id)))]),
-      source: 'rules',
+      source,
     });
-    res.json({ weather: w, budget, over_budget, outfits });
+    res.json({ weather: w, budget, over_budget, source, style_guess, outfits });
   });
   return r;
 }

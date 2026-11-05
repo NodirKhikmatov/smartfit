@@ -211,10 +211,22 @@ async function analyse(source, w, h) {
     $('shoot').textContent = 'Qayta urinish';
     return status("Butun tanangiz ko'rinmadi. Oyoqlarni yaqin qo'yib tik turing, boshdan oyoqqacha kadrga tushadigan qilib uzoqroq turing va yorug' joyda qayta urinib ko'ring.");
   }
-  await findSizes(pose);
+  await findSizes(pose, snapshot(source, w, h));
 }
 
-async function findSizes(pose) {
+// The stylist (task 7) gets one small JPEG: in memory only, sent with /api/recommend, dropped on reset.
+function snapshot(source, w, h) {
+  const k = Math.min(1, 512 / Math.max(w, h));
+  const c = document.createElement('canvas');
+  c.width = Math.round(w * k);
+  c.height = Math.round(h * k);
+  c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+  const jpeg = c.toDataURL('image/jpeg', 0.7);
+  c.width = c.height = 0;
+  return jpeg;
+}
+
+async function findSizes(pose, photo = null) {
   setBusy(true);
   try {
     sizeInfo = await api('/size', { ...body, pose });
@@ -226,6 +238,7 @@ async function findSizes(pose) {
   setBusy(false);
   if (cameraScreen.hidden) return;
   Object.assign(request.sizes, sizeInfo.sizes);
+  request.photo = photo ?? undefined; // undefined is left out of the JSON
   loadResults();
 }
 
@@ -273,6 +286,7 @@ async function loadResults() {
     return;
   }
   $('results').replaceChildren(
+    ...(r.style_guess ? [el('p', { className: 'muted', textContent: `Uslub: ${r.style_guess}` })] : []),
     ...(r.over_budget > 0 ? [el('div', { className: 'notice warn', textContent: `Byudjetingizga mos obraz topilmadi. Eng arzon obraz byudjetdan ${som(r.over_budget)} qimmat.` })] : []),
     ...r.outfits.map((o, i) => outfitCard(o, i + 1)),
   );
@@ -303,7 +317,8 @@ function addButton(items) {
 
 function outfitCard(o, n) {
   const card = el('article', { className: 'outfit' },
-    el('h2', { textContent: `${n}-obraz` }),
+    el('h2', { textContent: o.title ? `${n}-obraz: ${o.title}` : `${n}-obraz` }),
+    ...(o.reason ? [el('p', { className: 'muted', textContent: o.reason })] : []),
     el('ul', { className: 'items' }, ...o.items.map(itemRow)),
     el('div', { className: 'total' }, el('span', {}, 'Jami: ', el('strong', { textContent: som(o.total) })), addButton(o.items)),
   );

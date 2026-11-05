@@ -39,14 +39,8 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
 // Pure: builds up to 3 outfits from candidates, no item shared between outfits.
 // Returns { outfits: [{ items, total, alternative }], over_budget } — over_budget > 0 only when nothing fits the budget.
 export function buildOutfits(candidates, { temperature, raining, budget = null }) {
-  const required = ['top', 'bottom', 'shoes'];
-  if (temperature < OUTERWEAR_BELOW || raining) required.unshift('outerwear');
-
-  // Rain → waterproof first. With a budget, cheapest first; otherwise the best temperature match first.
-  const fit = (p) => Math.abs(temperature - (p.temp_min + p.temp_max) / 2);
-  const rank = (a, b) =>
-    (raining ? b.waterproof - a.waterproof : 0) || (budget ? a.unit_price - b.unit_price : fit(a) - fit(b)) || a.id - b.id;
-  const pool = Object.fromEntries(ORDER.map((c) => [c, candidates.filter((p) => p.category === c).sort(rank)]));
+  const required = requiredCategories(temperature, raining);
+  const pool = rankPool(candidates, { temperature, raining, budget });
 
   const count = Math.min(MAX_OUTFITS, ...required.map((c) => pool[c].length));
   const used = new Set();
@@ -79,8 +73,19 @@ export function buildOutfits(candidates, { temperature, raining, budget = null }
   return { outfits, over_budget };
 }
 
+export const requiredCategories = (temperature, raining) =>
+  temperature < OUTERWEAR_BELOW || raining ? ['outerwear', 'top', 'bottom', 'shoes'] : ['top', 'bottom', 'shoes'];
+
+// Candidates per category, best first: waterproof first in rain; with a budget cheapest first, otherwise the best temperature match.
+export function rankPool(candidates, { temperature, raining, budget = null }) {
+  const fit = (p) => Math.abs(temperature - (p.temp_min + p.temp_max) / 2);
+  const rank = (a, b) =>
+    (raining ? b.waterproof - a.waterproof : 0) || (budget ? a.unit_price - b.unit_price : fit(a) - fit(b)) || a.id - b.id;
+  return Object.fromEntries(ORDER.map((c) => [c, candidates.filter((p) => p.category === c).sort(rank)]));
+}
+
 // Same outfit with one item swapped for the cheapest unused item of its category; the biggest saving wins.
-function cheaperAlternative(items, pool, used) {
+export function cheaperAlternative(items, pool, used) {
   let best = null;
   for (const [idx, item] of items.entries()) {
     const swap = pool[item.category].filter((p) => !used.has(p.id) && p.unit_price < item.unit_price).sort((a, b) => a.unit_price - b.unit_price || a.id - b.id)[0];

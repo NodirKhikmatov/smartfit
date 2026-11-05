@@ -188,8 +188,12 @@ test('no image or base64 data reaches disk, the DB or the logs', async () => {
     const big = 'data:image/jpeg;base64,' + Buffer.alloc(200_000, 7).toString('base64');
     assert.equal((await post('/api/size', { gender: 'male', height: 176, image: big })).status, 413, 'over the 100 kb JSON limit');
     // /api/recommend logs a row; extra fields must not end up in it.
-    const r = await post('/api/recommend', { store_id: storeId, gender: 'male', sizes: { top: 'L', bottom: 'L', top_image: image }, budget: null, image, photo: b64 });
+    const r = await post('/api/recommend', { store_id: storeId, gender: 'male', sizes: { top: 'L', bottom: 'L', top_image: image }, budget: null, image });
     assert.equal(r.status, 200);
+    // The stylist photo (task 7) must be a JPEG data URL; anything else is refused. No key here, so it is just dropped.
+    assert.equal((await post('/api/recommend', { store_id: storeId, gender: 'male', sizes: { top: 'L', bottom: 'L' }, photo: b64 })).status, 400);
+    const jpeg = 'data:image/jpeg;base64,' + Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(10_000, 7)]).toString('base64');
+    assert.equal((await post('/api/recommend', { store_id: storeId, gender: 'male', sizes: { top: 'L', bottom: 'L' }, photo: jpeg })).status, 200);
   } finally {
     methods.forEach((m, i) => (console[m] = saved[i]));
   }
@@ -203,9 +207,10 @@ test('no image or base64 data reaches disk, the DB or the logs', async () => {
   assert.ok((await db('recommendation_logs').count({ n: '*' }))[0].n >= 1, 'the recommend call was logged');
   assert.deepEqual(readdirSync(uploadDir), [], 'nothing written to the upload dir');
 
-  // The browser code has no way to send pixels: no encoders, no form uploads.
+  // The browser encodes pixels in one place only: the small JPEG for the stylist (task 7). No uploads or other encoders.
   for (const f of ['app.js', 'pose.js']) {
     const src = readFileSync(new URL(`../public/app/${f}`, import.meta.url), 'utf8');
-    assert.ok(!/toDataURL|toBlob|FormData|readAsDataURL|getImageData|btoa\(/.test(src), f);
+    assert.ok(!/toBlob|FormData|readAsDataURL|getImageData|btoa\(|localStorage|sessionStorage|indexedDB/.test(src), f);
+    assert.equal(src.match(/toDataURL/g)?.length ?? 0, f === 'app.js' ? 1 : 0, f);
   }
 });
