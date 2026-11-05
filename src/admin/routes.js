@@ -1,4 +1,5 @@
 import express from 'express';
+import qrcode from 'qrcode-generator';
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
@@ -161,6 +162,20 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   r.get('/stores', async (req, res) => {
     const q = db('stores').select('id', 'name', 'city').orderBy('id');
     res.json(req.admin.role === 'super' ? await q : await q.where({ id: req.admin.store_id }));
+  });
+
+  // QR for the phone app (/m?store=ID), printed and placed next to the kiosk. Built offline as SVG.
+  r.get('/stores/:id/qr', async (req, res) => {
+    const id = Number(req.params.id);
+    if (req.admin.role !== 'super' && id !== req.admin.store_id) throw fail(404, "Do'kon topilmadi");
+    const store = Number.isInteger(id) ? await db('stores').where({ id }).first('id', 'name') : undefined;
+    if (!store) throw fail(404, "Do'kon topilmadi");
+    const base = (process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+    const url = `${base}/m?store=${store.id}`;
+    const qr = qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    res.json({ name: store.name, url, svg: qr.createSvgTag({ cellSize: 8, margin: 4, scalable: true }) });
   });
 
   r.get('/products', async (req, res) => {

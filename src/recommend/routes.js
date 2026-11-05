@@ -49,3 +49,15 @@ export function createRecommendRouter(db, { weather }) {
   });
   return r;
 }
+
+// Public: GET /api/stores/:id → store name and current weather for the customer start screen.
+export function createStoreRouter(db, { weather }) {
+  const r = express.Router();
+  r.get('/:id', async (req, res) => {
+    const id = Number(req.params.id);
+    const store = Number.isInteger(id) && id > 0 ? await db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon') : undefined;
+    if (!store) throw fail(404, "Do'kon topilmadi");
+    res.json({ id: store.id, name: store.name, city: store.city, weather: await weather(store) });
+  });
+  return r;
+}
