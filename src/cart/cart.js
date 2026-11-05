@@ -13,8 +13,8 @@ const DELIVERY_RADIUS_KM = 30; // "within the city" = the map pin is this close 
 const TOKEN = /^[a-f0-9]{32}$/;
 const iso = (ms) => new Date(ms).toISOString(); // ISO strings compare correctly in SQLite text and Postgres timestamptz
 
-// Online payment hook: task 9 adds click/payme here, each returning what the client needs (e.g. { method, url }).
-export const PAYMENTS = { cashier: async () => ({ method: 'cashier' }) };
+// Payment methods offered at checkout. Each returns what the client needs; online ones add a pay `url` (src/cart/payments.js).
+const CASHIER = { cashier: async () => ({ method: 'cashier' }) };
 
 // Pickup is free. Delivery: the store's flat city fee, free when the subtotal is above the store's threshold (null = never free).
 export function deliveryFee(store, subtotal, fulfillment) {
@@ -58,16 +58,35 @@ export async function releaseExpired(db, now = Date.now()) {
     });
   }
   for (const id of await db('orders').where({ payment_status: 'pending' }).where('expires_at', '<=', at).pluck('id')) {
-    await db.transaction(async (trx) => {
-      const n = await trx('orders').where({ id, payment_status: 'pending' }).where('expires_at', '<=', at)
-        .update({ payment_status: 'cancelled', status: 'cancelled', expires_at: null, updated_at: trx.fn.now() });
-      if (n) await release(trx, await trx('order_items').where({ order_id: id }));
-    });
+    await db.transaction((trx) => cancelPending(trx, id, now, { expiredOnly: true }));
   }
 }
 
+// Unpaid order → cancelled: its holds come back and any open Click/Payme transaction ends with it (Payme reason 4).
+// False when it wasn't pending (or, with expiredOnly, hadn't expired yet).
+export async function cancelPending(trx, orderId, now = Date.now(), { expiredOnly = false } = {}) {
+  let q = trx('orders').where({ id: orderId, payment_status: 'pending' });
+  if (expiredOnly) q = q.where('expires_at', '<=', iso(now));
+  if (!(await q.update({ payment_status: 'cancelled', status: 'cancelled', expires_at: null, updated_at: trx.fn.now() }))) return false;
+  await release(trx, await trx('order_items').where({ order_id: orderId }));
+  await trx('payment_transactions').where({ order_id: orderId, state: 1 }).update({ state: -1, reason: 4, cancel_time: now });
+  return true;
+}
+
+// The provider took the money back (Payme cancel after perform): the stock returns to the shelf.
+// Refused once the order has left the store (shipping/delivered).
+export async function refundPaid(trx, orderId) {
+  const n = await trx('orders').where({ id: orderId, payment_status: 'paid' }).whereIn('status', ['new', 'packing'])
+    .update({ payment_status: 'cancelled', status: 'cancelled', updated_at: trx.fn.now() });
+  if (!n) return false;
+  for (const i of await trx('order_items').where({ order_id: orderId })) {
+    await trx('product_stock').where({ product_id: i.product_id, size: i.size }).increment('quantity', i.quantity);
+  }
+  return true;
+}
+
 // Paid → stock leaves the shelf: quantity and reserved both drop. Only a pending, unexpired order can be paid, exactly once.
-// Task 9's payment callback calls this too.
+// The Click/Payme callbacks call it inside their own transaction (knex nests it as a savepoint).
 export async function markPaid(db, orderId, now = Date.now()) {
   return db.transaction(async (trx) => {
     const n = await trx('orders').where({ id: orderId, payment_status: 'pending' }).where('expires_at', '>', iso(now))
@@ -85,7 +104,7 @@ const stamp = (v) => (v == null ? null : new Date(v).toISOString());
 const storeOf = (db, id) => db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold');
 
 // Prices always come from the products table, never from the request.
-async function cartView(db, cart) {
+async function cartView(db, cart, payments) {
   const store = await storeOf(db, cart.store_id);
   const rows = await db('cart_items as c').join('products as p', 'p.id', 'c.product_id').where('c.cart_id', cart.id).orderBy('c.id')
     .select('c.id', 'c.product_id', 'c.size', 'c.quantity', 'p.name', 'p.category', 'p.color', 'p.price', 'p.discount_price', 'p.image_url', 'p.shelf_location');
@@ -102,6 +121,7 @@ async function cartView(db, cart) {
     store_id: store.id,
     expires_at: stamp(cart.expires_at),
     items,
+    payments,
     delivery: { city: store.city, lat: store.lat, lon: store.lon, fee: store.delivery_fee, free_over: store.free_delivery_threshold },
     totals: { pickup: totals(store, subtotal, 'pickup'), delivery: totals(store, subtotal, 'delivery') },
   };
@@ -158,8 +178,9 @@ function parseItems(items) {
 }
 
 // Public, keyed by an unguessable cart token. The token is the customer's only handle on the cart.
-export function createCartRouter(db) {
+export function createCartRouter(db, { methods = CASHIER } = {}) {
   const r = express.Router();
+  const view = (cart) => cartView(db, cart, Object.keys(methods));
   r.use(async (req, res, next) => {
     await releaseExpired(db);
     next();
@@ -191,13 +212,13 @@ export function createCartRouter(db) {
       }
       return cart;
     });
-    res.json(await cartView(db, cart));
+    res.json(await view(cart));
   });
 
   r.get('/:token', async (req, res) => {
     const cart = TOKEN.test(req.params.token) ? await db('carts').where({ token: req.params.token }).first() : null;
     if (!cart) throw fail(404, "Savat topilmadi yoki band qilish muddati tugadi");
-    res.json(await cartView(db, cart));
+    res.json(await view(cart));
   });
 
   // Change size: hold the new size first, then release the old one.
@@ -216,7 +237,7 @@ export function createCartRouter(db) {
       await trx('cart_items').where({ id: line.id }).update({ size });
       return cart;
     });
-    res.json(await cartView(db, cart));
+    res.json(await view(cart));
   });
 
   r.delete('/:token/items/:id', async (req, res) => {
@@ -228,7 +249,7 @@ export function createCartRouter(db) {
       await trx('cart_items').where({ id: line.id }).del();
       return cart;
     });
-    res.json(await cartView(db, cart));
+    res.json(await view(cart));
   });
 
   // Kiosk idle reset and "Savatni tozalash": give every held unit back at once.
@@ -247,7 +268,7 @@ export function createCartRouter(db) {
   r.post('/:token/checkout', async (req, res) => {
     const b = req.body ?? {};
     const method = b.payment ?? 'cashier';
-    if (!Object.hasOwn(PAYMENTS, method)) throw fail(400, "To'lov usuli noto'g'ri");
+    if (typeof method !== 'string' || !Object.hasOwn(methods, method)) throw fail(400, "To'lov usuli noto'g'ri");
     const id = await db.transaction(async (trx) => {
       const cart = await liveCart(trx, req.params.token);
       const store = await storeOf(trx, cart.store_id);
@@ -262,7 +283,7 @@ export function createCartRouter(db) {
       return id;
     });
     const order = await orderView(db, await db('orders').where({ id }).first());
-    res.status(201).json({ order, payment: await PAYMENTS[method](order) });
+    res.status(201).json({ order, payment: await methods[method](order) });
   });
 
   return r;

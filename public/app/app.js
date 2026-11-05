@@ -412,7 +412,20 @@ function renderCartScreen() {
   if (empty) return $('cartBody').replaceChildren(el('p', { className: 'muted', textContent: "Savat bo'sh. Obrazlardan kiyim qo'shing." }));
   $('holdNote').textContent = `Kiyimlar ${hhmm(cart.expires_at)} gacha siz uchun band qilindi. Shu vaqtgacha buyurtma bering.`;
   $('cartBody').replaceChildren(el('ul', { className: 'items' }, ...cart.items.map(cartLine)));
+  renderPay();
   renderSum();
+}
+
+// Click/Payme only on the phone (no card entry on a shared kiosk) and only when the server has them configured.
+const PAY = { cashier: "Kassada", click: 'Click', payme: 'Payme' };
+function renderPay() {
+  const online = kiosk ? [] : cart.payments.filter((m) => m !== 'cashier' && PAY[m]);
+  $('payFields').hidden = !online.length;
+  if (!online.length) return;
+  const picked = checkout.payment?.value || 'cashier';
+  $('payChoices').replaceChildren(...['cashier', ...online].map((m) =>
+    el('label', {}, el('input', { type: 'radio', name: 'payment', value: m, checked: m === picked }), el('span', { textContent: PAY[m] }))));
+  $('payNote').textContent = "Onlayn to'lovda buyurtmadan keyin to'lov sahifasi ochiladi.";
 }
 
 function renderSum() {
@@ -470,12 +483,12 @@ checkout.addEventListener('submit', async (e) => {
   $('placeOrder').disabled = true;
   try {
     const r = await api(`/cart/${cart.token}/checkout`, {
-      fulfillment: f.fulfillment.value, name: f.fullname.value, phone: f.phone.value,
+      fulfillment: f.fulfillment.value, name: f.fullname.value, phone: f.phone.value, payment: f.payment?.value || 'cashier',
       ...(delivery && { address: f.address.value, ...(pin && { lat: pin.lat, lon: pin.lng }) }),
     });
     setCart(null);
     clearCheckout();
-    showDone(r.order);
+    showDone(r.order, r.payment);
   } catch (err) {
     if (err.status === 404) return cartAction(() => Promise.reject(err));
     $('checkoutError').textContent = err.message;
@@ -484,14 +497,16 @@ checkout.addEventListener('submit', async (e) => {
   }
 });
 
-function showDone(o) {
+function showDone(o, pay = { method: 'cashier' }) {
+  const online = pay.url && /^https:\/\//.test(pay.url);
   $('orderNo').textContent = `№ ${o.id}`;
   $('doneBody').replaceChildren(
     el('div', { className: 'sum' },
       ...o.items.map((i) => sumRow(`${i.name} · ${sizeName(i.size)}${i.quantity > 1 ? ` × ${i.quantity}` : ''}`, som(i.unit_price * i.quantity))),
       ...(o.fulfillment === 'delivery' ? [sumRow('Yetkazish', o.delivery_fee ? som(o.delivery_fee) : 'bepul')] : []),
       sumRow('Jami', som(o.total), 'grand')),
-    el('p', { className: 'notice', textContent: `Kassaga boring va buyurtma raqamini ayting. ${hhmm(o.expires_at)} gacha to'lanmasa, buyurtma bekor bo'ladi.` }),
+    el('p', { className: 'notice', textContent: `${online ? `${PAY[pay.method]} orqali to'lang` : 'Kassaga boring va buyurtma raqamini ayting'}. ${hhmm(o.expires_at)} gacha to'lanmasa, buyurtma bekor bo'ladi.` }),
+    ...(online ? [el('a', { className: 'button primary wide', href: pay.url, rel: 'noopener', textContent: `${PAY[pay.method]} orqali to'lash` })] : []),
     el('p', { textContent: o.fulfillment === 'pickup' ? "To'lovdan keyin xodim kiyimlarni tayyorlab beradi." : `To'lovdan keyin kuryer ${o.phone} raqamiga qo'ng'iroq qiladi.` }),
   );
   show('done');
