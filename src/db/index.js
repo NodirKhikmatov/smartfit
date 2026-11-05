@@ -1,8 +1,9 @@
 import knex from 'knex';
 import * as init from './migrations/001_init.js';
+import * as cart from './migrations/002_cart.js';
 
 // Migrations are listed in code so they load the same way from any cwd.
-const migrations = { '001_init': init };
+const migrations = { '001_init': init, '002_cart': cart };
 const migrationSource = {
   getMigrations: async () => Object.keys(migrations),
   getMigrationName: (name) => name,

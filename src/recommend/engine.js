@@ -25,13 +25,17 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
       }
       q.orWhere((w) => w.where('p.category', 'accessory').where('s.size', 'ONE'));
     })
-    .orderBy('p.id')
+    .orderBy(['p.id', 's.id'])
     .select('p.id', 'p.name', 'p.category', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.waterproof', 'p.image_url', 'p.shelf_location', 's.size');
   const byId = new Map();
   for (const r of rows) {
-    if (byId.has(r.id)) continue; // several sizes only when shoe size is unknown
     const known = r.category === 'accessory' || sizes[sizeKey[r.category]];
-    byId.set(r.id, { ...r, waterproof: Boolean(r.waterproof), size: known ? r.size : null, unit_price: unitPrice(r) });
+    // Several rows per item only when the shoe size is unknown: `sizes` lists them so the customer picks one.
+    if (byId.has(r.id)) {
+      byId.get(r.id).sizes.push(r.size);
+      continue;
+    }
+    byId.set(r.id, { ...r, waterproof: Boolean(r.waterproof), size: known ? r.size : null, ...(known ? {} : { sizes: [r.size] }), unit_price: unitPrice(r) });
   }
   return [...byId.values()];
 }

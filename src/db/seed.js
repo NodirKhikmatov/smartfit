@@ -48,7 +48,7 @@ const stockFor = (item, size, storeIdx, sizeCount) => (sizeCount === 1 ? 5 : (it
 export async function seed(db) {
   if (process.env.NODE_ENV === 'production') throw new Error('Seed wipes all data; refusing to run in production');
   await db.transaction(async (trx) => {
-    for (const t of ['order_items', 'orders', 'recommendation_logs', 'carts', 'product_stock', 'products', 'admins', 'stores']) {
+    for (const t of ['order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'admins', 'stores']) {
       await trx(t).del();
     }
     for (const [storeIdx, store] of STORES.entries()) {

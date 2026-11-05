@@ -15,8 +15,19 @@ const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.crea
 const som = (n) => n.toLocaleString('ru-RU').replace(/\s/g, '\u00a0') + "\u00a0so'm";
 const form = $('form');
 
-// shortcut: in-memory cart stub (product + size); task 8 replaces it with the server cart and stock holds.
-let cart = [];
+// Server cart (task 8): each item holds its stock for 15 min. The phone keeps the token across reloads; the kiosk never stores it.
+const CART_KEY = 'sfCart'; // the only thing the app stores in the browser: the phone's cart token
+let cart = null;
+let syncs = new Set(); // "Savatga qo'shish" buttons on the results screen
+const savedCart = (t) => {
+  if (kiosk) return null;
+  try {
+    if (t === undefined) return sessionStorage.getItem(CART_KEY);
+    t ? sessionStorage.setItem(CART_KEY, t) : sessionStorage.removeItem(CART_KEY);
+  } catch {}
+  return null;
+};
+let current = 'start';
 let request = null; // POST /api/recommend body
 let body = null; // { gender, height, weight } for POST /api/size
 let sizeInfo = null; // last /api/size answer: confidence for the results screen
@@ -26,21 +37,28 @@ form.shoes.append(...SHOES.map((s) => el('option', { value: s, textContent: s })
 
 function show(name) {
   if (name !== 'camera') stopCamera();
+  current = name;
   for (const s of document.querySelectorAll('[data-screen]')) s.hidden = s.dataset.screen !== name;
   $('home').hidden = name === 'start';
   window.scrollTo(0, 0);
   document.querySelector(`[data-screen="${name}"] h1`).focus({ preventScroll: true });
 }
 
-function renderCart() {
-  $('cartCount').textContent = cart.length ? `Savatda: ${cart.length} ta` : '';
+function setCart(c) {
+  cart = c;
+  savedCart(c?.token ?? null);
+  const n = c ? c.items.reduce((s, i) => s + i.quantity, 0) : 0;
+  $('cartBtn').hidden = !n;
+  $('cartBtn').textContent = `Savat: ${n}`;
+  syncs.forEach((f) => f());
+  if (current === 'cart') renderCartScreen();
 }
 
 const weatherLine = (w) => `${Math.round(w.temperature)}°C${w.raining ? ", yomg'ir" : ''}`;
 
-async function api(path, body) {
-  const res = await fetch('/api' + path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {});
-  const data = await res.json().catch(() => ({}));
+async function api(path, body, method = body ? 'POST' : 'GET') {
+  const res = await fetch('/api' + path, { method, ...(body && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) });
+  const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error || "Xatolik yuz berdi. Qayta urinib ko'ring"), { status: res.status });
   return data;
 }
@@ -269,6 +287,7 @@ function renderSizes() {
 }
 
 async function loadResults() {
+  syncs = new Set();
   show('results');
   renderSizes();
   $('resultsWeather').textContent = '';
@@ -292,27 +311,45 @@ async function loadResults() {
   );
 }
 
+const sizeName = (s) => (s === 'ONE' ? 'yagona razmer' : s);
+const thumb = (p) => (p.image_url ? el('img', { className: 'thumb', src: p.image_url, alt: '' }) : el('div', { className: 'thumb' }));
+
 function itemRow(p) {
-  const size = p.size ? (p.size === 'ONE' ? 'yagona razmer' : `razmer ${p.size}`) : 'razmer savatda tanlanadi';
+  // Unknown shoe size: the customer picks one of the in-stock sizes before adding (stored on the item as `chosen`).
+  const pick = !p.size && p.sizes
+    ? el('div', { className: 'line-actions' }, el('select', { ariaLabel: `${p.name}: razmer`, onchange: (e) => { p.chosen = e.target.value; syncs.forEach((f) => f()); } },
+      el('option', { value: '', textContent: 'Razmerni tanlang' }), ...p.sizes.map((s) => el('option', { value: s, textContent: s, selected: s === p.chosen }))))
+    : '';
+  const size = p.size ? (p.size === 'ONE' ? 'yagona razmer' : `razmer ${p.size}`) : '';
   return el('li', {},
-    p.image_url ? el('img', { className: 'thumb', src: p.image_url, alt: '' }) : el('div', { className: 'thumb' }),
-    el('div', {}, el('div', { textContent: p.name }), el('div', { className: 'meta', textContent: [CATS[p.category], p.color, size, p.shelf_location && `javon ${p.shelf_location}`].filter(Boolean).join(' · ') })),
+    thumb(p),
+    el('div', {}, el('div', { textContent: p.name }), el('div', { className: 'meta', textContent: [CATS[p.category], p.color, size, p.shelf_location && `javon ${p.shelf_location}`].filter(Boolean).join(' · ') }), pick),
     el('div', { className: 'price' }, ...(p.discount_price ? [el('s', { textContent: som(p.price) })] : []), som(p.unit_price)),
   );
 }
 
 function addButton(items) {
-  const keys = items.map((p) => `${p.id}:${p.size}`);
-  const inCart = () => keys.every((k) => cart.some((c) => `${c.product_id}:${c.size}` === k));
+  const size = (p) => p.size ?? p.chosen;
+  const has = (p) => cart?.items.some((c) => c.product_id === p.id && (!size(p) || c.size === size(p)));
   const b = el('button', { className: 'primary', textContent: "Savatga qo'shish" });
-  const sync = () => { b.disabled = inCart(); b.textContent = b.disabled ? "Savatga qo'shildi ✓" : "Savatga qo'shish"; };
-  b.onclick = () => {
-    for (const p of items) if (!cart.some((c) => c.product_id === p.id && c.size === p.size)) cart.push({ product_id: p.id, size: p.size });
-    renderCart();
+  const msg = el('p', { className: 'error', style: 'margin:0;min-height:0', role: 'alert' });
+  const sync = () => { b.disabled = items.every(has); b.textContent = b.disabled ? "Savatga qo'shildi ✓" : "Savatga qo'shish"; };
+  b.onclick = async () => {
+    const missing = items.find((p) => !size(p));
+    if (missing) return void (msg.textContent = `«${missing.name}» uchun razmerni tanlang`);
+    msg.textContent = '';
+    b.disabled = true;
+    try {
+      const todo = items.filter((p) => !has(p)).map((p) => ({ product_id: p.id, size: size(p) }));
+      setCart(await api('/cart/items', { token: cart?.token, store_id: storeId, items: todo }));
+    } catch (err) {
+      msg.textContent = err.message;
+    }
     sync();
   };
+  syncs.add(sync);
   sync();
-  return b;
+  return el('div', {}, b, msg);
 }
 
 function outfitCard(o, n) {
@@ -335,16 +372,143 @@ function outfitCard(o, n) {
   return card;
 }
 
+// --- Cart and checkout. Every number shown here comes from the server; the browser sends no prices.
+const hhmm = (iso) => new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+const sumRow = (label, value, className = '') => el('div', { className }, el('span', { textContent: label }), el('span', { textContent: value }));
+const checkout = $('checkout');
+
+$('cartBtn').onclick = () => { show('cart'); renderCartScreen(); };
+$('cartBack').onclick = () => show(request ? 'results' : 'start');
+checkout.addEventListener('change', (e) => e.target.name === 'fulfillment' && renderSum());
+
+async function cartAction(call) {
+  $('cartError').textContent = '';
+  try {
+    setCart(await call());
+  } catch (err) {
+    if (err.status === 404) setCart(null);
+    $('cartError').textContent = err.status === 404 ? "Band qilish muddati tugadi. Kiyimlarni qaytadan qo'shing." : err.message;
+    renderCartScreen();
+  }
+}
+
+function cartLine(i) {
+  const url = `/cart/${cart.token}/items/${i.id}`;
+  const sel = el('select', { ariaLabel: `${i.name}: razmer`, disabled: i.sizes.length < 2, onchange: () => cartAction(() => api(url, { size: sel.value }, 'PATCH')) },
+    ...i.sizes.map((s) => el('option', { value: s, textContent: sizeName(s), selected: s === i.size })));
+  return el('li', {},
+    thumb(i),
+    el('div', {},
+      el('div', { textContent: i.quantity > 1 ? `${i.name} × ${i.quantity}` : i.name }),
+      el('div', { className: 'meta', textContent: [CATS[i.category], i.color, i.shelf_location && `javon ${i.shelf_location}`].filter(Boolean).join(' · ') }),
+      el('div', { className: 'line-actions' }, sel, el('button', { type: 'button', textContent: "O'chirish", ariaLabel: `${i.name}: savatdan o'chirish`, onclick: () => cartAction(() => api(url, null, 'DELETE')) }))),
+    el('div', { className: 'price' }, ...(i.discount_price ? [el('s', { textContent: som(i.price * i.quantity) })] : []), som(i.line_total)),
+  );
+}
+
+function renderCartScreen() {
+  const empty = !cart?.items.length;
+  checkout.hidden = $('holdNote').hidden = empty;
+  if (empty) return $('cartBody').replaceChildren(el('p', { className: 'muted', textContent: "Savat bo'sh. Obrazlardan kiyim qo'shing." }));
+  $('holdNote').textContent = `Kiyimlar ${hhmm(cart.expires_at)} gacha siz uchun band qilindi. Shu vaqtgacha buyurtma bering.`;
+  $('cartBody').replaceChildren(el('ul', { className: 'items' }, ...cart.items.map(cartLine)));
+  renderSum();
+}
+
+function renderSum() {
+  const delivery = checkout.fulfillment.value === 'delivery';
+  const t = cart.totals[delivery ? 'delivery' : 'pickup'], d = cart.delivery;
+  $('deliveryFields').hidden = !delivery;
+  $('cartSum').replaceChildren(
+    sumRow('Kiyimlar', som(t.subtotal)),
+    ...(delivery ? [sumRow(`Yetkazish (${d.city} ichida)`, t.delivery_fee ? som(t.delivery_fee) : 'bepul')] : []),
+    sumRow('Jami', som(t.total), 'grand'),
+    ...(delivery && t.delivery_fee && d.free_over !== null ? [el('p', { className: 'meta', style: 'margin:.35rem 0 0', textContent: `Xarid ${som(d.free_over)} dan oshsa, yetkazish bepul.` })] : []),
+  );
+  if (delivery) loadMap();
+}
+
+// Map pin for delivery: Leaflet + OpenStreetMap tiles, loaded only when delivery is picked. Without it the address alone is enough.
+const LEAFLET = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/';
+let leaflet = null, map = null, marker = null, pin = null;
+function loadMap() {
+  leaflet ??= new Promise((ok, no) => {
+    document.head.append(el('link', { rel: 'stylesheet', href: LEAFLET + 'leaflet.css', integrity: 'sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H', crossOrigin: 'anonymous' }));
+    document.head.append(el('script', { src: LEAFLET + 'leaflet.js', integrity: 'sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH', crossOrigin: 'anonymous', onload: ok, onerror: no }));
+  });
+  leaflet.then(() => {
+    if (map) return map.invalidateSize();
+    map = L.map('map').setView([cart.delivery.lat, cart.delivery.lon], 12);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+    map.on('click', (e) => {
+      pin = e.latlng;
+      marker ? marker.setLatLng(pin) : (marker = L.marker(pin).addTo(map));
+    });
+  }, () => {
+    $('map').hidden = true;
+    $('mapHint').textContent = "Xarita yuklanmadi. Manzilni aniq yozing.";
+  });
+}
+function clearCheckout() {
+  checkout.reset(); // a kiosk must not show the last customer's name and phone
+  pin = null;
+  marker?.remove();
+  marker = null;
+  $('cartError').textContent = $('checkoutError').textContent = '';
+}
+
+checkout.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = checkout, delivery = f.fulfillment.value === 'delivery';
+  const check = [
+    [f.fullname.value.trim().length < 2, f.fullname, 'Ismingizni yozing'],
+    [!/^(\+?998)?\d{9}$/.test(f.phone.value.replace(/[\s()-]/g, '')), f.phone, "Telefon raqamini to'liq yozing: +998 90 123 45 67"],
+    [delivery && f.address.value.trim().length < 5, f.address, 'Manzilni yozing: ko\'cha, uy, xonadon'],
+  ].find(([bad]) => bad);
+  $('checkoutError').textContent = check ? check[2] : '';
+  if (check) return check[1].focus();
+  $('placeOrder').disabled = true;
+  try {
+    const r = await api(`/cart/${cart.token}/checkout`, {
+      fulfillment: f.fulfillment.value, name: f.fullname.value, phone: f.phone.value,
+      ...(delivery && { address: f.address.value, ...(pin && { lat: pin.lat, lon: pin.lng }) }),
+    });
+    setCart(null);
+    clearCheckout();
+    showDone(r.order);
+  } catch (err) {
+    if (err.status === 404) return cartAction(() => Promise.reject(err));
+    $('checkoutError').textContent = err.message;
+  } finally {
+    $('placeOrder').disabled = false;
+  }
+});
+
+function showDone(o) {
+  $('orderNo').textContent = `№ ${o.id}`;
+  $('doneBody').replaceChildren(
+    el('div', { className: 'sum' },
+      ...o.items.map((i) => sumRow(`${i.name} · ${sizeName(i.size)}${i.quantity > 1 ? ` × ${i.quantity}` : ''}`, som(i.unit_price * i.quantity))),
+      ...(o.fulfillment === 'delivery' ? [sumRow('Yetkazish', o.delivery_fee ? som(o.delivery_fee) : 'bepul')] : []),
+      sumRow('Jami', som(o.total), 'grand')),
+    el('p', { className: 'notice', textContent: `Kassaga boring va buyurtma raqamini ayting. ${hhmm(o.expires_at)} gacha to'lanmasa, buyurtma bekor bo'ladi.` }),
+    el('p', { textContent: o.fulfillment === 'pickup' ? "To'lovdan keyin xodim kiyimlarni tayyorlab beradi." : `To'lovdan keyin kuryer ${o.phone} raqamiga qo'ng'iroq qiladi.` }),
+  );
+  show('done');
+}
+$('doneHome').onclick = () => reset();
+
 // Back to start keeps the cart; only the kiosk idle reset clears it for the next customer.
 $('home').onclick = () => { show('start'); loadStore(); };
 
 function reset() {
-  cart = [];
+  if (cart) api(`/cart/${cart.token}`, null, 'DELETE').catch(() => {}); // give the held stock back now, not in 15 min
+  setCart(null);
   request = body = sizeInfo = null;
   form.reset();
+  clearCheckout();
   $('formError').textContent = '';
   $('results').replaceChildren();
-  renderCart();
   show('start');
   loadStore();
 }
@@ -352,3 +516,4 @@ if (kiosk) watchIdle(document, { onIdle: reset });
 
 show('start');
 loadStore();
+if (savedCart()) api('/cart/' + savedCart()).then((c) => setCart(c.store_id === storeId ? c : null), () => setCart(null));

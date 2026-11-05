@@ -59,6 +59,7 @@
       <button id="tabProducts" aria-current="page">Kiyimlar</button>
       <button id="tabStats">Statistika</button>
     </nav>
+    <button id="payBtn">Kassa</button>
     <button id="qrBtn">QR kodlar</button>
     <span id="who" class="sizes"></span>
     <button id="logout">Chiqish</button>
@@ -102,6 +103,17 @@
   <table><tbody id="qrRows"></tbody></table>
   <p class="error" id="qrError" role="alert"></p>
   <div class="actions"><button type="button" id="qrClose">Yopish</button></div>
+</dialog>
+
+<dialog id="payDlg">
+  <h2>Kassa: buyurtma to'lovi</h2>
+  <form id="payFind" class="bar">
+    <label class="grow">Buyurtma raqami <input name="no" type="number" inputmode="numeric" min="1" required></label>
+    <button class="primary">Topish</button>
+  </form>
+  <div id="payOrder"></div>
+  <p class="error" id="payError" role="alert"></p>
+  <div class="actions"><button type="button" class="primary" id="payConfirm" hidden>Pul olindi: to'landi</button><button type="button" id="payClose">Yopish</button></div>
 </dialog>
 
 <dialog id="importDlg">
@@ -372,6 +384,54 @@ async function loadStats() {
   } catch (err) { $('statsError').textContent = err.message; }
 }
 $('statsDays').onchange = $('statsStore').onchange = loadStats;
+
+// Cashier: find an order by its number, take the money, mark it paid (stock goes down on the server).
+const PAY = { pending: "to'lanmagan", paid: "to'langan", cancelled: 'bekor qilingan' };
+let payOrder = null;
+$('payBtn').onclick = () => {
+  payOrder = null;
+  $('payFind').reset();
+  $('payOrder').replaceChildren();
+  $('payError').textContent = '';
+  $('payConfirm').hidden = true;
+  $('payDlg').showModal();
+};
+$('payClose').onclick = () => $('payDlg').close();
+function renderPay(o) {
+  payOrder = o;
+  $('payConfirm').hidden = o.payment_status !== 'pending';
+  const until = o.expires_at ? ` · ${new Date(o.expires_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} gacha` : '';
+  $('payOrder').replaceChildren(
+    el('p', { textContent: `№ ${o.id} · ${o.customer_name} · ${o.phone} · ${o.fulfillment === 'pickup' ? "do'kondan olib ketadi" : 'yetkazish: ' + o.address}` }),
+    el('div', { className: 'scroll' }, el('table', {}, el('tbody', {}, ...o.items.map((i) => el('tr', {},
+      el('td', { textContent: i.name }), el('td', { textContent: i.size }), el('td', { textContent: i.shelf_location || '' }),
+      el('td', { className: 'num', textContent: `${i.quantity} × ${som(i.unit_price)}` })))))),
+    el('p', {}, el('strong', { textContent: `Jami: ${som(o.total)} so'm` }), ` (shundan yetkazish ${som(o.delivery_fee)}) · ${PAY[o.payment_status]}${o.payment_status === 'pending' ? until : ''}`),
+  );
+}
+$('payFind').onsubmit = async (e) => {
+  e.preventDefault();
+  $('payError').textContent = '';
+  try {
+    renderPay(await call('/orders/' + Number($('payFind').no.value)));
+  } catch (err) {
+    $('payOrder').replaceChildren();
+    $('payConfirm').hidden = true;
+    $('payError').textContent = err.message;
+  }
+};
+$('payConfirm').onclick = async () => {
+  $('payError').textContent = '';
+  $('payConfirm').disabled = true;
+  try {
+    renderPay(await call(`/orders/${payOrder.id}/pay`, { method: 'POST' }));
+    load(); // stock changed
+  } catch (err) {
+    $('payError').textContent = err.message;
+  } finally {
+    $('payConfirm').disabled = false;
+  }
+};
 
 $('qrBtn').onclick = () => {
   $('qrError').textContent = '';

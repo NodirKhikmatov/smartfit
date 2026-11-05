@@ -6,6 +6,7 @@ import path from 'node:path';
 import { sizesFor } from '../db/seed.js';
 import { parseCsv } from './csv.js';
 import { hashPassword, verifyPassword, DUMMY_HASH, tokenSecret, signToken, verifyToken } from './auth.js';
+import { releaseExpired, markPaid, orderView } from '../cart/cart.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -339,6 +340,26 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     // The DB change already happened; a leftover file is only wasted disk, so log instead of failing the request.
     await unlink(path.join(imageDir, path.basename(url))).catch((err) => err.code === 'ENOENT' || console.error(err));
   }
+
+  // Cashier (task 8): look up an order by its number and mark it paid. Task 10 adds the list and statuses.
+  const findOrder = async (req) => {
+    await releaseExpired(db);
+    const id = Number(req.params.id);
+    const q = db('orders').where({ id: Number.isInteger(id) && id > 0 ? id : 0 });
+    if (req.admin.role !== 'super') q.where('store_id', req.admin.store_id);
+    const o = await q.first();
+    if (!o) throw fail(404, 'Buyurtma topilmadi');
+    return o;
+  };
+  r.get('/orders/:id', async (req, res) => res.json(await orderView(db, await findOrder(req))));
+  r.post('/orders/:id/pay', async (req, res) => {
+    const o = await findOrder(req);
+    if (!(await markPaid(db, o.id))) {
+      const now = await db('orders').where({ id: o.id }).first('payment_status');
+      throw fail(409, now.payment_status === 'paid' ? "Bu buyurtma allaqachon to'langan" : "Buyurtma bekor qilingan: 15 daqiqada to'lanmadi");
+    }
+    res.json(await orderView(db, await db('orders').where({ id: o.id }).first()));
+  });
 
   // Recommendations per day (Tashkent time, zero-filled) and the most-suggested products.
   r.get('/stats', async (req, res) => {

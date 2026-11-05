@@ -209,7 +209,8 @@ test('no image or base64 data reaches disk, the DB or the logs', async () => {
 
   // The browser encodes pixels in one place only: the small JPEG for the stylist (task 7). No uploads or other encoders.
   for (const f of ['app.js', 'pose.js']) {
-    const src = readFileSync(new URL(`../public/app/${f}`, import.meta.url), 'utf8');
+    // Task 8: the phone keeps only its cart token, under one key.
+    const src = readFileSync(new URL(`../public/app/${f}`, import.meta.url), 'utf8').replace(/sessionStorage\.(getItem|removeItem)\(CART_KEY\)|sessionStorage\.setItem\(CART_KEY, t\)/g, '');
     assert.ok(!/toBlob|FormData|readAsDataURL|getImageData|btoa\(|localStorage|sessionStorage|indexedDB/.test(src), f);
     assert.equal(src.match(/toDataURL/g)?.length ?? 0, f === 'app.js' ? 1 : 0, f);
   }
