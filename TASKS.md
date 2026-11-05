@@ -5,12 +5,14 @@ One task = one session. Do them in order: each one builds on the previous one. T
 ## [x] 0. Setup
 Repo, CLAUDE.md, docs/SPEC.md, TASKS.md, Node 22.
 
-## [ ] 1. Foundation + DB (stage 1)
+## [x] 1. Foundation + DB (stage 1)
 Express server with the `/api` prefix and `.env` config. Tables: stores, products, product_stock, carts, orders, order_items, admins, recommendation_logs (fields as in the spec). SQLite in dev, written so that Postgres can be used later.
 Done when:
 - The server starts, and `npm test` runs.
 - The seed creates 2 stores (Tashkent, Samarkand) with 25 items each, covering all seasons, with stock per size.
 - Prices are stored as integer so'm.
+
+Notes: Knex + better-sqlite3 (`src/db`); setting `DATABASE_URL` switches to Postgres (`pg` gets installed in task 11; not run against Postgres yet). The server auto-migrates on start, and `npm run seed` wipes the DB and reseeds it (it refuses when NODE_ENV=production). DB CHECKs: `0 ≤ reserved ≤ quantity`, `discount < price`, `total = subtotal + delivery_fee`, plus enums. Order statuses are stored as codes new/packing/shipping/delivered/cancelled, and the UI maps them to Uzbek. Products have a `style` column (task 7). SQLite returns booleans as 0/1. Not done yet: `cart_items` and reservation rows (task 8), admins (task 2). Product delete in task 2 must handle the FK from `order_items`. The JSON body limit is 100kb.
 
 ## [ ] 2. Admin: auth + products + stock (stage 2, part)
 `/admin`: email + password login (scrypt) with a 12h token. Super-admin sees all stores; a store manager sees only their own. Product list with search and category filter, plus add, edit and delete. Size table (XS–XXL or 36–45) with stock counts.
