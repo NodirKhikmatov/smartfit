@@ -15,8 +15,8 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
     .join('product_stock as s', 's.product_id', 'p.id')
     .where('p.store_id', storeId)
     .whereIn('p.gender', [gender, 'unisex'])
-    .where('p.temp_min', '<=', temperature)
-    .where('p.temp_max', '>=', temperature)
+    // Live weather is fractional (11.7 °C); Postgres would type the parameter as the integer column and refuse it.
+    .whereRaw('p.temp_min <= cast(? as real) and p.temp_max >= cast(? as real)', [temperature, temperature])
     .whereRaw('s.quantity - s.reserved > 0')
     .where((q) => {
       for (const [cat, key] of Object.entries(sizeKey)) {

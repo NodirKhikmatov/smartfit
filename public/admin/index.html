@@ -110,6 +110,9 @@
     <p id="statsEmpty" hidden>Bu davrda hali tavsiya berilmagan. Mijozlar kioskdan foydalana boshlaganda bu yerda statistika paydo bo'ladi.</p>
     <div id="statsBody">
       <h2 id="statsTotal"></h2>
+      <h3>Pilot hisoboti</h3>
+      <div class="scroll"><table><thead><tr><th>Bosqich</th><th class="num">Soni</th><th class="num">Ulushi</th></tr></thead><tbody id="pilotRows"></tbody></table></div>
+      <p class="sizes" id="pilotOrders"></p>
       <h3>Eng ko'p taklif qilingan kiyimlar</h3>
       <div class="scroll"><table><thead><tr><th>Kiyim</th><th>Kategoriya</th><th class="num">Necha marta</th></tr></thead><tbody id="topRows"></tbody></table></div>
       <h3>Kunlik tavsiyalar soni</h3>
@@ -404,6 +407,13 @@ async function loadStats() {
     $('statsEmpty').hidden = s.total > 0;
     $('statsBody').hidden = s.total === 0;
     $('statsTotal').textContent = `${s.days} kunda ${s.total} ta tavsiya`;
+    const f = s.pilot;
+    const pct = (n) => (f.shown ? `${Math.round((n / f.shown) * 100)}%` : '—');
+    $('pilotRows').replaceChildren(...[
+      ['Tavsiya ko\'rsatildi', f.shown], ['Taklifni qabul qildi (savatga qo\'shdi)', f.accepted],
+      ['Kiyib ko\'rdi', f.tried], ['Sotib oldi (to\'langan buyurtma)', f.bought],
+    ].map(([label, n]) => el('tr', {}, el('td', { textContent: label }), el('td', { className: 'num', textContent: n }), el('td', { className: 'num', textContent: pct(n) }))));
+    $('pilotOrders').textContent = `To'langan buyurtmalar: ${f.orders} ta, shundan yetkazib berish: ${f.delivery_orders} ta · Tushum: ${som(f.revenue)} so'm · O'rtacha chek: ${som(f.avg_order)} so'm`;
     $('topRows').replaceChildren(...s.top.map((t) => el('tr', {},
       el('td', { textContent: t.name ?? `O'chirilgan kiyim (#${t.product_id})` }),
       el('td', { textContent: CATS[t.category] || '—' }),

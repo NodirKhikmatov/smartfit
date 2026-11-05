@@ -394,12 +394,18 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const keys = Array.from({ length: days }, (_, i) => dayKey(Date.now() - (days - 1 - i) * 86400000));
     const since = new Date(`${keys[0]}T00:00:00+05:00`).toISOString().replace('T', ' ').slice(0, 19) + '+00:00';
     // shortcut: aggregates in JS over the raw rows; fine for pilot volume, move to SQL GROUP BY if logs reach ~100k/90 days.
-    const q = db('recommendation_logs').select('product_ids', 'created_at').where('created_at', '>=', since);
-    if (req.admin.role !== 'super') q.where('store_id', req.admin.store_id);
-    if (req.query.store_id) q.where('store_id', Number(req.query.store_id) || 0);
+    const inScope = (q, col = 'store_id') => {
+      if (req.admin.role !== 'super') q.where(col, req.admin.store_id);
+      if (req.query.store_id) q.where(col, Number(req.query.store_id) || 0);
+      return q;
+    };
+    const logs = await inScope(db('recommendation_logs').select('id', 'product_ids', 'created_at', 'accepted_at', 'tried_at').where('created_at', '>=', since));
+    // Pilot: paid orders that weren't cancelled afterwards (a cancelled paid order is a refund).
+    const orders = await inScope(db('orders').select('recommendation_id', 'fulfillment', 'total').where({ payment_status: 'paid' })
+      .whereNot('status', 'cancelled').where('created_at', '>=', since));
     const perDay = Object.fromEntries(keys.map((k) => [k, 0]));
     const counts = new Map();
-    for (const log of await q) {
+    for (const log of logs) {
       // SQLite gives 'YYYY-MM-DD HH:MM:SS' (UTC) strings, Postgres gives Date objects.
       const at = log.created_at instanceof Date ? log.created_at : new Date(`${String(log.created_at).replace(' ', 'T')}Z`);
       const k = dayKey(at.getTime());
@@ -415,9 +421,22 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const top = [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, 10);
     // Logged products may since have been deleted: they come back with name null.
     const names = await scoped(req.admin).whereIn('id', top.map(([id]) => id)).select('id', 'name', 'category');
+    const fromRec = orders.filter((o) => o.recommendation_id != null);
+    const ids = new Set(logs.map((l) => l.id));
     res.json({
       days,
       total: Object.values(perDay).reduce((a, b) => a + b, 0),
+      // Funnel per results screen: shown → accepted (added to cart) → tried on → bought (paid order from it).
+      pilot: {
+        shown: logs.length,
+        accepted: logs.filter((l) => l.accepted_at != null).length,
+        tried: logs.filter((l) => l.tried_at != null).length,
+        bought: new Set(fromRec.map((o) => o.recommendation_id).filter((id) => ids.has(id))).size,
+        orders: orders.length,
+        delivery_orders: orders.filter((o) => o.fulfillment === 'delivery').length,
+        revenue: orders.reduce((a, o) => a + o.total, 0),
+        avg_order: orders.length ? Math.round(orders.reduce((a, o) => a + o.total, 0) / orders.length) : 0,
+      },
       per_day: keys.map((day) => ({ day, count: perDay[day] })),
       top: top.map(([product_id, count]) => {
         const p = names.find((x) => x.id === product_id);
@@ -437,5 +456,28 @@ export async function createAdmin(db, { email, password, storeId = null }) {
   const [{ id }] = await db('admins')
     .insert({ email, password_hash: await hashPassword(password), role: storeId ? 'manager' : 'super', store_id: storeId || null })
     .returning('id');
+  return id;
+}
+
+// New store (CLI: npm run store:create). Weather comes from lat/lon; the delivery fee is a flat city fee in so'm,
+// free above free_delivery_threshold (empty = never free).
+export async function createStore(db, { name, city, lat, lon, address, delivery_fee = 0, free_delivery_threshold = null }) {
+  const str = (v, label) => {
+    const s = String(v ?? '').trim();
+    if (!s || s.length > 200) throw new Error(`${label}: 1–200 characters`);
+    return s;
+  };
+  const num = (v, min, max, label) => {
+    const n = Number(v);
+    if (v === '' || v == null || !Number.isFinite(n) || n < min || n > max) throw new Error(`${label}: ${min}…${max}`);
+    return n;
+  };
+  const fee = num(delivery_fee, 0, 1e9, 'delivery_fee');
+  const free = free_delivery_threshold === '' || free_delivery_threshold == null ? null : num(free_delivery_threshold, 1, 1e9, 'free_delivery_threshold');
+  if (!Number.isInteger(fee) || (free !== null && !Number.isInteger(free))) throw new Error("Prices are whole so'm");
+  const [{ id }] = await db('stores').insert({
+    name: str(name, 'name'), city: str(city, 'city'), address: str(address, 'address'),
+    lat: num(lat, -90, 90, 'lat'), lon: num(lon, -180, 180, 'lon'), delivery_fee: fee, free_delivery_threshold: free,
+  }).returning('id');
   return id;
 }

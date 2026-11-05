@@ -10,9 +10,20 @@ import { paymentConfig, paymentMethods, createPaymentRouter } from './cart/payme
 import { telegramConfig, telegramLink } from './notify/telegram.js';
 
 // uploadDir holds product images only. Customer photos are never written anywhere.
-export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads', weather = createWeather(), stylist = createStylist(), stylistTimeoutMs, payments = paymentConfig(), telegram = telegramConfig() } = {}) {
+export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads', weather = createWeather(), stylist = createStylist(), stylistTimeoutMs, payments = paymentConfig(), telegram = telegramConfig(), trustProxy = process.env.TRUST_PROXY, logRequests = false } = {}) {
   const app = express();
   app.disable('x-powered-by');
+  // Behind Caddy: TRUST_PROXY=1 (one hop) so req.ip / req.protocol are the client's, for the login lock, the AI cap and QR URLs.
+  if (trustProxy) app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy);
+  // One line per request: method, path without query, status, time. Tokens in paths are redacted by src/log.js.
+  if (logRequests) {
+    app.use((req, res, next) => {
+      const start = performance.now();
+      const path = req.originalUrl.split('?')[0]; // read now: mounted routers rewrite req.url
+      res.on('finish', () => console.info({ msg: 'request', method: req.method, path, status: res.statusCode, ms: Math.round(performance.now() - start), ip: req.ip }));
+      next();
+    });
+  }
   app.use('/api/pay', createPaymentRouter(db, payments)); // Click/Payme callbacks parse their own bodies
   // /api/recommend may carry one small customer photo for the stylist (capped again in stylist.js); everything else 100 kb.
   app.use('/api/recommend', express.json({ limit: '400kb' }));

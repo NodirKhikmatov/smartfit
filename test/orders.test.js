@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDb } from '../src/db/index.js';
+import { testDb } from './helpers/db.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 import { createAdmin } from '../src/admin/routes.js';
@@ -8,7 +8,7 @@ import { refundPaid } from '../src/cart/cart.js';
 import { flushNotifications, handleUpdate, telegramConfig, telegramApi, message } from '../src/notify/telegram.js';
 
 process.env.ADMIN_TOKEN_SECRET = 'test-secret';
-const db = createDb({ databaseUrl: '', sqliteFile: ':memory:' });
+const db = testDb();
 const BOT = { token: '123:secret-bot-token', username: 'smartfit_test_bot' };
 let server, base, botServer, botBase, tashkent, samarkand, tashToken, samToken, superToken;
 

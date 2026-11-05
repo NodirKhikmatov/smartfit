@@ -1,9 +1,9 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDb } from '../src/db/index.js';
+import { testDb } from './helpers/db.js';
 import { seed, CATALOGUE } from '../src/db/seed.js';
 
-const db = createDb({ databaseUrl: '', sqliteFile: ':memory:' });
+const db = testDb();
 
 before(async () => {
   await db.migrate.latest();
@@ -69,11 +69,9 @@ test('seed: each required category has ≥2 items per gender at −10, 5, 15, 30
 });
 
 test('prices are stored as integer so\'m', async () => {
-  const rows = await db.raw("select typeof(price) tp, typeof(discount_price) td from products");
-  for (const r of rows) {
-    assert.equal(r.tp, 'integer');
-    assert.ok(r.td === 'integer' || r.td === 'null');
-  }
+  const cols = await db('products').columnInfo();
+  assert.equal(cols.price.type, 'integer');
+  assert.equal(cols.discount_price.type, 'integer');
   const products = await db('products');
   for (const p of products) {
     assert.ok(Number.isInteger(p.price) && p.price > 0);

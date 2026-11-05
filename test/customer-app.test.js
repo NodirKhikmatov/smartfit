@@ -1,13 +1,13 @@
 import { test, before, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDb } from '../src/db/index.js';
+import { testDb } from './helpers/db.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 import { createAdmin } from '../src/admin/routes.js';
 import { watchIdle, IDLE_MS } from '../public/app/idle.js';
 
 process.env.ADMIN_TOKEN_SECRET = 'test-secret';
-const db = createDb({ databaseUrl: '', sqliteFile: ':memory:' });
+const db = testDb();
 const weather = { temperature: 12, apparent_temperature: 10, raining: true, wind_speed: 4, source: 'live' };
 let server, base, tashkent, samarkand, superToken, tashToken;
 

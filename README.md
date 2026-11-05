@@ -1,0 +1,204 @@
+# Smart Fit
+
+Outfit recommendations for clothing stores, on an in-store kiosk and on the customer's phone (QR). Only items that are
+in this store and in stock in the customer's size are suggested and sold. The customer's size comes from a photo (measured
+in the browser, the photo is never stored), the outfits fit today's weather and budget, and the customer can put a whole
+outfit in the cart, pick it up and pay at the cashier, or order delivery and pay with Click/Payme.
+
+- Customer app: `/kiosk?store=<id>` (kiosk, big buttons, resets after 90 s idle) and `/m?store=<id>` (phone)
+- Admin: `/admin` (products, stock, CSV import, orders, cashier, QR codes, stats and the pilot report)
+- API: `/api/...`, health check `GET /api/health`
+- Full spec: [`docs/SPEC.md`](docs/SPEC.md), build log and decisions: [`TASKS.md`](TASKS.md)
+
+Stack: Node.js 22 + Express 5, Knex with PostgreSQL in production (SQLite file in development), vanilla JS frontend,
+Caddy for HTTPS.
+
+## Run locally (development)
+
+```bash
+nvm use                      # Node 22 (.nvmrc)
+npm install
+cp .env.example .env         # every variable is optional in development
+npm run seed                 # demo data: 2 stores × 25 items (wipes the DB!)
+npm run admin:create -- boss@example.uz   # super-admin; asks for the password
+npm start                    # http://localhost:3000/kiosk?store=1  and  /admin
+```
+
+Without `DATABASE_URL` the app uses the SQLite file `SQLITE_FILE` (default `./smartfit.db`). Migrations run on every start.
+
+Tests: `npm test` (SQLite in memory). To run the same suite against PostgreSQL, point `TEST_DATABASE_URL` at a
+throwaway database (each test file creates its own schema there and leaves it behind):
+
+```bash
+docker run -d --rm --name smartfit-testpg -e POSTGRES_PASSWORD=test -e POSTGRES_DB=smartfit_test -p 55432:5432 postgres:16-alpine
+TEST_DATABASE_URL=postgres://postgres:test@localhost:55432/smartfit_test npm test
+docker stop smartfit-testpg
+```
+
+## Environment variables (`.env`)
+
+| Variable | Default | What it does |
+|---|---|---|
+| `PORT` | `3000` | HTTP port of the app. |
+| `DATABASE_URL` | empty | `postgres://user:pass@host:5432/db` → PostgreSQL. Empty → SQLite. docker compose sets it for you. |
+| `SQLITE_FILE` | `./smartfit.db` | SQLite file when `DATABASE_URL` is empty. |
+| `ADMIN_TOKEN_SECRET` | random per process | Signs admin login tokens (12 h). **Required in production.** Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `UPLOAD_DIR` | `./uploads` | Product photos uploaded in admin (served at `/uploads`). Customer photos are never saved. |
+| `PUBLIC_URL` | empty | Public address, e.g. `https://fit.example.uz`. Used in the store QR codes and the Click/Payme return link. **Set it in production.** |
+| `ANTHROPIC_API_KEY` | empty | Claude stylist. Empty → rule-based recommendations only (the app works fully without it). |
+| `ANTHROPIC_MODEL` | `claude-haiku-5-5` | Must accept a forced `tool_choice` and answer within 8 s. |
+| `PAYME_MERCHANT_ID`, `PAYME_KEY` | empty | Payme Merchant API. Off (and hidden in the app) until both are set. Use the TEST_KEY while testing. |
+| `PAYME_CHECKOUT_URL` | `https://test.paycom.uz` | Set `https://checkout.paycom.uz` for live payments. |
+| `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY` | empty | Click SHOP API. Off until all three are set. |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` | empty | Order status messages to customers. Both needed; empty → no messages. |
+| `POSTGRES_PASSWORD` | — | docker compose only: the database password (compose builds `DATABASE_URL` from it, so letters and digits only, e.g. `openssl rand -hex 24`). Required by compose. |
+| `DOMAIN` | `localhost` | docker compose only: the HTTPS domain Caddy serves and gets a certificate for. |
+| `NODE_ENV` | empty | `production` requires `ADMIN_TOKEN_SECRET` and blocks `npm run seed`. compose sets it. |
+| `TRUST_PROXY` | empty | Number of reverse proxies in front of the app. compose sets `1` (Caddy), so client IPs (login lock, AI rate limit) and `https` (QR links) are right. Leave empty when the app is reached directly. |
+| `ERROR_WEBHOOK_URL` | empty | Optional error monitoring: every error log line is POSTed as JSON `{text, content, level, time}` (works with Slack, Discord and Mattermost incoming webhooks), at most 10 a minute. |
+
+Secrets live only in `.env` (git-ignored), never in code. The logs redact them anyway (see Logs below).
+
+## Deploy (docker compose: app + PostgreSQL + Caddy HTTPS)
+
+Needs a Linux server with Docker, a domain whose A record points at the server, and ports 80 and 443 open
+(the camera on phones only works over HTTPS, and Let's Encrypt checks the domain over port 80).
+
+```bash
+git clone <repo> smart-fit && cd smart-fit
+cp .env.example .env
+# edit .env: POSTGRES_PASSWORD, DOMAIN=fit.example.uz, PUBLIC_URL=https://fit.example.uz, ADMIN_TOKEN_SECRET,
+#            plus the optional Claude / Payme / Click / Telegram / ERROR_WEBHOOK_URL values
+docker compose up -d --build
+docker compose exec app npm run admin:create -- boss@example.uz   # first super-admin (asks for the password)
+```
+
+Then open `https://fit.example.uz/admin`. Caddy gets and renews the certificate on its own; the app container
+migrates the database on start. Check it: `curl https://fit.example.uz/api/health` → `{"ok":true}`.
+
+- Logs: `docker compose logs -f app`. Update: `git pull && docker compose up -d --build`.
+- Backups: `docker compose exec db pg_dump -U smartfit smartfit > backup-$(date +%F).sql` (put it in cron and copy
+  it off the server). Restore: `docker compose exec -T db psql -U smartfit smartfit < backup.sql`.
+- Run **one** app container: the Telegram long poll, the order outbox and the in-memory rate limits live in that process.
+- Product photos are in the `uploads` volume, the database in `pgdata`, certificates in `caddy_data`.
+- Demo data on a test server: `docker compose exec -e NODE_ENV=development app npm run seed` (**wipes everything**;
+  production refuses to seed).
+- Local smoke test of the whole stack: `DOMAIN=localhost` (the default) and `https://localhost` (Caddy's own certificate,
+  the browser will warn).
+
+## Adding a store and its staff
+
+1. Create the store (the id it prints goes into the kiosk URL, the QR code and the manager account):
+   ```bash
+   docker compose exec app npm run store:create -- "Smart Fit Buxoro" "Buxoro" 39.7747 64.4286 "Navoiy ko'chasi 1" 25000 1000000
+   # name, city, lat, lon (for the weather), address, delivery fee in so'm, free delivery above (so'm, optional)
+   ```
+   (Without docker: `npm run store:create -- ...`.)
+2. Create the store manager, who sees and changes only this store: `npm run admin:create -- manager@example.uz <store_id>`.
+   No store id → super-admin (sees all stores). The password is asked on stdin, or taken from `ADMIN_PASSWORD`.
+3. Add products in `/admin` → "Kiyimlar" (form, or "CSV yuklash" for a whole catalogue), set stock per size, upload photos.
+   CSV columns (`,` or `;`, UTF-8, header row): `id, store_id, name, category, gender, color, style, price, discount_price,
+   temp_min, temp_max, waterproof, shelf_location` plus one stock column per size (`XS…XXL`, `36…45`, `ONE`). Empty `id`
+   creates a product, a filled one updates it; categories `outerwear/top/bottom/shoes/accessory`, genders
+   `male/female/unisex`, prices in whole so'm. Any bad row rejects the whole file with the line numbers.
+4. Kiosk: open `https://<domain>/kiosk?store=<id>` full screen in the kiosk browser (Chrome kiosk mode), allow the camera.
+5. Phone: `/admin` → "QR kodlar" → "QR chop etish" and put the print next to the kiosk / in the fitting rooms.
+
+## Online payment (Click, Payme)
+
+Cashier payment always works. A provider appears in the phone app only when all its keys are set.
+
+- **Payme**: in the merchant cabinet set the endpoint `https://<domain>/api/pay/payme` and the account field
+  `order_id`. Put the merchant id and key into `PAYME_MERCHANT_ID` / `PAYME_KEY` (the TEST_KEY with
+  `PAYME_CHECKOUT_URL=https://test.paycom.uz` for the sandbox; the live key with `https://checkout.paycom.uz` for real money).
+  Run the sandbox scenarios at test.paycom.uz before going live.
+- **Click**: in the Click merchant cabinet set Prepare `https://<domain>/api/pay/click/prepare` and Complete
+  `https://<domain>/api/pay/click/complete`, then fill `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY`.
+- The amount is always the server's order total; an order becomes paid only through a verified callback.
+  An unpaid order is cancelled after 15 minutes and its stock comes back. Refunds are made in the provider cabinet
+  (or cash at the cashier) after cancelling a paid order in admin.
+
+## Telegram notifications
+
+1. Create a bot with @BotFather, put its token in `TELEGRAM_BOT_TOKEN` and its username (without @) in
+   `TELEGRAM_BOT_USERNAME`, restart (`docker compose up -d`).
+2. After an order the phone shows "Holatini Telegram'da kuzatish" (the kiosk shows a QR). The customer presses Start in
+   the bot and then gets a message on every status change.
+3. The app long-polls the bot, so don't set a webhook on it and run only one app instance.
+
+SMS is a stub (`src/notify/sms.js`): return a `(phone, text)` sender there to switch it on.
+
+## Logs and error monitoring
+
+The server writes one JSON line per event to stdout/stderr (`{time, level, msg, ...}`), one line per request
+(`method, path, status, ms, ip`, no query strings or bodies). Before anything is written, values of secret variables,
+`data:` URLs, long base64 runs and 32+ hex tokens (cart, order, recommendation tokens) are replaced with
+`[secret]`, `[data]`, `[base64]`, `[token]`. Customer photos are never logged or stored in the first place.
+Set `ERROR_WEBHOOK_URL` to get every error (500s, failed callbacks, crashes) in a Slack/Discord/Mattermost channel.
+
+## Pilot report
+
+`/admin` → "Statistika" → "Pilot hisoboti", per period (7/30/90 days) and store:
+
+| Step | How it is counted |
+|---|---|
+| Tavsiya ko'rsatildi | results screens shown (one per customer: the −/+ size changes update the same row) |
+| Taklifni qabul qildi | the customer added at least one suggested item to the cart from that screen |
+| Kiyib ko'rdi | the customer tapped "Kiyib ko'rdim" under the outfits |
+| Sotib oldi | a paid (not refunded) order came from a cart filled from that screen |
+
+Below it: paid orders, how many of them are delivery orders, revenue and the average order value (paid, not
+cancelled orders in the period). "Tried on" depends on customers tapping the button, so ask staff to remind them.
+Purchases rung up only on the store's own till (not through the app) are not counted.
+
+## Launch checklist
+
+Everything below was left manual or pending while building (see the Notes in `TASKS.md`). Tick them before and during
+the 2-week pilot.
+
+**Server and HTTPS**
+- [ ] Server with Docker, a domain and DNS A record, ports 80/443 open; `DOMAIN`, `PUBLIC_URL`, `POSTGRES_PASSWORD`,
+      `ADMIN_TOKEN_SECRET` set; `https://<domain>/api/health` answers.
+- [ ] Real store created with `store:create`, its manager account, the real catalogue and stock (CSV), product photos.
+      The demo seed is not used in production.
+- [ ] Daily `pg_dump` backup copied off the server.
+- [ ] `ERROR_WEBHOOK_URL` set and one test error seen in the channel.
+- [ ] Stock is kept current: the shelf and the database must match (a daily stock update or a sync with the store's
+      till; the spec lists stale stock as a risk).
+
+**Phones, kiosk, camera**
+- [ ] QR → `/m` → camera with the 10 s timer → gallery picker on a real iPhone (Safari) and a real Android (Chrome), over HTTPS.
+- [ ] Size accuracy on 20 people: the size from the photo matches the real size in ≥ 70 % of cases. The size chart and
+      factors in `src/size/size.js` are marked `shortcut:` guesses; recalibrate them from these measurements.
+- [ ] Speed: photo to results in under 15 s on the kiosk and a mid-range phone.
+- [ ] Kiosk placement: light and background good enough for MediaPipe; the 90 s idle reset empties the cart
+      (browser-check it on the kiosk).
+- [ ] MediaPipe model and wasm load from jsDelivr / Google Storage: the kiosk needs internet, or self-host them
+      (`public/app/pose.js`) if the kiosk can be offline.
+- [ ] Print the store QR on the real printer.
+- [ ] The kiosk QR on the order screen scans to the Telegram bot.
+
+**Claude stylist**
+- [ ] Live `ANTHROPIC_API_KEY`: run real requests, check the answer comes within the 8 s limit and the Uzbek titles and
+      reasons read well. Turn the internet / key off once and check the rule-based fallback.
+
+**Payments (only if delivery/online payment is in the pilot; the spec says start with pickup + cashier)**
+- [ ] Payme sandbox (test.paycom.uz, TEST_KEY) and Click test service: payment, cancel, callback, 15-min expiry.
+- [ ] Payment choice and pay link checked in a phone browser.
+- [ ] Switch to live keys and `PAYME_CHECKOUT_URL=https://checkout.paycom.uz`.
+- [ ] Click: a Complete that arrives after the order expired is answered with an error (no automatic reversal); watch
+      for it in the Click cabinet and refund by hand.
+
+**Telegram**
+- [ ] Bot created with @BotFather, `TELEGRAM_BOT_TOKEN` + `TELEGRAM_BOT_USERNAME` set; order on a phone → Start →
+      change the status in admin → the message arrives.
+
+**Store process**
+- [ ] Return and exchange terms written and shown to delivery customers (risk: wrong size delivered).
+- [ ] Staff know the cashier dialog ("Kassa"), the order statuses and that a cancelled paid order needs a manual refund.
+- [ ] Consent text on the camera screen reviewed (photo not saved; a small copy goes to Claude when the key is set).
+
+**Known limits to watch during the pilot**
+- No per-IP rate limit on `/api/recommend` and on opening carts (anyone could hold stock with many carts). Add one if it
+  shows up in the stats or the stock holds.
+- One app instance only (Telegram long poll, outbox, in-memory limits).

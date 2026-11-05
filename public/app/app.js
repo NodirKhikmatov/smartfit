@@ -299,6 +299,7 @@ async function loadResults() {
     $('results').replaceChildren(el('p', { className: 'error', textContent: err.message }), el('button', { className: 'primary', textContent: 'Qayta urinish', onclick: loadResults }));
     return;
   }
+  request.rec = r.rec; // −/+ re-queries update the same pilot log row
   $('resultsWeather').textContent = `Ob-havo: ${weatherLine(r.weather)}` + (r.budget ? ` · Byudjet: ${som(r.budget)}` : '');
   if (!r.outfits.length) {
     $('results').replaceChildren(el('div', { className: 'notice warn', textContent: "Hozir sizning razmeringizda bugungi ob-havoga mos to'liq obraz yo'q. − / + bilan boshqa razmerni tanlab ko'ring yoki do'kon xodimidan so'rang." }));
@@ -308,7 +309,23 @@ async function loadResults() {
     ...(r.style_guess ? [el('p', { className: 'muted', textContent: `Uslub: ${r.style_guess}` })] : []),
     ...(r.over_budget > 0 ? [el('div', { className: 'notice warn', textContent: `Byudjetingizga mos obraz topilmadi. Eng arzon obraz byudjetdan ${som(r.over_budget)} qimmat.` })] : []),
     ...r.outfits.map((o, i) => outfitCard(o, i + 1)),
+    triedCard(),
   );
+}
+
+// Pilot report: the customer says they tried the suggestion on (the shelf numbers are on each item above).
+function triedCard() {
+  const b = el('button', { type: 'button', textContent: "Kiyib ko'rdim" });
+  b.onclick = async () => {
+    b.disabled = true;
+    try {
+      await api('/recommend/tried', { rec: request.rec });
+      b.textContent = "Rahmat! ✓";
+    } catch {
+      b.disabled = false;
+    }
+  };
+  return el('div', { className: 'notice' }, el('p', { style: 'margin:0 0 .5rem', textContent: "Kiyimni kiyib ko'rdingizmi? Belgilab qo'ying — bu bizga tavsiyalarni yaxshilashga yordam beradi." }), b);
 }
 
 const sizeName = (s) => (s === 'ONE' ? 'yagona razmer' : s);
@@ -341,7 +358,7 @@ function addButton(items) {
     b.disabled = true;
     try {
       const todo = items.filter((p) => !has(p)).map((p) => ({ product_id: p.id, size: size(p) }));
-      setCart(await api('/cart/items', { token: cart?.token, store_id: storeId, items: todo }));
+      setCart(await api('/cart/items', { token: cart?.token, store_id: storeId, items: todo, rec: request?.rec }));
     } catch (err) {
       msg.textContent = err.message;
     }

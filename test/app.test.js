@@ -1,9 +1,9 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDb } from '../src/db/index.js';
+import { testDb } from './helpers/db.js';
 import { createApp } from '../src/app.js';
 
-const db = createDb({ databaseUrl: '', sqliteFile: ':memory:' });
+const db = testDb();
 let server, base;
 
 before(async () => {

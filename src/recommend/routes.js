@@ -1,4 +1,5 @@
 import express from 'express';
+import { randomBytes } from 'node:crypto';
 import { sizesFor } from '../db/seed.js';
 import { fail } from '../admin/routes.js';
 import { filterCandidates, buildOutfits } from './engine.js';
@@ -16,6 +17,10 @@ const pick = (v, allowed, label, required) => {
 
 // shortcut: in-memory per-IP cap on paid Claude calls (over it → rules, never an error); one process only.
 const AI_PER_MINUTE = 30;
+export const REC = /^[a-f0-9]{32}$/;
+const REC_TTL_MS = 2 * 60 * 60 * 1000; // a re-query after this starts a new log row (a new customer at the kiosk)
+// Compares right against DB-default created_at: SQLite stores 'YYYY-MM-DD HH:MM:SS' (UTC) text, Postgres timestamptz.
+export const dbTime = (ms) => `${new Date(ms).toISOString().replace('T', ' ').slice(0, 19)}+00:00`;
 
 // Public: POST /api/recommend { store_id, gender, sizes: { top, bottom, shoes? }, budget?, photo? }
 // stylist (task 7) is null without ANTHROPIC_API_KEY → rules only.
@@ -65,8 +70,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     const { outfits, over_budget, style_guess, source } = result;
 
     // Stats (task 3) need product_ids as a JSON array of integers. No photo or body data here.
-    await db('recommendation_logs').insert({
-      store_id: store.id,
+    const log = {
       temperature: w.temperature,
       raining: w.raining,
       gender: b.gender,
@@ -74,8 +78,24 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       budget,
       product_ids: JSON.stringify([...new Set(outfits.flatMap((o) => o.items.map((i) => i.id)))]),
       source,
-    });
-    res.json({ weather: w, budget, over_budget, source, style_guess, outfits });
+    };
+    // A −/+ re-query sends back its `rec` and updates the same row, so one customer counts once in the pilot report.
+    let rec = typeof b.rec === 'string' && REC.test(b.rec) ? b.rec : null;
+    if (!rec || !(await db('recommendation_logs').where({ token: rec, store_id: store.id }).where('created_at', '>', dbTime(Date.now() - REC_TTL_MS)).update(log))) {
+      rec = randomBytes(16).toString('hex');
+      await db('recommendation_logs').insert({ ...log, store_id: store.id, token: rec });
+    }
+    res.json({ weather: w, budget, over_budget, source, style_guess, outfits, rec });
+  });
+
+  // Pilot funnel: the customer tapped "Kiyib ko'rdim" (tried the suggestion on). { rec } → 204, once per results screen.
+  r.post('/tried', async (req, res) => {
+    const rec = req.body?.rec;
+    if (typeof rec !== 'string' || !REC.test(rec)) throw fail(400, "So'rov noto'g'ri");
+    const row = await db('recommendation_logs').where({ token: rec }).first('id', 'tried_at');
+    if (!row) throw fail(404, 'Tavsiya topilmadi');
+    if (!row.tried_at) await db('recommendation_logs').where({ id: row.id }).whereNull('tried_at').update({ tried_at: new Date().toISOString() });
+    res.status(204).end();
   });
   return r;
 }

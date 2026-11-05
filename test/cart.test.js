@@ -1,13 +1,13 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDb } from '../src/db/index.js';
+import { testDb } from './helpers/db.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 import { createAdmin } from '../src/admin/routes.js';
 import { deliveryFee, totals, normalizePhone, releaseExpired, HOLD_MS } from '../src/cart/cart.js';
 
 process.env.ADMIN_TOKEN_SECRET = 'test-secret';
-const db = createDb({ databaseUrl: '', sqliteFile: ':memory:' });
+const db = testDb();
 let server, base, tashkent, samarkand, tashToken, samToken;
 
 const call = async (method, path, body, token) => {

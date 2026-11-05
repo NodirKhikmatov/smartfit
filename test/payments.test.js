@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { createDb } from '../src/db/index.js';
+import { testDb } from './helpers/db.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 import { releaseExpired, HOLD_MS } from '../src/cart/cart.js';
@@ -12,7 +12,7 @@ const ENV = {
   CLICK_SERVICE_ID: '111', CLICK_MERCHANT_ID: '222', CLICK_SECRET_KEY: 'click-secret',
   PUBLIC_URL: 'https://fit.example.uz/',
 };
-const db = createDb({ databaseUrl: '', sqliteFile: ':memory:' });
+const db = testDb();
 const weather = async () => ({ temperature: 5, apparent_temperature: 2, raining: false, wind_speed: 3, source: 'live' });
 let server, off, base, offBase, store;
 

@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDb } from '../src/db/index.js';
+import { json, testDb, tableNames } from './helpers/db.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 import { filterCandidates, buildOutfits } from '../src/recommend/engine.js';
@@ -91,7 +91,7 @@ test('no key → no stylist; defaults', () => {
 });
 
 // --- API with a fake Anthropic client (never the real API)
-const db = createDb({ databaseUrl: '', sqliteFile: ':memory:' });
+const db = testDb();
 const weather = { temperature: 5, apparent_temperature: 2, raining: false, wind_speed: 3, source: 'live' };
 const calls = [];
 let behave; // (params, opts) => response promise
@@ -159,7 +159,7 @@ test('API: Claude picks from CANDIDATES, server fills, prices and logs', async (
 
   const log = await db('recommendation_logs').orderBy('id', 'desc').first();
   assert.equal(log.source, 'ai');
-  assert.deepEqual(JSON.parse(log.product_ids), [...new Set(r.body.outfits.flatMap((x) => x.items.map((p) => p.id)))]);
+  assert.deepEqual(json(log.product_ids), [...new Set(r.body.outfits.flatMap((x) => x.items.map((p) => p.id)))]);
 });
 
 test('API: no valid outfit, an error, a refusal or a timeout → the rule-based result', async () => {
@@ -208,7 +208,7 @@ test('API: photo is validated, never stored or logged, and only sent to Claude',
   const leak = (s) => /data:image|base64|[A-Za-z0-9+/=]{200,}/.test(s);
   assert.ok(logged.length >= 1);
   for (const line of logged) assert.ok(!leak(line), line.slice(0, 120));
-  for (const t of (await db.raw("select name from sqlite_master where type = 'table'")).map((x) => x.name))
+  for (const t of await tableNames(db))
     for (const row of await db(t)) for (const [col, v] of Object.entries(row)) assert.ok(!(typeof v === 'string' && leak(v)), `${t}.${col}`);
 });
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDb } from '../src/db/index.js';
+import { testDb, tableNames } from './helpers/db.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 import { estimateSize } from '../src/size/size.js';
@@ -112,7 +112,7 @@ test('MediaPipe loads from an exact pinned CDN version', () => {
 
 // --- API and privacy
 process.env.ADMIN_TOKEN_SECRET = 'test-secret';
-const db = createDb({ databaseUrl: '', sqliteFile: ':memory:' });
+const db = testDb();
 const uploadDir = mkdtempSync(join(tmpdir(), 'smartfit-size-'));
 const weather = { temperature: 12, apparent_temperature: 10, raining: false, wind_speed: 4, source: 'live' };
 let server, base, storeId;
@@ -200,7 +200,7 @@ test('no image or base64 data reaches disk, the DB or the logs', async () => {
 
   const leak = (s) => /data:image|base64|[A-Za-z0-9+/=]{200,}/.test(s);
   for (const line of logged) assert.ok(!leak(line), `log line: ${line.slice(0, 120)}`);
-  const tables = (await db.raw("select name from sqlite_master where type = 'table'")).map((t) => t.name);
+  const tables = await tableNames(db);
   for (const t of tables) {
     for (const row of await db(t)) for (const [col, v] of Object.entries(row)) assert.ok(!(typeof v === 'string' && leak(v)), `${t}.${col}`);
   }

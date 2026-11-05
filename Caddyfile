@@ -1,0 +1,7 @@
+# HTTPS reverse proxy. DOMAIN=fit.example.uz → a Let's Encrypt certificate is issued and renewed automatically
+# (ports 80 and 443 must reach this server and the domain's A record must point here).
+# DOMAIN=localhost → Caddy's own local certificate, for a smoke test on this machine.
+{$DOMAIN:localhost} {
+	encode gzip
+	reverse_proxy app:3000
+}

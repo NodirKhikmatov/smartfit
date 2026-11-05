@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createDb } from '../src/db/index.js';
+import { testDb } from './helpers/db.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 import { createAdmin } from '../src/admin/routes.js';
 import { parseCsv } from '../src/admin/csv.js';
 
 process.env.ADMIN_TOKEN_SECRET = 'test-secret';
-const db = createDb({ databaseUrl: '', sqliteFile: ':memory:' });
+const db = testDb();
 let server, base, uploadDir, tashkent, samarkand, superToken, tashToken;
 
 const req = async (url, { token, method = 'GET', body, type = 'application/json' } = {}) => {
@@ -72,12 +72,12 @@ test('manager imports new products and updates stock by id', async () => {
   const tee = await db('products').where({ name: 'Import futbolka' }).first();
   assert.equal(tee.store_id, tashkent);
   assert.equal(tee.price, 129000);
-  assert.equal(tee.waterproof, 0);
+  assert.equal(Number(tee.waterproof), 0); // SQLite 0/1, Postgres boolean
   const teeStock = await db('product_stock').where({ product_id: tee.id }).orderBy('id');
   assert.deepEqual(teeStock.map((s) => [s.size, s.quantity]), [['XS', 0], ['S', 2], ['M', 3], ['L', 0], ['XL', 0], ['XXL', 0]]);
   const jacket = await db('products').where({ name: 'Kuzgi kurtka, yengil' }).first();
   assert.equal(jacket.discount_price, 399000);
-  assert.equal(jacket.waterproof, 1);
+  assert.equal(Number(jacket.waterproof), 1);
 
   // The update row only touched size 42; the rest of the product is unchanged.
   const after = await db('products').where({ id: existing.id }).first();

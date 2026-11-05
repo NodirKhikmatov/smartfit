@@ -1,12 +1,12 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDb } from '../src/db/index.js';
+import { json, testDb } from './helpers/db.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 import { filterCandidates, buildOutfits } from '../src/recommend/engine.js';
 import { createWeather, CACHE_MS } from '../src/recommend/weather.js';
 
-const db = createDb({ databaseUrl: '', sqliteFile: ':memory:' });
+const db = testDb();
 let server, base, tashkent;
 let fakeWeather = { temperature: 5, apparent_temperature: 2, raining: false, wind_speed: 3, source: 'live' };
 
@@ -83,7 +83,8 @@ test('weather picks the right categories: −10, 5, 15, 30 °C and rain', async 
     return r.outfits;
   };
   const coat = ['outerwear', 'top', 'bottom', 'shoes'];
-  for (const t of [-10, 5, 15]) for (const o of await run(t, false)) assert.deepEqual(cats(o).slice(0, 4), coat, `${t} °C`);
+  // Live weather is fractional; Postgres refused 11.7 against the integer columns before the cast in filterCandidates.
+  for (const t of [-10, 5, 5.5, 11.7, 15]) for (const o of await run(t, false)) assert.deepEqual(cats(o).slice(0, 4), coat, `${t} °C`);
   for (const o of await run(30, false)) {
     assert.ok(!cats(o).includes('outerwear'), 'no outerwear at 30 °C');
     assert.deepEqual(cats(o).slice(0, 3), ['top', 'bottom', 'shoes']);
@@ -260,8 +261,8 @@ test('POST /api/recommend validates input and writes recommendation_logs for sta
   assert.equal(log.source, 'rules');
   assert.equal(log.temperature, 15);
   assert.equal(log.budget, 5000000);
-  assert.deepEqual(JSON.parse(log.sizes), { top: 'M', bottom: 'M', shoes: '42' });
-  const logged = JSON.parse(log.product_ids);
+  assert.deepEqual(json(log.sizes), { top: 'M', bottom: 'M', shoes: '42' });
+  const logged = json(log.product_ids);
   assert.ok(logged.length > 0 && logged.every(Number.isInteger));
   assert.deepEqual(new Set(logged), new Set(res.body.outfits.flatMap(ids)));
 });

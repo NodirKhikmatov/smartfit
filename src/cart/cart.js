@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import { fail } from '../admin/routes.js';
 import { sizesFor } from '../db/seed.js';
 import { unitPrice } from '../recommend/engine.js';
+import { REC } from '../recommend/routes.js';
 
 export const HOLD_MS = 15 * 60 * 1000;
 const MAX_UNITS = 20; // shortcut: per-cart cap only; anyone can open many carts, add a per-IP limit in task 11 if holds get abused
@@ -217,7 +218,7 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
     next();
   });
 
-  // { token?, store_id, items: [{ product_id, size }] }: one item or a whole outfit, all or nothing.
+  // { token?, store_id, items: [{ product_id, size }], rec? }: one item or a whole outfit, all or nothing.
   // A missing or expired token opens a new cart.
   r.post('/items', async (req, res) => {
     const b = req.body ?? {};
@@ -240,6 +241,12 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
         if (!(await hold(trx, product_id, size, 1))) throw fail(409, `«${p.name}» (${size === 'ONE' ? 'yagona razmer' : size}) qolmadi`);
         await trx('cart_items').insert({ cart_id: cart.id, product_id, size, quantity: 1 })
           .onConflict(['cart_id', 'product_id', 'size']).merge({ quantity: trx.raw('?? + 1', ['cart_items.quantity']) });
+      }
+      // Pilot funnel: added from a results screen (`rec`) → that suggestion was accepted; the order inherits it.
+      const rec = typeof b.rec === 'string' && REC.test(b.rec) ? await trx('recommendation_logs').where({ token: b.rec, store_id: cart.store_id }).first('id', 'accepted_at') : null;
+      if (rec) {
+        if (!rec.accepted_at) await trx('recommendation_logs').where({ id: rec.id }).update({ accepted_at: iso(Date.now()) });
+        await trx('carts').where({ id: cart.id }).update({ recommendation_id: rec.id });
       }
       return cart;
     });
@@ -309,7 +316,7 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
         .orderBy('c.id').select('c.product_id', 'c.size', 'c.quantity', 'p.price', 'p.discount_price');
       if (!lines.length) throw fail(400, "Savat bo'sh");
       const t = totals(store, lines.reduce((s, l) => s + unitPrice(l) * l.quantity, 0), c.fulfillment);
-      const [{ id }] = await trx('orders').insert({ store_id: store.id, ...c, ...t, payment_method: method, notify_token: notifyToken, expires_at: iso(Date.now() + HOLD_MS) }).returning('id');
+      const [{ id }] = await trx('orders').insert({ store_id: store.id, ...c, ...t, payment_method: method, notify_token: notifyToken, recommendation_id: cart.recommendation_id, expires_at: iso(Date.now() + HOLD_MS) }).returning('id');
       await trx('order_items').insert(lines.map((l) => ({ order_id: id, product_id: l.product_id, size: l.size, quantity: l.quantity, unit_price: unitPrice(l) })));
       await trx('carts').where({ id: cart.id }).del(); // reserved stays: the order owns the hold now
       return id;

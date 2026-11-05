@@ -1,21 +1,26 @@
 import knex from 'knex';
+import pg from 'pg';
 import * as init from './migrations/001_init.js';
 import * as cart from './migrations/002_cart.js';
 import * as payments from './migrations/003_payments.js';
 import * as notify from './migrations/004_notify.js';
+import * as pilot from './migrations/005_pilot.js';
+
+// Postgres returns bigint (count(*), Telegram chat ids, Payme ms times) as strings; all of ours fit in a double.
+pg.types.setTypeParser(20, Number);
 
 // Migrations are listed in code so they load the same way from any cwd.
-const migrations = { '001_init': init, '002_cart': cart, '003_payments': payments, '004_notify': notify };
+const migrations = { '001_init': init, '002_cart': cart, '003_payments': payments, '004_notify': notify, '005_pilot': pilot };
 const migrationSource = {
   getMigrations: async () => Object.keys(migrations),
   getMigrationName: (name) => name,
   getMigration: async (name) => migrations[name],
 };
 
-// DATABASE_URL set → PostgreSQL (needs `pg`, added in task 11); otherwise SQLite.
-export function createDb({ databaseUrl = process.env.DATABASE_URL, sqliteFile = process.env.SQLITE_FILE || './smartfit.db' } = {}) {
+// DATABASE_URL set → PostgreSQL; otherwise SQLite. `pg` passes extra knex options (tests use searchPath + pool).
+export function createDb({ databaseUrl = process.env.DATABASE_URL, sqliteFile = process.env.SQLITE_FILE || './smartfit.db', pg = {} } = {}) {
   const common = { migrations: { migrationSource } };
-  if (databaseUrl) return knex({ ...common, client: 'pg', connection: databaseUrl });
+  if (databaseUrl) return knex({ ...common, client: 'pg', connection: databaseUrl, ...pg });
   return knex({
     ...common,
     client: 'better-sqlite3',

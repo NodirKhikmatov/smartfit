@@ -1,12 +1,20 @@
 import { port } from './config.js';
+import { installLogging } from './log.js';
 import { createDb } from './db/index.js';
 import { createApp } from './app.js';
 import { releaseExpired } from './cart/cart.js';
 import { startNotifications } from './notify/telegram.js';
 
+installLogging();
+process.on('unhandledRejection', (err) => console.error('unhandled rejection:', err));
+process.on('uncaughtException', (err) => {
+  console.error('uncaught exception:', err);
+  setTimeout(() => process.exit(1), 1000); // let the error webhook go out first
+});
+
 const db = createDb();
 await db.migrate.latest();
-createApp(db).listen(port, () => console.log(`Smart Fit: http://localhost:${port}/api`));
+createApp(db, { logRequests: true }).listen(port, () => console.log(`Smart Fit: http://localhost:${port}/api`));
 
 // Expired holds also come back without any cart traffic, so recommendations see the stock again.
 setInterval(() => releaseExpired(db).catch((err) => console.error('hold sweep failed:', err.message)), 60_000).unref();
