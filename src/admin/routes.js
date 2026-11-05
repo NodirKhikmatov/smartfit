@@ -1,5 +1,9 @@
 import express from 'express';
+import { randomBytes } from 'node:crypto';
+import { mkdir, writeFile, unlink } from 'node:fs/promises';
+import path from 'node:path';
 import { sizesFor } from '../db/seed.js';
+import { parseCsv } from './csv.js';
 import { hashPassword, verifyPassword, DUMMY_HASH, tokenSecret, signToken, verifyToken } from './auth.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
@@ -69,7 +73,37 @@ async function applyStock(trx, productId, entries) {
   }
 }
 
-export function createAdminRouter(db) {
+// CSV import: one row = one product, stock in one column per size. A filled `id` cell updates that product.
+const PRODUCT_COLS = ['name', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'shelf_location'];
+const SIZE_COLS = [...sizesFor('top'), ...sizesFor('shoes'), ...sizesFor('accessory')];
+const IMPORT_COLS = ['id', 'store_id', ...PRODUCT_COLS, ...SIZE_COLS];
+const TEXT_COLS = ['name', 'color', 'style', 'shelf_location'];
+const MAX_IMPORT_ROWS = 2000;
+const YES = ['1', 'true', 'ha', 'yes'], NO = ['0', 'false', "yo'q", 'yoq', 'no'];
+
+// Empty cell = empty value. Bad numbers stay strings so validProduct reports them with the field name.
+function importCell(col, raw) {
+  const v = raw.trim();
+  // Spreadsheet formula injection: a cell starting with these runs as a formula when the data is opened in Excel.
+  if (TEXT_COLS.includes(col) && /^[=+\-@]/.test(v)) throw fail(400, `${col}: = + - @ belgisi bilan boshlanmasin`);
+  if (v === '') return null;
+  if (TEXT_COLS.includes(col)) return v;
+  if (col === 'waterproof') return YES.includes(v.toLowerCase()) ? true : NO.includes(v.toLowerCase()) ? false : v;
+  if (col === 'category' || col === 'gender') return v.toLowerCase();
+  const n = Number(v.replace(/\s/g, ''));
+  return Number.isInteger(n) ? n : v;
+}
+
+const IMAGE_TYPES = [
+  ['jpg', (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
+  ['png', (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))],
+  ['webp', (b) => b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP'],
+];
+const STATS_TZ = 'Asia/Tashkent'; // every store is in Uzbekistan (UTC+5, no DST)
+const dayKey = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: STATS_TZ });
+
+export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
+  const imageDir = path.resolve(uploadDir, 'products');
   const secret = tokenSecret();
   // shortcut: per-process, per-IP lockout map; move to a shared store if we run several instances.
   const fails = new Map();
@@ -142,40 +176,47 @@ export function createAdminRouter(db) {
     res.json(p);
   });
 
-  r.post('/products', async (req, res) => {
-    const body = req.body ?? {};
+  // `storeId` undefined = not given. Super-admin must name an existing store; a manager may only name their own.
+  async function resolveStore(q, admin, storeId) {
+    if (admin.role !== 'super') {
+      if (storeId !== undefined && Number(storeId) !== admin.store_id) throw fail(403, "Boshqa do'konga ruxsat yo'q");
+      return admin.store_id;
+    }
+    const id = Number(storeId);
+    if (storeId === undefined || !Number.isInteger(id) || !(await q('stores').where({ id }).first())) throw fail(400, "Do'kon noto'g'ri");
+    return id;
+  }
+
+  async function insertProduct(trx, admin, body) {
     const product = validProduct(body);
     const stock = validStock(body.stock, product.category);
-    let storeId = req.admin.store_id;
-    if (req.admin.role === 'super') {
-      storeId = Number(body.store_id);
-      if (!Number.isInteger(storeId) || !(await db('stores').where({ id: storeId }).first())) throw fail(400, "Do'kon noto'g'ri");
-    } else if (body.store_id !== undefined && Number(body.store_id) !== storeId) {
-      throw fail(403, "Boshqa do'konga ruxsat yo'q");
-    }
-    const id = await db.transaction(async (trx) => {
-      const [{ id }] = await trx('products').insert({ ...product, store_id: storeId }).returning('id');
-      await trx('product_stock').insert(sizesFor(product.category).map((size) => ({ product_id: id, size, quantity: 0 })));
-      await applyStock(trx, id, stock);
-      return id;
-    });
-    const [p] = await withStock([await db('products').where({ id }).first()]);
-    res.status(201).json(p);
-  });
+    const storeId = await resolveStore(trx, admin, body.store_id);
+    const [{ id }] = await trx('products').insert({ ...product, store_id: storeId }).returning('id');
+    await trx('product_stock').insert(sizesFor(product.category).map((size) => ({ product_id: id, size, quantity: 0 })));
+    await applyStock(trx, id, stock);
+    return id;
+  }
 
-  // Partial edit: send only the fields to change, plus optional `stock`. store_id cannot change.
-  r.patch('/products/:id', async (req, res) => {
-    const existing = await findProduct(req);
-    const body = req.body ?? {};
+  // Partial edit: only the given fields change, plus optional `stock`. store_id cannot change.
+  async function updateProduct(trx, existing, body) {
     if (body.store_id !== undefined && Number(body.store_id) !== existing.store_id) throw fail(400, "Do'konni o'zgartirib bo'lmaydi");
     const product = validProduct({ ...existing, ...body });
     // Sizes depend on category group; switching group would orphan the stock rows.
     if (sizesFor(product.category) !== sizesFor(existing.category)) throw fail(400, "Bu kategoriyaga o'zgartirib bo'lmaydi (razmerlar boshqa)");
     const stock = validStock(body.stock, product.category);
-    await db.transaction(async (trx) => {
-      await trx('products').where({ id: existing.id }).update({ ...product, updated_at: trx.fn.now() });
-      await applyStock(trx, existing.id, stock);
-    });
+    await trx('products').where({ id: existing.id }).update({ ...product, updated_at: trx.fn.now() });
+    await applyStock(trx, existing.id, stock);
+  }
+
+  r.post('/products', async (req, res) => {
+    const id = await db.transaction((trx) => insertProduct(trx, req.admin, req.body ?? {}));
+    const [p] = await withStock([await db('products').where({ id }).first()]);
+    res.status(201).json(p);
+  });
+
+  r.patch('/products/:id', async (req, res) => {
+    const existing = await findProduct(req);
+    await db.transaction((trx) => updateProduct(trx, existing, req.body ?? {}));
     const [p] = await withStock([await db('products').where({ id: existing.id }).first()]);
     res.json(p);
   });
@@ -185,7 +226,141 @@ export function createAdminRouter(db) {
     if (await db('order_items').where({ product_id: p.id }).first()) throw fail(409, "Bu kiyim buyurtmalarda bor. O'chirish o'rniga qoldiqni 0 qiling");
     if (await db('product_stock').where({ product_id: p.id }).andWhere('reserved', '>', 0).first()) throw fail(409, "Bu kiyim savatlarda band. Keyinroq urining");
     await db('products').where({ id: p.id }).del();
+    await removeImage(p.image_url);
     res.status(204).end();
+  });
+
+  // Body is the raw CSV file. All-or-nothing: any bad row rolls back the whole import.
+  r.post('/products/import', express.text({ type: () => true, limit: '1mb' }), async (req, res) => {
+    if (typeof req.body !== 'string' || !req.body.trim()) throw fail(400, 'CSV fayl bo\'sh');
+    if (req.body.includes('\uFFFD')) throw fail(400, 'Faylni "CSV UTF-8" formatida saqlang');
+    let rows;
+    try {
+      rows = parseCsv(req.body);
+    } catch {
+      throw fail(400, 'CSV buzilgan: yopilmagan qo\'shtirnoq');
+    }
+    const header = rows.shift().map((h) => h.trim());
+    while (header.length && !header.at(-1)) header.pop(); // Excel often adds empty trailing columns
+    const cols = header.map((h) => IMPORT_COLS.find((c) => c.toLowerCase() === h.toLowerCase()));
+    const unknown = header.filter((h, i) => !cols[i]);
+    if (unknown.length) throw fail(400, `Noma'lum ustun: ${unknown.join(', ')}`);
+    if (new Set(cols).size !== cols.length) throw fail(400, 'Ustun nomi takrorlangan');
+    const data = rows.map((cells, i) => ({ line: i + 2, cells })).filter((r) => r.cells.some((c) => c.trim()));
+    if (!data.length) throw fail(400, "CSV faylda kiyim yo'q");
+    if (data.length > MAX_IMPORT_ROWS) throw fail(400, `Bir faylda ko'pi bilan ${MAX_IMPORT_ROWS} qator`);
+
+    const errors = [], seenIds = new Set();
+    let created = 0, updated = 0;
+    const rollback = new Error('import rollback');
+    try {
+      await db.transaction(async (trx) => {
+        for (const { line, cells } of data) {
+          try {
+            if (cells.slice(cols.length).some((c) => c.trim())) throw fail(400, 'Ustunlar soni sarlavhadan ko\'p');
+            const body = {}, stock = {};
+            let id, storeId;
+            cols.forEach((col, j) => {
+              const raw = cells[j] ?? '';
+              if (SIZE_COLS.includes(col)) {
+                if (raw.trim()) stock[col] = importCell('stock', raw);
+              } else if (col === 'id') id = raw.trim() || undefined;
+              else if (col === 'store_id') storeId = raw.trim() || undefined;
+              else body[col] = importCell(col, raw);
+            });
+            if (Object.keys(stock).length) body.stock = stock;
+            if (storeId !== undefined) body.store_id = storeId;
+            if (id === undefined) {
+              await insertProduct(trx, req.admin, body);
+              created++;
+            } else {
+              const n = Number(id);
+              const existing = Number.isInteger(n) ? await scoped(req.admin).transacting(trx).where({ id: n }).first() : undefined;
+              if (!existing) throw fail(400, `Kiyim topilmadi: id ${id}`);
+              if (seenIds.has(n)) throw fail(400, `id ${n} faylda takrorlangan`);
+              seenIds.add(n);
+              // Update rows: an empty cell keeps the current value, so a stock-only row needs just id + sizes.
+              await updateProduct(trx, existing, Object.fromEntries(Object.entries(body).filter(([, v]) => v !== null)));
+              updated++;
+            }
+          } catch (err) {
+            if (!err.publicMessage) throw err; // DB errors are bugs, not bad rows
+            errors.push({ line, error: err.publicMessage });
+          }
+        }
+        if (errors.length) throw rollback;
+      });
+    } catch (err) {
+      if (err !== rollback) throw err;
+      return res.status(400).json({ error: `${errors.length} ta qatorda xato. Hech narsa yuklanmadi`, errors: errors.slice(0, 100) });
+    }
+    res.json({ created, updated });
+  });
+
+  // Body is the raw image file. The type comes from its magic bytes, never from the client's header or name.
+  r.post('/products/:id/image', express.raw({ type: () => true, limit: '2mb' }), async (req, res) => {
+    const p = await findProduct(req);
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const ext = buf.length >= 12 && IMAGE_TYPES.find(([, is]) => is(buf))?.[0];
+    if (!ext) throw fail(400, 'Faqat JPEG, PNG yoki WebP rasm');
+    const file = `${p.id}-${randomBytes(8).toString('hex')}.${ext}`;
+    await mkdir(imageDir, { recursive: true });
+    await writeFile(path.join(imageDir, file), buf);
+    const image_url = `/uploads/products/${file}`;
+    await db('products').where({ id: p.id }).update({ image_url, updated_at: db.fn.now() });
+    await removeImage(p.image_url);
+    res.json({ image_url });
+  });
+
+  r.delete('/products/:id/image', async (req, res) => {
+    const p = await findProduct(req);
+    await db('products').where({ id: p.id }).update({ image_url: null, updated_at: db.fn.now() });
+    await removeImage(p.image_url);
+    res.status(204).end();
+  });
+
+  async function removeImage(url) {
+    if (!url?.startsWith('/uploads/products/')) return;
+    // The DB change already happened; a leftover file is only wasted disk, so log instead of failing the request.
+    await unlink(path.join(imageDir, path.basename(url))).catch((err) => err.code === 'ENOENT' || console.error(err));
+  }
+
+  // Recommendations per day (Tashkent time, zero-filled) and the most-suggested products.
+  r.get('/stats', async (req, res) => {
+    const days = Math.min(Math.max(Number.parseInt(req.query.days, 10) || 30, 1), 90);
+    const keys = Array.from({ length: days }, (_, i) => dayKey(Date.now() - (days - 1 - i) * 86400000));
+    const since = new Date(`${keys[0]}T00:00:00+05:00`).toISOString().replace('T', ' ').slice(0, 19) + '+00:00';
+    // shortcut: aggregates in JS over the raw rows; fine for pilot volume, move to SQL GROUP BY if logs reach ~100k/90 days.
+    const q = db('recommendation_logs').select('product_ids', 'created_at').where('created_at', '>=', since);
+    if (req.admin.role !== 'super') q.where('store_id', req.admin.store_id);
+    if (req.query.store_id) q.where('store_id', Number(req.query.store_id) || 0);
+    const perDay = Object.fromEntries(keys.map((k) => [k, 0]));
+    const counts = new Map();
+    for (const log of await q) {
+      // SQLite gives 'YYYY-MM-DD HH:MM:SS' (UTC) strings, Postgres gives Date objects.
+      const at = log.created_at instanceof Date ? log.created_at : new Date(`${String(log.created_at).replace(' ', 'T')}Z`);
+      const k = dayKey(at.getTime());
+      if (k in perDay) perDay[k]++;
+      let ids = log.product_ids;
+      try {
+        if (typeof ids === 'string') ids = JSON.parse(ids);
+      } catch {
+        ids = [];
+      }
+      for (const id of new Set(Array.isArray(ids) ? ids : [])) if (Number.isInteger(id)) counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    const top = [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, 10);
+    // Logged products may since have been deleted: they come back with name null.
+    const names = await scoped(req.admin).whereIn('id', top.map(([id]) => id)).select('id', 'name', 'category');
+    res.json({
+      days,
+      total: Object.values(perDay).reduce((a, b) => a + b, 0),
+      per_day: keys.map((day) => ({ day, count: perDay[day] })),
+      top: top.map(([product_id, count]) => {
+        const p = names.find((x) => x.id === product_id);
+        return { product_id, name: p?.name ?? null, category: p?.category ?? null, count };
+      }),
+    });
   });
 
   return r;

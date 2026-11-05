@@ -33,6 +33,13 @@
   .stock { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 8px; margin-top: 8px; }
   .stock input { width: 100%; }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  nav button[aria-current="page"] { background: var(--fg); color: #fff; border-color: var(--fg); }
+  .thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; vertical-align: middle; margin-right: 8px; }
+  #imgPreview { max-width: 160px; max-height: 160px; border-radius: 6px; display: block; margin: 8px 0; }
+  .bars td:last-child { width: 60%; }
+  .bar-fill { height: 14px; background: var(--accent); border-radius: 3px; min-width: 2px; }
+  code { font-size: 13px; background: var(--bg); padding: 2px 4px; border-radius: 4px; word-break: break-all; }
+  #importErrors { max-height: 240px; overflow: auto; font-size: 14px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -48,14 +55,19 @@
 <div id="app" hidden>
   <header>
     <h1>Smart Fit admin</h1>
+    <nav class="bar" style="margin:0">
+      <button id="tabProducts" aria-current="page">Kiyimlar</button>
+      <button id="tabStats">Statistika</button>
+    </nav>
     <span id="who" class="sizes"></span>
     <button id="logout">Chiqish</button>
   </header>
-  <main>
+  <main id="products">
     <div class="bar">
       <label class="grow">Qidiruv <input id="q" type="search" placeholder="Masalan: jinsi"></label>
       <label>Kategoriya <select id="cat"><option value="">Hammasi</option></select></label>
       <label id="storeFilterWrap">Do'kon <select id="storeFilter"><option value="">Hammasi</option></select></label>
+      <button id="importBtn">CSV yuklash</button>
       <button class="primary" id="add">Kiyim qo'shish</button>
     </div>
     <p class="error" id="listError" role="alert"></p>
@@ -66,7 +78,37 @@
       </table>
     </div>
   </main>
+  <main id="stats" hidden>
+    <div class="bar">
+      <label>Davr <select id="statsDays"><option value="7">7 kun</option><option value="30" selected>30 kun</option><option value="90">90 kun</option></select></label>
+      <label id="statsStoreWrap">Do'kon <select id="statsStore"><option value="">Hammasi</option></select></label>
+    </div>
+    <p class="error" id="statsError" role="alert"></p>
+    <p id="statsEmpty" hidden>Bu davrda hali tavsiya berilmagan. Mijozlar kioskdan foydalana boshlaganda bu yerda statistika paydo bo'ladi.</p>
+    <div id="statsBody">
+      <h2 id="statsTotal"></h2>
+      <h3>Eng ko'p taklif qilingan kiyimlar</h3>
+      <div class="scroll"><table><thead><tr><th>Kiyim</th><th>Kategoriya</th><th class="num">Necha marta</th></tr></thead><tbody id="topRows"></tbody></table></div>
+      <h3>Kunlik tavsiyalar soni</h3>
+      <div class="scroll"><table class="bars"><thead><tr><th>Kun</th><th class="num">Soni</th><th></th></tr></thead><tbody id="dayRows"></tbody></table></div>
+    </div>
+  </main>
 </div>
+
+<dialog id="importDlg">
+  <form id="importForm" method="dialog">
+    <h2>CSV fayldan yuklash</h2>
+    <p class="sizes">Birinchi qator — ustun nomlari. Har qator bitta kiyim; razmer ustunlariga soni yoziladi. <code>id</code> ustuni to'ldirilsa, o'sha kiyim yangilanadi, bo'sh bo'lsa yangisi qo'shiladi (bosh admin <code>store_id</code> ni ham yozadi). Yangilashda bo'sh katak eski qiymatni saqlaydi. Excel'da "CSV UTF-8" qilib saqlang.</p>
+    <p><code id="importCols"></code></p>
+    <label>CSV fayl <input name="file" type="file" accept=".csv,text/csv" required></label>
+    <p class="error" id="importError" role="alert"></p>
+    <ul id="importErrors" class="error"></ul>
+    <div class="actions">
+      <button type="button" id="importCancel">Yopish</button>
+      <button class="primary">Yuklash</button>
+    </div>
+  </form>
+</dialog>
 
 <dialog id="dlg">
   <form id="form" method="dialog">
@@ -86,6 +128,16 @@
       <label>Javondagi joyi <input name="shelf_location" maxlength="40"></label>
       <label id="storeWrap">Do'kon <select name="store_id"></select></label>
       <label><input name="waterproof" type="checkbox" style="display:inline;width:auto"> Suv o'tkazmaydi</label>
+    </div>
+    <div id="imgWrap">
+      <h3>Rasm</h3>
+      <img id="imgPreview" alt="" hidden>
+      <div class="bar">
+        <label class="grow">JPEG, PNG yoki WebP, 2 MB gacha <input id="imgFile" type="file" accept="image/jpeg,image/png,image/webp"></label>
+        <button type="button" id="imgUpload">Rasmni yuklash</button>
+        <button type="button" class="danger" id="imgRemove">Rasmni o'chirish</button>
+      </div>
+      <p class="error" id="imgError" role="alert"></p>
     </div>
     <h3>Razmerlar va soni</h3>
     <div class="stock" id="stock"></div>
@@ -112,12 +164,12 @@ function setToken(t) { try { t ? localStorage.setItem('sfToken', t) : localStora
 async function call(path, opts = {}) {
   const res = await fetch('/api/admin' + path, {
     method: opts.method || 'GET',
-    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token() },
-    body: opts.body && JSON.stringify(opts.body),
+    headers: { 'content-type': opts.type || 'application/json', authorization: 'Bearer ' + token() },
+    body: opts.raw ?? (opts.body && JSON.stringify(opts.body)),
   });
   if (res.status === 401 && path !== '/login') { setToken(null); show(); throw new Error('Qayta kiring'); }
   const data = res.status === 204 ? null : await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Xatolik yuz berdi, qayta urining');
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Xatolik yuz berdi, qayta urining'), { data });
   return data;
 }
 
@@ -134,8 +186,8 @@ async function show() {
   if (!me) return;
   stores = await call('/stores');
   $('who').textContent = me.email + (me.role === 'super' ? ' · bosh admin' : ' · ' + (stores[0]?.name || ''));
-  $('storeFilterWrap').hidden = $('storeWrap').hidden = me.role !== 'super';
-  for (const sel of [$('storeFilter'), $('form').store_id]) {
+  $('storeFilterWrap').hidden = $('storeWrap').hidden = $('statsStoreWrap').hidden = me.role !== 'super';
+  for (const sel of [$('storeFilter'), $('statsStore'), $('form').store_id]) {
     sel.replaceChildren(...(sel.id ? [el('option', { value: '', textContent: 'Hammasi' })] : []), ...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
   }
   load();
@@ -165,7 +217,7 @@ async function load() {
     $('listError').textContent = '';
     const storeName = (id) => stores.find((s) => s.id === id)?.name || id;
     $('rows').replaceChildren(...(list.length ? list.map((x) => el('tr', {},
-      el('td', { textContent: x.name }),
+      el('td', {}, ...(x.image_url ? [el('img', { className: 'thumb', src: x.image_url, alt: '' })] : []), x.name),
       el('td', { textContent: CATS[x.category] }),
       el('td', { textContent: storeName(x.store_id) }),
       el('td', { className: 'num', textContent: x.discount_price ? som(x.discount_price) + ' (' + som(x.price) + ')' : som(x.price) }),
@@ -200,6 +252,10 @@ function openForm(p) {
   f.store_id.value = p?.store_id ?? stores[0]?.id ?? '';
   f.store_id.disabled = !!p;
   renderStock(f.category.value, p?.stock);
+  $('imgWrap').hidden = !p;
+  $('imgError').textContent = '';
+  $('imgFile').value = '';
+  showImage(p?.image_url);
   $('dlg').showModal();
 }
 $('form').category.onchange = (e) => renderStock(e.target.value, editing?.stock);
@@ -224,6 +280,89 @@ $('form').addEventListener('submit', async (e) => {
     load();
   } catch (err) { $('formError').textContent = err.message; }
 });
+
+function showImage(url) {
+  $('imgPreview').hidden = !url;
+  $('imgRemove').hidden = !url;
+  if (url) $('imgPreview').src = url;
+}
+$('imgUpload').onclick = async () => {
+  const file = $('imgFile').files[0];
+  $('imgError').textContent = '';
+  if (!file) { $('imgError').textContent = 'Avval rasm faylini tanlang'; return; }
+  if (file.size > 2 * 1024 * 1024) { $('imgError').textContent = 'Rasm 2 MB dan katta. Kichikroq rasm tanlang'; return; }
+  try {
+    const r = await call('/products/' + editing.id + '/image', { method: 'POST', raw: file, type: file.type || 'application/octet-stream' });
+    editing.image_url = r.image_url;
+    showImage(r.image_url);
+    $('imgFile').value = '';
+    load();
+  } catch (err) { $('imgError').textContent = err.message; }
+};
+$('imgRemove').onclick = async () => {
+  try {
+    await call('/products/' + editing.id + '/image', { method: 'DELETE' });
+    editing.image_url = null;
+    showImage(null);
+    load();
+  } catch (err) { $('imgError').textContent = err.message; }
+};
+
+$('importCols').textContent = 'id, store_id, name, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, shelf_location, XS, S, M, L, XL, XXL, 36 … 45, ONE';
+$('importBtn').onclick = () => {
+  $('importForm').reset();
+  $('importError').textContent = '';
+  $('importErrors').replaceChildren();
+  $('importDlg').showModal();
+};
+$('importCancel').onclick = () => $('importDlg').close();
+$('importForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('importError').textContent = '';
+  $('importErrors').replaceChildren();
+  const file = e.target.file.files[0];
+  if (!file) return;
+  try {
+    const r = await call('/products/import', { method: 'POST', raw: await file.text(), type: 'text/csv' });
+    $('importError').textContent = '';
+    $('importErrors').replaceChildren(el('li', { style: 'color:var(--accent)', textContent: `Tayyor: ${r.created} ta qo'shildi, ${r.updated} ta yangilandi.` }));
+    load();
+  } catch (err) {
+    $('importError').textContent = err.message;
+    $('importErrors').replaceChildren(...(err.data?.errors || []).map((x) => el('li', { textContent: `${x.line}-qator: ${x.error}` })));
+  }
+});
+
+function tab(name) {
+  $('products').hidden = name !== 'products';
+  $('stats').hidden = name !== 'stats';
+  for (const [b, n] of [[$('tabProducts'), 'products'], [$('tabStats'), 'stats']]) n === name ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current');
+  if (name === 'stats') loadStats(); else load();
+}
+$('tabProducts').onclick = () => tab('products');
+$('tabStats').onclick = () => tab('stats');
+
+async function loadStats() {
+  const p = new URLSearchParams({ days: $('statsDays').value });
+  if ($('statsStore').value) p.set('store_id', $('statsStore').value);
+  try {
+    const s = await call('/stats?' + p);
+    $('statsError').textContent = '';
+    $('statsEmpty').hidden = s.total > 0;
+    $('statsBody').hidden = s.total === 0;
+    $('statsTotal').textContent = `${s.days} kunda ${s.total} ta tavsiya`;
+    $('topRows').replaceChildren(...s.top.map((t) => el('tr', {},
+      el('td', { textContent: t.name ?? `O'chirilgan kiyim (#${t.product_id})` }),
+      el('td', { textContent: CATS[t.category] || '—' }),
+      el('td', { className: 'num', textContent: t.count }))));
+    const max = Math.max(1, ...s.per_day.map((d) => d.count));
+    $('dayRows').replaceChildren(...s.per_day.slice().reverse().map((d) => el('tr', {},
+      el('td', { textContent: d.day }),
+      el('td', { className: 'num', textContent: d.count }),
+      el('td', {}, el('div', { className: 'bar-fill', style: `width:${(d.count / max) * 100}%` })))));
+  } catch (err) { $('statsError').textContent = err.message; }
+}
+$('statsDays').onchange = $('statsStore').onchange = loadStats;
 
 async function remove(p) {
   if (!confirm(`"${p.name}" o'chirilsinmi? Buni qaytarib bo'lmaydi.`)) return;
