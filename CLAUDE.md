@@ -1,6 +1,7 @@
 # Smart Fit — loyiha qoidalari
 
 - Kiosk orqali kiyim tavsiya qiluvchi tizim (kiyim do'konlari uchun). Full spec: `docs/SPEC.md`.
+- Node 22 is pinned in `.nvmrc`, but the shell defaults to Node 20. Prefix node/npm commands with `. ~/.nvm/nvm.sh && nvm use >/dev/null && `.
 - Stack: Node.js 22 + Express, PostgreSQL (dev: SQLite), vanilla JS frontend.
 - Interfeys tili: o'zbek (lotin). Kod va izohlar: ingliz.
 - ASOSIY QOIDA: faqat do'konda bor va qoldig'i > 0 kiyim taklif qilinadi va sotiladi.
