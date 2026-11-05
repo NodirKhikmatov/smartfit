@@ -14,7 +14,7 @@
 The build is split into tasks in `TASKS.md`. Each task runs in its own Claude Code session. Do only the task you were given, and don't start the next one.
 
 Every session follows this cycle:
-1. **Plan**: read `TASKS.md`, `docs/SPEC.md` and the existing code. Present a plan and **wait for the user's approval** before writing any code.
+1. **Plan**: read `TASKS.md`, `docs/SPEC.md` and the existing code, then write a short plan and carry on. **Don't ask the user anything.** Pick sensible defaults and record each decision in the task's Notes line. If something truly needs the user (credentials, a paid account, a real device), skip that part and record it in Notes.
 2. **Code**: implement the approved plan.
 3. **Test**: `npm test` must pass. Every "done when" check of the task has a test, or a written note for a manual check.
 4. **Review**: review this task's changes for bugs and security issues, and fix what you find.
