@@ -40,7 +40,7 @@ export const CATALOGUE = [
   ['Kepka', 'accessory', 'unisex', 'qora', 'sport', 85000, 70000, 18, 40, false],
 ];
 
-const sizesFor = (category) => (category === 'shoes' ? SHOES : category === 'accessory' ? ONE : CLOTHES);
+export const sizesFor = (category) => (category === 'shoes' ? SHOES : category === 'accessory' ? ONE : CLOTHES);
 
 // Deterministic stock 0–5 per size, so some sizes are sold out (exercises the stock > 0 rule).
 const stockFor = (item, size, storeIdx, sizeCount) => (sizeCount === 1 ? 5 : (item * 7 + size * 5 + storeIdx * 3) % 6);

@@ -14,10 +14,12 @@ Done when:
 
 Notes: Knex + better-sqlite3 (`src/db`); setting `DATABASE_URL` switches to Postgres (`pg` gets installed in task 11; not run against Postgres yet). The server auto-migrates on start, and `npm run seed` wipes the DB and reseeds it (it refuses when NODE_ENV=production). DB CHECKs: `0 ≤ reserved ≤ quantity`, `discount < price`, `total = subtotal + delivery_fee`, plus enums. Order statuses are stored as codes new/packing/shipping/delivered/cancelled, and the UI maps them to Uzbek. Products have a `style` column (task 7). Sizes: XS–XXL for clothes, 36–45 for shoes, `ONE` for accessories; seed stock is fixed, not random. SQLite returns booleans as 0/1. Not done yet: `cart_items` and reservation rows (task 8), admins (task 2). Product delete in task 2 must handle the FK from `order_items`. The JSON body limit is 100kb.
 
-## [ ] 2. Admin: auth + products + stock (stage 2, part)
+## [x] 2. Admin: auth + products + stock (stage 2, part)
 `/admin`: email + password login (scrypt) with a 12h token. Super-admin sees all stores; a store manager sees only their own. Product list with search and category filter, plus add, edit and delete. Size table (XS–XXL or 36–45) with stock counts.
 Done when:
 - There is a test that a store manager cannot read or change another store's products.
+
+Notes: API under `/api/admin` (login, me, stores, products GET/POST/PATCH/DELETE), page at `/admin` (`public/admin/index.html`, vanilla JS, token in localStorage). Token = HMAC-SHA256-signed `{sub, exp}` (no JWT dependency), secret `ADMIN_TOKEN_SECRET` in `.env` (random per process in dev if unset, required in production); role and store are re-read from the DB on each request, so a deleted admin loses access at once. Passwords: scrypt with a 16-byte salt. No signup: create admins with `npm run admin:create -- <email> [store_id]` (no store_id = super-admin; password from `ADMIN_PASSWORD` or stdin). A manager gets 404 for another store's product and 403 when creating in another store. Stock is sent as `{ "M": 3 }` with create/PATCH; sizes follow the category (`sizesFor` in seed.js), and switching to a category with a different size group is refused. Stock can't drop below `reserved`; delete is refused (409) when the product is in order_items or held in carts, so the admin sets stock to 0 instead. Login locks an IP for 15 min after 10 failures (in-memory) — task 11 must set Express `trust proxy` behind a reverse proxy or every client shares one IP. Task 3: stats must cope with deleted product IDs in recommendation_logs. Manual: add + search checked in the browser.
 
 ## [ ] 3. Admin: CSV import, images, stats (stage 2, part)
 CSV import of products and stock, image upload, and a stats page (recommendations per day, most-suggested items).

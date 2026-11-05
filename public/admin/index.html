@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Fit — Admin</title>
+<style>
+  :root { --bg: #f6f6f4; --fg: #1d1d1b; --muted: #6b6b66; --line: #dcdcd6; --accent: #1f5f4a; --danger: #a33; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  header { display: flex; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); background: #fff; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  label { display: block; font-size: 13px; color: var(--muted); }
+  input, select, button { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--fg); }
+  label input, label select { display: block; width: 100%; margin-top: 4px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.danger { color: var(--danger); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: end; }
+  .bar .grow { flex: 1; min-width: 180px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 13px; color: var(--muted); font-weight: 500; }
+  .scroll { overflow-x: auto; }
+  .num { text-align: right; white-space: nowrap; }
+  .sizes { font-size: 13px; color: var(--muted); }
+  .error { color: var(--danger); min-height: 1.4em; }
+  #login { max-width: 340px; margin: 10vh auto; background: #fff; padding: 24px; border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 12px; }
+  dialog { border: 1px solid var(--line); border-radius: 8px; max-width: 640px; width: calc(100% - 32px); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+  .stock { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 8px; margin-top: 8px; }
+  .stock input { width: 100%; }
+  .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<form id="login" hidden>
+  <h1>Smart Fit admin</h1>
+  <label>Email <input name="email" type="email" autocomplete="username" required></label>
+  <label>Parol <input name="password" type="password" autocomplete="current-password" required></label>
+  <p class="error" id="loginError" role="alert"></p>
+  <button class="primary">Kirish</button>
+</form>
+
+<div id="app" hidden>
+  <header>
+    <h1>Smart Fit admin</h1>
+    <span id="who" class="sizes"></span>
+    <button id="logout">Chiqish</button>
+  </header>
+  <main>
+    <div class="bar">
+      <label class="grow">Qidiruv <input id="q" type="search" placeholder="Masalan: jinsi"></label>
+      <label>Kategoriya <select id="cat"><option value="">Hammasi</option></select></label>
+      <label id="storeFilterWrap">Do'kon <select id="storeFilter"><option value="">Hammasi</option></select></label>
+      <button class="primary" id="add">Kiyim qo'shish</button>
+    </div>
+    <p class="error" id="listError" role="alert"></p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Nomi</th><th>Kategoriya</th><th>Do'kon</th><th class="num">Narxi, so'm</th><th>Qoldiq (razmer: soni)</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<dialog id="dlg">
+  <form id="form" method="dialog">
+    <h2 id="formTitle"></h2>
+    <div class="grid">
+      <label>Nomi <input name="name" required maxlength="120"></label>
+      <label>Kategoriya <select name="category" required></select></label>
+      <label>Jins <select name="gender" required>
+        <option value="unisex">Uniseks</option><option value="male">Erkak</option><option value="female">Ayol</option>
+      </select></label>
+      <label>Rangi <input name="color" required maxlength="40"></label>
+      <label>Uslubi <input name="style" maxlength="40"></label>
+      <label>Narxi, so'm <input name="price" type="number" min="1" step="1" required></label>
+      <label>Chegirmali narx <input name="discount_price" type="number" min="1" step="1"></label>
+      <label>Min harorat, °C <input name="temp_min" type="number" step="1" required></label>
+      <label>Max harorat, °C <input name="temp_max" type="number" step="1" required></label>
+      <label>Javondagi joyi <input name="shelf_location" maxlength="40"></label>
+      <label id="storeWrap">Do'kon <select name="store_id"></select></label>
+      <label><input name="waterproof" type="checkbox" style="display:inline;width:auto"> Suv o'tkazmaydi</label>
+    </div>
+    <h3>Razmerlar va soni</h3>
+    <div class="stock" id="stock"></div>
+    <p class="error" id="formError" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="cancel">Bekor qilish</button>
+      <button class="primary" id="save">Saqlash</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const CATS = { outerwear: 'Ustki kiyim', top: 'Ustki (top)', bottom: 'Shim / yubka', shoes: 'Poyabzal', accessory: 'Aksessuar' };
+const SIZES = { shoes: ['36','37','38','39','40','41','42','43','44','45'], accessory: ['ONE'] };
+const sizesFor = (c) => SIZES[c] || ['XS','S','M','L','XL','XXL'];
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+const som = (n) => n.toLocaleString('ru-RU').replace(/ /g, ' ');
+let me = null, stores = [], editing = null;
+
+function token() { try { return localStorage.getItem('sfToken'); } catch { return null; } }
+function setToken(t) { try { t ? localStorage.setItem('sfToken', t) : localStorage.removeItem('sfToken'); } catch {} }
+
+async function call(path, opts = {}) {
+  const res = await fetch('/api/admin' + path, {
+    method: opts.method || 'GET',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token() },
+    body: opts.body && JSON.stringify(opts.body),
+  });
+  if (res.status === 401 && path !== '/login') { setToken(null); show(); throw new Error('Qayta kiring'); }
+  const data = res.status === 204 ? null : await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Xatolik yuz berdi, qayta urining');
+  return data;
+}
+
+for (const [v, t] of Object.entries(CATS)) {
+  $('cat').append(el('option', { value: v, textContent: t }));
+  $('form').category.append(el('option', { value: v, textContent: t }));
+}
+
+async function show() {
+  me = null;
+  if (token()) { try { me = await call('/me'); } catch {} }
+  $('login').hidden = !!me;
+  $('app').hidden = !me;
+  if (!me) return;
+  stores = await call('/stores');
+  $('who').textContent = me.email + (me.role === 'super' ? ' · bosh admin' : ' · ' + (stores[0]?.name || ''));
+  $('storeFilterWrap').hidden = $('storeWrap').hidden = me.role !== 'super';
+  for (const sel of [$('storeFilter'), $('form').store_id]) {
+    sel.replaceChildren(...(sel.id ? [el('option', { value: '', textContent: 'Hammasi' })] : []), ...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
+  }
+  load();
+}
+
+$('login').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('loginError').textContent = '';
+  try {
+    const f = e.target;
+    const r = await call('/login', { method: 'POST', body: { email: f.email.value, password: f.password.value } });
+    setToken(r.token);
+    f.password.value = '';
+    show();
+  } catch (err) { $('loginError').textContent = err.message; }
+});
+$('logout').onclick = () => { setToken(null); show(); };
+
+let timer;
+async function load() {
+  const p = new URLSearchParams();
+  if ($('q').value.trim()) p.set('q', $('q').value.trim());
+  if ($('cat').value) p.set('category', $('cat').value);
+  if ($('storeFilter').value) p.set('store_id', $('storeFilter').value);
+  try {
+    const list = await call('/products?' + p);
+    $('listError').textContent = '';
+    const storeName = (id) => stores.find((s) => s.id === id)?.name || id;
+    $('rows').replaceChildren(...(list.length ? list.map((x) => el('tr', {},
+      el('td', { textContent: x.name }),
+      el('td', { textContent: CATS[x.category] }),
+      el('td', { textContent: storeName(x.store_id) }),
+      el('td', { className: 'num', textContent: x.discount_price ? som(x.discount_price) + ' (' + som(x.price) + ')' : som(x.price) }),
+      el('td', { className: 'sizes', textContent: x.stock.map((s) => s.size + ': ' + s.quantity).join(', ') }),
+      el('td', { className: 'num' },
+        el('button', { textContent: 'Tahrirlash', onclick: () => openForm(x) }), ' ',
+        el('button', { className: 'danger', textContent: "O'chirish", onclick: () => remove(x) })),
+    )) : [el('tr', {}, el('td', { colSpan: 6, textContent: 'Hech narsa topilmadi. Qidiruvni o\'zgartiring yoki yangi kiyim qo\'shing.' }))]));
+  } catch (err) { $('listError').textContent = err.message; }
+}
+$('q').oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
+$('cat').onchange = $('storeFilter').onchange = load;
+
+function renderStock(category, stock = []) {
+  $('stock').replaceChildren(...sizesFor(category).map((size) => {
+    const row = stock.find((s) => s.size === size);
+    const input = el('input', { type: 'number', min: row?.reserved || 0, step: 1, value: row?.quantity ?? 0 });
+    input.dataset.size = size;
+    return el('label', { textContent: size }, input);
+  }));
+}
+
+function openForm(p) {
+  editing = p;
+  const f = $('form');
+  f.reset();
+  $('formError').textContent = '';
+  $('formTitle').textContent = p ? 'Kiyimni tahrirlash' : "Yangi kiyim";
+  for (const k of ['name', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'shelf_location']) f[k].value = p?.[k] ?? '';
+  if (!p) { f.category.value = 'top'; f.gender.value = 'unisex'; }
+  f.waterproof.checked = !!p?.waterproof;
+  f.store_id.value = p?.store_id ?? stores[0]?.id ?? '';
+  f.store_id.disabled = !!p;
+  renderStock(f.category.value, p?.stock);
+  $('dlg').showModal();
+}
+$('form').category.onchange = (e) => renderStock(e.target.value, editing?.stock);
+$('add').onclick = () => openForm(null);
+$('cancel').onclick = () => $('dlg').close();
+
+$('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const num = (v) => (v === '' ? null : Number(v));
+  const body = {
+    name: f.name.value, category: f.category.value, gender: f.gender.value, color: f.color.value,
+    style: f.style.value || null, price: num(f.price.value), discount_price: num(f.discount_price.value),
+    temp_min: num(f.temp_min.value), temp_max: num(f.temp_max.value), waterproof: f.waterproof.checked,
+    shelf_location: f.shelf_location.value || null,
+    stock: Object.fromEntries([...$('stock').querySelectorAll('input')].map((i) => [i.dataset.size, num(i.value) ?? 0])),
+  };
+  if (!editing && me.role === 'super') body.store_id = Number(f.store_id.value);
+  try {
+    await call(editing ? '/products/' + editing.id : '/products', { method: editing ? 'PATCH' : 'POST', body });
+    $('dlg').close();
+    load();
+  } catch (err) { $('formError').textContent = err.message; }
+});
+
+async function remove(p) {
+  if (!confirm(`"${p.name}" o'chirilsinmi? Buni qaytarib bo'lmaydi.`)) return;
+  try { await call('/products/' + p.id, { method: 'DELETE' }); load(); }
+  catch (err) { $('listError').textContent = err.message; }
+}
+
+show();
+</script>
+</body>
+</html>
