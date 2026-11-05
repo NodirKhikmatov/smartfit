@@ -73,16 +73,45 @@ export async function cancelPending(trx, orderId, now = Date.now(), { expiredOnl
   return true;
 }
 
-// The provider took the money back (Payme cancel after perform): the stock returns to the shelf.
-// Refused once the order has left the store (shipping/delivered).
-export async function refundPaid(trx, orderId) {
+// A paid order is cancelled before it left the store: its stock returns to the shelf. The status UPDATE claims the
+// order, so the stock comes back exactly once. payment_status stays 'paid' until the money is refunded.
+async function cancelPaid(trx, orderId) {
   const n = await trx('orders').where({ id: orderId, payment_status: 'paid' }).whereIn('status', ['new', 'packing'])
-    .update({ payment_status: 'cancelled', status: 'cancelled', updated_at: trx.fn.now() });
+    .update({ status: 'cancelled', updated_at: trx.fn.now() });
   if (!n) return false;
   for (const i of await trx('order_items').where({ order_id: orderId })) {
     await trx('product_stock').where({ product_id: i.product_id, size: i.size }).increment('quantity', i.quantity);
   }
   return true;
+}
+
+// The provider took the money back (Payme cancel after perform). Works whether or not a manager already cancelled
+// the order (then the stock is already back); refused once the order has left the store (shipping/delivered).
+export async function refundPaid(trx, orderId) {
+  await cancelPaid(trx, orderId);
+  return (await trx('orders').where({ id: orderId, payment_status: 'paid', status: 'cancelled' })
+    .update({ payment_status: 'cancelled', updated_at: trx.fn.now() })) === 1;
+}
+
+// Order flow: new → packing → shipping → delivered, or cancelled. Pickup goes packing → delivered (handed over).
+// Work starts only after payment; an unpaid order can only be cancelled. Nothing leaves shipping except delivered.
+export function nextStatuses(o) {
+  if (o.payment_status === 'pending') return o.status === 'new' ? ['cancelled'] : [];
+  if (o.payment_status !== 'paid') return [];
+  if (o.status === 'new') return ['packing', 'cancelled'];
+  if (o.status === 'packing') return [o.fulfillment === 'delivery' ? 'shipping' : 'delivered', 'cancelled'];
+  if (o.status === 'shipping') return ['delivered'];
+  return [];
+}
+
+// Each step is a conditional UPDATE on the status read here, so two staff clicking at once can't both move it.
+export function changeStatus(db, orderId, to) {
+  return db.transaction(async (trx) => {
+    const o = await trx('orders').where({ id: orderId }).first();
+    if (!nextStatuses(o).includes(to)) return false;
+    if (to === 'cancelled') return o.payment_status === 'pending' ? cancelPending(trx, o.id) : cancelPaid(trx, o.id);
+    return (await trx('orders').where({ id: o.id, status: o.status, payment_status: 'paid' }).update({ status: to, updated_at: trx.fn.now() })) === 1;
+  });
 }
 
 // Paid → stock leaves the shelf: quantity and reserved both drop. Only a pending, unexpired order can be paid, exactly once.
@@ -100,7 +129,8 @@ export async function markPaid(db, orderId, now = Date.now()) {
   });
 }
 
-const stamp = (v) => (v == null ? null : new Date(v).toISOString());
+// SQLite CURRENT_TIMESTAMP is 'YYYY-MM-DD HH:MM:SS' in UTC, which Date would read as local time.
+export const stamp = (v) => (v == null ? null : new Date(typeof v === 'string' && !v.includes('T') ? `${v.replace(' ', 'T')}Z` : v).toISOString());
 const storeOf = (db, id) => db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold');
 
 // Prices always come from the products table, never from the request.
@@ -178,7 +208,8 @@ function parseItems(items) {
 }
 
 // Public, keyed by an unguessable cart token. The token is the customer's only handle on the cart.
-export function createCartRouter(db, { methods = CASHIER } = {}) {
+// `link(notifyToken)` → how the customer subscribes to order messages ({ url, svg } for Telegram), or null when off.
+export function createCartRouter(db, { methods = CASHIER, link = () => null } = {}) {
   const r = express.Router();
   const view = (cart) => cartView(db, cart, Object.keys(methods));
   r.use(async (req, res, next) => {
@@ -269,6 +300,7 @@ export function createCartRouter(db, { methods = CASHIER } = {}) {
     const b = req.body ?? {};
     const method = b.payment ?? 'cashier';
     if (typeof method !== 'string' || !Object.hasOwn(methods, method)) throw fail(400, "To'lov usuli noto'g'ri");
+    const notifyToken = randomBytes(16).toString('hex');
     const id = await db.transaction(async (trx) => {
       const cart = await liveCart(trx, req.params.token);
       const store = await storeOf(trx, cart.store_id);
@@ -277,13 +309,13 @@ export function createCartRouter(db, { methods = CASHIER } = {}) {
         .orderBy('c.id').select('c.product_id', 'c.size', 'c.quantity', 'p.price', 'p.discount_price');
       if (!lines.length) throw fail(400, "Savat bo'sh");
       const t = totals(store, lines.reduce((s, l) => s + unitPrice(l) * l.quantity, 0), c.fulfillment);
-      const [{ id }] = await trx('orders').insert({ store_id: store.id, ...c, ...t, payment_method: method, expires_at: iso(Date.now() + HOLD_MS) }).returning('id');
+      const [{ id }] = await trx('orders').insert({ store_id: store.id, ...c, ...t, payment_method: method, notify_token: notifyToken, expires_at: iso(Date.now() + HOLD_MS) }).returning('id');
       await trx('order_items').insert(lines.map((l) => ({ order_id: id, product_id: l.product_id, size: l.size, quantity: l.quantity, unit_price: unitPrice(l) })));
       await trx('carts').where({ id: cart.id }).del(); // reserved stays: the order owns the hold now
       return id;
     });
     const order = await orderView(db, await db('orders').where({ id }).first());
-    res.status(201).json({ order, payment: await methods[method](order) });
+    res.status(201).json({ order, payment: await methods[method](order), notify: link(notifyToken) });
   });
 
   return r;

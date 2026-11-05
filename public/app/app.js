@@ -488,7 +488,7 @@ checkout.addEventListener('submit', async (e) => {
     });
     setCart(null);
     clearCheckout();
-    showDone(r.order, r.payment);
+    showDone(r.order, r.payment, r.notify);
   } catch (err) {
     if (err.status === 404) return cartAction(() => Promise.reject(err));
     $('checkoutError').textContent = err.message;
@@ -497,7 +497,7 @@ checkout.addEventListener('submit', async (e) => {
   }
 });
 
-function showDone(o, pay = { method: 'cashier' }) {
+function showDone(o, pay = { method: 'cashier' }, notify = null) {
   const online = pay.url && /^https:\/\//.test(pay.url);
   $('orderNo').textContent = `№ ${o.id}`;
   $('doneBody').replaceChildren(
@@ -508,8 +508,18 @@ function showDone(o, pay = { method: 'cashier' }) {
     el('p', { className: 'notice', textContent: `${online ? `${PAY[pay.method]} orqali to'lang` : 'Kassaga boring va buyurtma raqamini ayting'}. ${hhmm(o.expires_at)} gacha to'lanmasa, buyurtma bekor bo'ladi.` }),
     ...(online ? [el('a', { className: 'button primary wide', href: pay.url, rel: 'noopener', textContent: `${PAY[pay.method]} orqali to'lash` })] : []),
     el('p', { textContent: o.fulfillment === 'pickup' ? "To'lovdan keyin xodim kiyimlarni tayyorlab beradi." : `To'lovdan keyin kuryer ${o.phone} raqamiga qo'ng'iroq qiladi.` }),
+    ...(notify ? [telegramBlock(notify)] : []),
   );
   show('done');
+}
+// Order status by Telegram: the phone opens the bot link; the kiosk shows it as a QR to scan with the customer's phone.
+// The SVG is built by our server from our own t.me link.
+function telegramBlock(n) {
+  if (!/^https:\/\/t\.me\//.test(n.url)) return el('div');
+  if (!kiosk) return el('a', { className: 'button wide', href: n.url, rel: 'noopener', textContent: "Holatini Telegram'da kuzatish" });
+  const qr = el('div', { className: 'tgqr' });
+  qr.innerHTML = n.svg;
+  return el('div', { className: 'notice' }, el('p', { textContent: "Buyurtma holatini Telegram'da bilish uchun telefoningiz bilan skanerlang va «Start» ni bosing." }), qr);
 }
 $('doneHome').onclick = () => reset();
 

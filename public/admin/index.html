@@ -8,7 +8,7 @@
   :root { --bg: #f6f6f4; --fg: #1d1d1b; --muted: #6b6b66; --line: #dcdcd6; --accent: #1f5f4a; --danger: #a33; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 15px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
-  header { display: flex; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); background: #fff; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); background: #fff; }
   header h1 { font-size: 18px; margin: 0; flex: 1; }
   main { max-width: 1100px; margin: 0 auto; padding: 16px; }
   label { display: block; font-size: 13px; color: var(--muted); }
@@ -40,6 +40,12 @@
   .bar-fill { height: 14px; background: var(--accent); border-radius: 3px; min-width: 2px; }
   code { font-size: 13px; background: var(--bg); padding: 2px 4px; border-radius: 4px; word-break: break-all; }
   #importErrors { max-height: 240px; overflow: auto; font-size: 14px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 13px; background: var(--bg); border: 1px solid var(--line); white-space: nowrap; }
+  .badge.new { background: #fff4d6; border-color: #e8cf83; }
+  .badge.done { background: #e3f1ea; border-color: #9cc9b2; }
+  .badge.off { color: var(--muted); }
+  #orderRows tr { cursor: pointer; }
+  #orderRows tr:hover { background: var(--bg); }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -57,6 +63,7 @@
     <h1>Smart Fit admin</h1>
     <nav class="bar" style="margin:0">
       <button id="tabProducts" aria-current="page">Kiyimlar</button>
+      <button id="tabOrders">Buyurtmalar</button>
       <button id="tabStats">Statistika</button>
     </nav>
     <button id="payBtn">Kassa</button>
@@ -77,6 +84,20 @@
       <table>
         <thead><tr><th>Nomi</th><th>Kategoriya</th><th>Do'kon</th><th class="num">Narxi, so'm</th><th>Qoldiq (razmer: soni)</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </main>
+  <main id="orders" hidden>
+    <div class="bar">
+      <label>Holati <select id="ordersStatus"><option value="">Hammasi</option></select></label>
+      <label id="ordersStoreWrap">Do'kon <select id="ordersStore"><option value="">Hammasi</option></select></label>
+      <button id="ordersReload">Yangilash</button>
+    </div>
+    <p class="error" id="ordersError" role="alert"></p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>№</th><th>Vaqti</th><th>Mijoz</th><th>Olish usuli</th><th class="num">Jami, so'm</th><th>To'lov</th><th>Holati</th><th>Telegram</th></tr></thead>
+        <tbody id="orderRows"></tbody>
       </table>
     </div>
   </main>
@@ -103,6 +124,13 @@
   <table><tbody id="qrRows"></tbody></table>
   <p class="error" id="qrError" role="alert"></p>
   <div class="actions"><button type="button" id="qrClose">Yopish</button></div>
+</dialog>
+
+<dialog id="orderDlg">
+  <h2 id="orderTitle"></h2>
+  <div id="orderInfo"></div>
+  <p class="error" id="orderError" role="alert"></p>
+  <div class="actions" id="orderActions"></div>
 </dialog>
 
 <dialog id="payDlg">
@@ -207,8 +235,8 @@ async function show() {
   if (!me) return;
   stores = await call('/stores');
   $('who').textContent = me.email + (me.role === 'super' ? ' · bosh admin' : ' · ' + (stores[0]?.name || ''));
-  $('storeFilterWrap').hidden = $('storeWrap').hidden = $('statsStoreWrap').hidden = me.role !== 'super';
-  for (const sel of [$('storeFilter'), $('statsStore'), $('form').store_id]) {
+  $('storeFilterWrap').hidden = $('storeWrap').hidden = $('statsStoreWrap').hidden = $('ordersStoreWrap').hidden = me.role !== 'super';
+  for (const sel of [$('storeFilter'), $('statsStore'), $('ordersStore'), $('form').store_id]) {
     sel.replaceChildren(...(sel.id ? [el('option', { value: '', textContent: 'Hammasi' })] : []), ...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
   }
   load();
@@ -354,13 +382,17 @@ $('importForm').addEventListener('submit', async (e) => {
   }
 });
 
+const TABS = { products: () => load(), orders: () => loadOrders(), stats: () => loadStats() };
 function tab(name) {
-  $('products').hidden = name !== 'products';
-  $('stats').hidden = name !== 'stats';
-  for (const [b, n] of [[$('tabProducts'), 'products'], [$('tabStats'), 'stats']]) n === name ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current');
-  if (name === 'stats') loadStats(); else load();
+  for (const n of Object.keys(TABS)) {
+    $(n).hidden = n !== name;
+    const b = $('tab' + n[0].toUpperCase() + n.slice(1));
+    n === name ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current');
+  }
+  TABS[name]();
 }
 $('tabProducts').onclick = () => tab('products');
+$('tabOrders').onclick = () => tab('orders');
 $('tabStats').onclick = () => tab('stats');
 
 async function loadStats() {
@@ -400,14 +432,17 @@ $('payClose').onclick = () => $('payDlg').close();
 function renderPay(o) {
   payOrder = o;
   $('payConfirm').hidden = o.payment_status !== 'pending';
+  $('payOrder').replaceChildren(...orderInfo(o));
+}
+function orderInfo(o) {
   const until = o.expires_at ? ` · ${new Date(o.expires_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} gacha` : '';
-  $('payOrder').replaceChildren(
+  return [
     el('p', { textContent: `№ ${o.id} · ${o.customer_name} · ${o.phone} · ${o.fulfillment === 'pickup' ? "do'kondan olib ketadi" : 'yetkazish: ' + o.address}` }),
     el('div', { className: 'scroll' }, el('table', {}, el('tbody', {}, ...o.items.map((i) => el('tr', {},
       el('td', { textContent: i.name }), el('td', { textContent: i.size }), el('td', { textContent: i.shelf_location || '' }),
       el('td', { className: 'num', textContent: `${i.quantity} × ${som(i.unit_price)}` })))))),
     el('p', {}, el('strong', { textContent: `Jami: ${som(o.total)} so'm` }), ` (shundan yetkazish ${som(o.delivery_fee)}) · ${PAY[o.payment_status]}${o.payment_status === 'pending' ? until : ''}`),
-  );
+  ];
 }
 $('payFind').onsubmit = async (e) => {
   e.preventDefault();
@@ -432,6 +467,66 @@ $('payConfirm').onclick = async () => {
     $('payConfirm').disabled = false;
   }
 };
+
+// Orders: list with filters, details with one button per allowed next status (the server decides which).
+const STATUS = { new: 'Yangi', packing: "Yig'ilmoqda", shipping: "Yo'lda", delivered: 'Yetkazildi', cancelled: 'Bekor qilindi' };
+const statusName = (o) => (o.status === 'delivered' && o.fulfillment === 'pickup' ? 'Topshirildi' : STATUS[o.status]);
+const STEP = { packing: "Yig'ishni boshlash", shipping: "Yo'lga chiqarish", delivered: (o) => (o.fulfillment === 'pickup' ? 'Mijozga topshirildi' : 'Yetkazildi'), cancelled: 'Bekor qilish' };
+const badge = (o) => el('span', { className: 'badge ' + (o.status === 'new' ? 'new' : o.status === 'delivered' ? 'done' : o.status === 'cancelled' ? 'off' : ''), textContent: statusName(o) });
+const when = (iso) => new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+for (const [v, t] of Object.entries(STATUS)) $('ordersStatus').append(el('option', { value: v, textContent: t }));
+
+async function loadOrders() {
+  const p = new URLSearchParams();
+  if ($('ordersStatus').value) p.set('status', $('ordersStatus').value);
+  if ($('ordersStore').value) p.set('store_id', $('ordersStore').value);
+  try {
+    const list = await call('/orders?' + p);
+    $('ordersError').textContent = '';
+    $('orderRows').replaceChildren(...(list.length ? list.map((o) => {
+      const tr = el('tr', { tabIndex: 0, onclick: () => openOrder(o.id), onkeydown: (e) => e.key === 'Enter' && openOrder(o.id) },
+        el('td', { textContent: o.id }),
+        el('td', { textContent: when(o.created_at) }),
+        el('td', {}, o.customer_name, el('div', { className: 'sizes', textContent: o.phone + (me.role === 'super' ? ' · ' + o.store_name : '') })),
+        el('td', { textContent: o.fulfillment === 'pickup' ? 'Olib ketadi' : 'Yetkazish' }),
+        el('td', { className: 'num', textContent: som(o.total) }),
+        el('td', { textContent: PAY[o.payment_status] }),
+        el('td', {}, badge(o)),
+        el('td', { textContent: o.telegram ? 'ulangan' : '—' }));
+      return tr;
+    }) : [el('tr', {}, el('td', { colSpan: 8, textContent: "Buyurtmalar yo'q. Mijoz kiosk yoki telefondan buyurtma berganda shu yerda chiqadi." }))]));
+  } catch (err) { $('ordersError').textContent = err.message; }
+}
+$('ordersStatus').onchange = $('ordersStore').onchange = $('ordersReload').onclick = loadOrders;
+// New orders show up without a click while the tab is open.
+setInterval(() => { if (me && !$('orders').hidden && !$('orderDlg').open && !document.hidden) loadOrders(); }, 30000);
+
+async function openOrder(id) {
+  $('orderError').textContent = '';
+  try { renderOrder(await call('/orders/' + id)); $('orderDlg').showModal(); }
+  catch (err) { $('ordersError').textContent = err.message; }
+}
+function renderOrder(o) {
+  $('orderTitle').replaceChildren(`Buyurtma № ${o.id} `, badge(o));
+  $('orderInfo').replaceChildren(...orderInfo(o),
+    el('p', { className: 'sizes', textContent: `${when(o.created_at)} · ${{ cashier: 'kassada', click: 'Click', payme: 'Payme' }[o.payment_method] || o.payment_method} · Telegram: ${o.telegram ? 'xabar boradi' : 'ulanmagan'}` }),
+    ...(o.status === 'cancelled' && o.payment_status === 'paid' ? [el('p', { className: 'error', textContent: "Buyurtma to'langan edi: pulni mijozga qaytaring." })] : []));
+  $('orderActions').replaceChildren(
+    ...o.next.map((s) => el('button', { type: 'button', className: s === 'cancelled' ? 'danger' : 'primary', textContent: typeof STEP[s] === 'function' ? STEP[s](o) : STEP[s], onclick: (e) => setStatus(o, s, e.target) })),
+    el('button', { type: 'button', textContent: 'Yopish', onclick: () => $('orderDlg').close() }));
+}
+async function setStatus(o, s, btn) {
+  if (s === 'cancelled' && !confirm(`№ ${o.id} buyurtma bekor qilinsinmi?` + (o.payment_status === 'paid' ? " Kiyimlar qoldiqqa qaytadi, pulni mijozga qaytarish kerak bo'ladi." : ''))) return;
+  $('orderError').textContent = '';
+  btn.disabled = true;
+  try {
+    renderOrder(await call(`/orders/${o.id}/status`, { method: 'POST', body: { status: s } }));
+    loadOrders();
+  } catch (err) {
+    $('orderError').textContent = err.message;
+    btn.disabled = false;
+  }
+}
 
 $('qrBtn').onclick = () => {
   $('qrError').textContent = '';

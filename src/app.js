@@ -7,9 +7,10 @@ import { createStylist } from './recommend/stylist.js';
 import { createSizeRouter } from './size/size.js';
 import { createCartRouter } from './cart/cart.js';
 import { paymentConfig, paymentMethods, createPaymentRouter } from './cart/payments.js';
+import { telegramConfig, telegramLink } from './notify/telegram.js';
 
 // uploadDir holds product images only. Customer photos are never written anywhere.
-export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads', weather = createWeather(), stylist = createStylist(), stylistTimeoutMs, payments = paymentConfig() } = {}) {
+export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads', weather = createWeather(), stylist = createStylist(), stylistTimeoutMs, payments = paymentConfig(), telegram = telegramConfig() } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use('/api/pay', createPaymentRouter(db, payments)); // Click/Payme callbacks parse their own bodies
@@ -26,7 +27,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/recommend', createRecommendRouter(db, { weather, stylist, stylistTimeoutMs }));
   api.use('/stores', createStoreRouter(db, { weather }));
   api.use('/size', createSizeRouter());
-  api.use('/cart', createCartRouter(db, { methods: paymentMethods(payments) }));
+  api.use('/cart', createCartRouter(db, { methods: paymentMethods(payments), link: telegramLink(telegram) }));
   api.use((req, res) => res.status(404).json({ error: 'Topilmadi' }));
   app.use('/api', api);
   app.use('/admin', express.static(fileURLToPath(new URL('../public/admin', import.meta.url))));

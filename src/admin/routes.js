@@ -6,7 +6,7 @@ import path from 'node:path';
 import { sizesFor } from '../db/seed.js';
 import { parseCsv } from './csv.js';
 import { hashPassword, verifyPassword, DUMMY_HASH, tokenSecret, signToken, verifyToken } from './auth.js';
-import { releaseExpired, markPaid, orderView } from '../cart/cart.js';
+import { releaseExpired, markPaid, orderView, nextStatuses, changeStatus, stamp } from '../cart/cart.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -341,7 +341,22 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     await unlink(path.join(imageDir, path.basename(url))).catch((err) => err.code === 'ENOENT' || console.error(err));
   }
 
-  // Cashier (task 8): look up an order by its number and mark it paid. Task 10 adds the list and statuses.
+  // Orders: newest first, store-scoped, optional status/store filter. Capped; older ones are opened by number.
+  r.get('/orders', async (req, res) => {
+    await releaseExpired(db);
+    const q = db('orders as o').join('stores as s', 's.id', 'o.store_id').orderBy('o.id', 'desc').limit(200)
+      .select('o.id', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.phone', 'o.fulfillment', 'o.status', 'o.payment_status',
+        'o.payment_method', 'o.total', 'o.created_at', 'o.telegram_chat_id');
+    if (req.admin.role !== 'super') q.where('o.store_id', req.admin.store_id);
+    if (req.query.store_id) q.where('o.store_id', Number(req.query.store_id) || 0);
+    if (req.query.status) q.where('o.status', String(req.query.status));
+    res.json((await q).map(({ telegram_chat_id, created_at, ...o }) => ({
+      ...o, created_at: stamp(created_at),
+      telegram: telegram_chat_id != null, next: nextStatuses(o),
+    })));
+  });
+
+  // Cashier (task 8): look up an order by its number and mark it paid.
   const findOrder = async (req) => {
     await releaseExpired(db);
     const id = Number(req.params.id);
@@ -351,14 +366,26 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     if (!o) throw fail(404, 'Buyurtma topilmadi');
     return o;
   };
-  r.get('/orders/:id', async (req, res) => res.json(await orderView(db, await findOrder(req))));
+  const adminView = async (o) => ({ ...(await orderView(db, o)), telegram: o.telegram_chat_id != null, next: nextStatuses(o) });
+  r.get('/orders/:id', async (req, res) => res.json(await adminView(await findOrder(req))));
+  // { status }: one step along the flow in nextStatuses. Cancelling releases holds (unpaid) or restocks (paid), once.
+  // The customer's Telegram message goes out from the notifier loop, so it can't slow or fail this request.
+  r.post('/orders/:id/status', async (req, res) => {
+    const o = await findOrder(req);
+    const to = req.body?.status;
+    if (!['new', 'packing', 'shipping', 'delivered', 'cancelled'].includes(to)) throw fail(400, "Holat noto'g'ri");
+    if (!(await changeStatus(db, o.id, to))) {
+      throw fail(409, o.payment_status === 'pending' && to !== 'cancelled' ? "Avval to'lov olinishi kerak" : "Bu holatga o'tkazib bo'lmaydi. Sahifani yangilang");
+    }
+    res.json(await adminView(await db('orders').where({ id: o.id }).first()));
+  });
   r.post('/orders/:id/pay', async (req, res) => {
     const o = await findOrder(req);
     if (!(await markPaid(db, o.id))) {
       const now = await db('orders').where({ id: o.id }).first('payment_status');
       throw fail(409, now.payment_status === 'paid' ? "Bu buyurtma allaqachon to'langan" : "Buyurtma bekor qilingan: 15 daqiqada to'lanmadi");
     }
-    res.json(await orderView(db, await db('orders').where({ id: o.id }).first()));
+    res.json(await adminView(await db('orders').where({ id: o.id }).first()));
   });
 
   // Recommendations per day (Tashkent time, zero-filled) and the most-suggested products.
