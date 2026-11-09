@@ -59,6 +59,10 @@
       <button id="ordersReload"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#refresh"></use></svg><span data-i18n="adm.orders.reload"></span></button>
     </div>
     <p class="error" id="ordersError" role="alert"></p>
+    <section id="fitting" class="card fitting" hidden aria-labelledby="fittingTitle">
+      <h2 id="fittingTitle"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><span data-i18n="adm.fit.title"></span></h2>
+      <ul id="fittingList"></ul>
+    </section>
     <div class="table-wrap">
       <table class="table">
         <thead><tr><th>№</th><th data-i18n="adm.orders.time"></th><th data-i18n="adm.orders.customer"></th><th data-i18n="adm.orders.fulfillment"></th><th class="num" data-i18n="adm.orders.total"></th><th data-i18n="adm.orders.payment"></th><th data-i18n="adm.orders.status"></th><th>Telegram</th></tr></thead>
@@ -424,7 +428,7 @@ function renderPay(o) {
 function orderInfo(o) {
   const until = o.expires_at ? ` · ${t('adm.order.until', { time: fmt.time(o.expires_at) })}` : '';
   return [
-    el('p', { textContent: `№ ${o.id} · ${o.customer_name} · ${o.phone} · ${o.fulfillment === 'pickup' ? t('adm.order.pickup') : t('adm.order.delivery_to', { address: o.address })}` }),
+    el('p', { textContent: `№ ${o.number} · ${o.customer_name} · ${o.phone} · ${o.fulfillment === 'pickup' ? t('adm.order.pickup') : t('adm.order.delivery_to', { address: o.address })}` }),
     el('div', { className: 'table-wrap' }, el('table', { className: 'table' }, el('tbody', {}, ...o.items.map((i) => el('tr', {},
       el('td', { textContent: productName(i) }), el('td', { textContent: i.size }), el('td', { textContent: i.shelf_location || '' }),
       el('td', { className: 'num', textContent: `${i.quantity} × ${som(i.unit_price)}` })))))),
@@ -435,7 +439,13 @@ $('payFind').onsubmit = async (e) => {
   e.preventDefault();
   $('payError').textContent = '';
   try {
-    renderPay(await call('/orders/' + Number($('payFind').no.value)));
+    // Customers say the per-store display number; a super-admin may find it in several stores and picks one.
+    const found = await call('/orders?number=' + Number($('payFind').no.value));
+    if (!found.length) throw new Error(t('err.order_not_found'));
+    if (found.length === 1) return renderPay(await call('/orders/' + found[0].id));
+    $('payConfirm').hidden = true;
+    $('payOrder').replaceChildren(el('p', { textContent: t('adm.paydlg.pick') }), el('div', { className: 'actions' }, ...found.map((o) =>
+      el('button', { type: 'button', textContent: `№ ${o.number} · ${o.store_name}`, onclick: async () => renderPay(await call('/orders/' + o.id)) }))));
   } catch (err) {
     $('payOrder').replaceChildren();
     $('payConfirm').hidden = true;
@@ -447,7 +457,7 @@ $('payConfirm').onclick = async () => {
   $('payConfirm').disabled = true;
   try {
     renderPay(await call(`/orders/${payOrder.id}/pay`, { method: 'POST' }));
-    toast(t('adm.paydlg.done', { id: payOrder.id }));
+    toast(t('adm.paydlg.done', { id: payOrder.number }));
     load(); // stock changed
   } catch (err) {
     $('payError').textContent = err.message;
@@ -474,7 +484,7 @@ async function loadOrders() {
     $('ordersError').textContent = '';
     $('orderRows').replaceChildren(...(list.length ? list.map((o) => {
       const tr = el('tr', { tabIndex: 0, onclick: () => openOrder(o.id), onkeydown: (e) => e.key === 'Enter' && openOrder(o.id) },
-        el('td', { textContent: o.id }),
+        el('td', { textContent: o.number }),
         el('td', { textContent: when(o.created_at) }),
         el('td', {}, o.customer_name, el('div', { className: 'sizes', textContent: o.phone + (me.role === 'super' ? ' · ' + o.store_name : '') })),
         el('td', { textContent: t(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery') }),
@@ -485,10 +495,23 @@ async function loadOrders() {
       return tr;
     }) : [el('tr', {}, el('td', { colSpan: 8, className: 'empty-row', textContent: t('adm.orders.empty') }))]));
   } catch (err) { $('ordersError').textContent = err.message; }
+  loadFitting();
+}
+// Fitting-room requests (task 17): bring these sizes to this cabin, then tick it off.
+async function loadFitting() {
+  let list;
+  try { list = await call('/fitting'); } catch { return; } // the orders table above already shows any connection error
+  $('fitting').hidden = !list.length;
+  $('fittingList').replaceChildren(...list.map((f) => el('li', {},
+    el('div', {}, el('strong', { textContent: t('adm.fit.cabin', { cabin: f.cabin }) }), el('span', { className: 'sizes', textContent: ` · ${fmt.time(f.created_at)}${me.role === 'super' ? ' · ' + f.store_name : ''}` }),
+      el('div', { className: 'sizes', textContent: f.items.map((i) => `${productName(i)} — ${i.size === 'ONE' ? t('common.size_one') : i.size}${i.shelf_location ? ` (${i.shelf_location})` : ''}`).join(', ') })),
+    el('button', { type: 'button', onclick: async () => {
+      try { await call(`/fitting/${f.id}/done`, { method: 'POST' }); loadFitting(); } catch (err) { $('ordersError').textContent = err.message; }
+    } }, icon('check'), t('adm.fit.done')))));
 }
 $('ordersStatus').onchange = $('ordersStore').onchange = $('ordersReload').onclick = loadOrders;
 // New orders show up without a click while the tab is open.
-setInterval(() => { if (me && !$('orders').hidden && !$('orderDlg').open && !document.hidden) loadOrders(); }, 30000);
+setInterval(() => { if (me && !$('orders').hidden && !$('orderDlg').open && !document.hidden) loadOrders(); }, 15000); // fitting-room requests are time-sensitive
 
 async function openOrder(id) {
   $('orderError').textContent = '';
@@ -496,7 +519,7 @@ async function openOrder(id) {
   catch (err) { $('ordersError').textContent = err.message; }
 }
 function renderOrder(o) {
-  $('orderTitle').replaceChildren(t('adm.order.title', { id: o.id }), ' ', badge(o));
+  $('orderTitle').replaceChildren(t('adm.order.title', { id: o.number }), ' ', badge(o));
   $('orderInfo').replaceChildren(...orderInfo(o),
     el('p', { className: 'sizes', textContent: `${when(o.created_at)} · ${o.payment_method === 'cashier' ? t('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] || o.payment_method} · ${t(o.telegram ? 'adm.order.tg_on' : 'adm.order.tg_off')}` }),
     ...(o.status === 'cancelled' && o.payment_status === 'paid' ? [el('p', { className: 'error', textContent: t('adm.order.refund') })] : []));
@@ -505,13 +528,13 @@ function renderOrder(o) {
     el('button', { type: 'button', textContent: t('common.close'), onclick: () => $('orderDlg').close() }));
 }
 async function setStatus(o, s, btn) {
-  if (s === 'cancelled' && !(await confirmDialog({ title: t('adm.order.cancel_title', { id: o.id }), text: t(o.payment_status === 'paid' ? 'adm.order.cancel_paid' : 'adm.order.cancel_unpaid'), ok: t('adm.step.cancelled'), cancel: t('common.back'), danger: true }))) return;
+  if (s === 'cancelled' && !(await confirmDialog({ title: t('adm.order.cancel_title', { id: o.number }), text: t(o.payment_status === 'paid' ? 'adm.order.cancel_paid' : 'adm.order.cancel_unpaid'), ok: t('adm.step.cancelled'), cancel: t('common.back'), danger: true }))) return;
   $('orderError').textContent = '';
   btn.disabled = true;
   try {
     const next = await call(`/orders/${o.id}/status`, { method: 'POST', body: { status: s } });
     renderOrder(next);
-    toast(t('adm.order.changed', { id: o.id, status: statusName(next) }));
+    toast(t('adm.order.changed', { id: o.number, status: statusName(next) }));
     loadOrders();
   } catch (err) {
     $('orderError').textContent = err.message;

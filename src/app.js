@@ -5,7 +5,7 @@ import { createRecommendRouter, createStoreRouter } from './recommend/routes.js'
 import { createWeather } from './recommend/weather.js';
 import { createStylist } from './recommend/stylist.js';
 import { createSizeRouter } from './size/size.js';
-import { createCartRouter } from './cart/cart.js';
+import { createCartRouter, createOrderRouter } from './cart/cart.js';
 import { paymentConfig, paymentMethods, createPaymentRouter } from './cart/payments.js';
 import { telegramConfig, telegramLink } from './notify/telegram.js';
 import { fail, langOf, errorBody } from './admin/routes.js';
@@ -39,7 +39,9 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/recommend', createRecommendRouter(db, { weather, stylist, stylistTimeoutMs }));
   api.use('/stores', createStoreRouter(db, { weather }));
   api.use('/size', createSizeRouter());
-  api.use('/cart', createCartRouter(db, { methods: paymentMethods(payments), link: telegramLink(telegram) }));
+  const methods = paymentMethods(payments), link = telegramLink(telegram);
+  api.use('/cart', createCartRouter(db, { methods, link }));
+  api.use('/orders', createOrderRouter(db, { methods, link }));
   api.use(() => { throw fail(404, 'err.not_found'); });
   app.use('/api', api);
   // Design system (ui.css, ui.js, icons, fonts) shared by the customer app and admin.
@@ -52,6 +54,8 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   // Customer app: one page for the kiosk and the phone; app.js picks the mode from the path.
   const customer = fileURLToPath(new URL('../public/app', import.meta.url));
   app.get(['/kiosk', '/m'], (req, res) => res.sendFile('index.html', { root: customer }));
+  // Order status page; the token in its URL must not leak to the payment provider through Referer.
+  app.get('/order/:token', (req, res) => res.set('Referrer-Policy', 'no-referrer').sendFile('order.html', { root: customer }));
   app.use('/app', express.static(customer, { index: false }));
   app.use('/uploads', express.static(uploadDir, { index: false, setHeaders: (res) => res.set('X-Content-Type-Options', 'nosniff') }));
 

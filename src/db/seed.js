@@ -123,6 +123,9 @@ export function stockFor(item, size, storeIdx, sizeCount) {
 // The name is fixed per store + SKU, so re-seeding overwrites instead of piling up files.
 const imageName = (storeIdx, sku) => `demo-s${storeIdx + 1}-${sku.toLowerCase()}.svg`;
 
+// Children before parents (SQLite deletes row by row, with foreign keys on).
+const WIPE = ['fitting_requests', 'payment_transactions', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'admins', 'stores'];
+
 // uploadDir: where /uploads is served from. Without it (tests) image_url is still set, but no file is copied.
 export async function seed(db, { uploadDir } = {}) {
   if (process.env.NODE_ENV === 'production') throw new Error('Seed wipes all data; refusing to run in production');
@@ -133,9 +136,9 @@ export async function seed(db, { uploadDir } = {}) {
     }
   }
   await db.transaction(async (trx) => {
-    for (const t of ['payment_transactions', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'admins', 'stores']) {
-      await trx(t).del();
-    }
+    // Ids restart at 1, so a reseed gives stores 1 and 2 again and printed QR codes (/kiosk?store=1) keep working.
+    if (trx.client.config.client === 'pg') await trx.raw(`truncate ${WIPE.map(() => '??').join(', ')} restart identity cascade`, WIPE);
+    else for (const t of WIPE) await trx(t).truncate(); // knex's SQLite truncate also clears the table's sqlite_sequence row
     for (const [storeIdx, store] of STORES.entries()) {
       const [{ id: storeId }] = await trx('stores').insert(store).returning('id');
       const code = 'TS'[storeIdx];

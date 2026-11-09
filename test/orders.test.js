@@ -168,7 +168,7 @@ test('Telegram: linking by /start, a message per status change, never twice, nev
   };
   const flush = () => flushNotifications(db, { telegram });
   const o = await order(tashkent, { at: botBase });
-  const token = (await db('orders').where({ id: o.id }).first()).notify_token;
+  const { notify_token: token, number } = await db('orders').where({ id: o.id }).first();
   await flush();
   assert.equal(sent.length, 0, 'nothing before the customer links a chat');
 
@@ -188,7 +188,7 @@ test('Telegram: linking by /start, a message per status change, never twice, nev
   await flush();
   assert.equal(sent.length, 1);
   assert.equal(sent[0].chat, 5551);
-  assert.match(sent[0].text, new RegExp(`№${o.id} to'landi`));
+  assert.match(sent[0].text, new RegExp(`№${number} to'landi`), 'the per-store display number, not the global id');
   await flush();
   assert.equal(sent.length, 1, 'no repeat without a change');
 

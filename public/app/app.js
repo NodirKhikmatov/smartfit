@@ -2,13 +2,14 @@ import { watchIdle } from './idle.js';
 import { loadPose, measure } from './pose.js';
 import { keypad } from './keypad.js';
 import { CLOTHES, SHOES, nextError, toRequest, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
-import { icon, confirmDialog, showAfter, skeletonCard } from '/shared/ui.js';
+import { icon, confirmDialog, showAfter, skeletonCard, toast } from '/shared/ui.js';
 import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName } from '/shared/i18n.js';
 
 // One app: /kiosk (big buttons, idle reset) and /m (phone, opened from the store QR).
 const kiosk = location.pathname.startsWith('/kiosk');
 document.documentElement.classList.add(kiosk ? 'kiosk' : 'mobile');
-const storeId = Number(new URLSearchParams(location.search).get('store'));
+const params = new URLSearchParams(location.search);
+const storeId = Number(params.get('store'));
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
@@ -34,6 +35,7 @@ let body = null; // { gender, height, weight } for POST /api/size
 let sizeInfo = null; // last /api/size answer: confidence for the results screen
 let store = null;
 let lastOrder = null; // the done screen's order, in memory only
+let holdTimer = null, holdDeadline = 0; // cart hold countdown (cart screen)
 
 // Shoe size chips (U11: chips, not a <select>) and budget shortcuts.
 $('shoeChips').append(...SHOES.map((s) => el('label', {}, el('input', { type: 'radio', name: 'shoes', value: s }), el('span', { textContent: s }))));
@@ -75,6 +77,7 @@ const ENTER = {
 const PARENT = { form: 'start', camera: 'form', results: 'form', cart: () => (request ? 'results' : 'start'), done: 'start' };
 function render(name) {
   if (name !== 'camera') stopCamera();
+  if (name !== 'cart') clearInterval(holdTimer);
   current = name;
   for (const s of document.querySelectorAll('[data-screen]')) s.hidden = s.dataset.screen !== name;
   $('home').hidden = name === 'start';
@@ -522,23 +525,29 @@ function itemRow(p) {
 }
 
 // card: the outfit card, where a missing size picker is looked up.
+const sizeOf = (p) => p.size ?? chosen.get(p.id);
+const smooth = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
+// An item without a size yet: take the customer to its picker (U11) instead of an error under the button. True if one was missing.
+function needSize(items, card, msg) {
+  const missing = items.find((p) => !sizeOf(p));
+  if (!missing) return false;
+  const pick = card.querySelector(`[data-pick="${missing.id}"]`);
+  const text = t('kiosk.add.pick_size', { name: productName(missing) });
+  if (!pick) return void (msg.textContent = text) || true;
+  pick.querySelector('.field-error').textContent = text;
+  pick.scrollIntoView({ block: 'center', behavior: smooth() });
+  pick.querySelector('.chip').focus({ preventScroll: true });
+  return true;
+}
+
 function addButton(items, card, className = 'primary wide', label = 'kiosk.add.btn') {
-  const size = (p) => p.size ?? chosen.get(p.id);
+  const size = sizeOf;
   const has = (p) => cart?.items.some((c) => c.product_id === p.id && (!size(p) || c.size === size(p)));
   const b = el('button', { className });
   const msg = el('p', { className: 'field-error', role: 'alert' });
   const sync = () => { b.disabled = items.every(has); b.replaceChildren(...(b.disabled ? [icon('check'), t('kiosk.add.done')] : [icon('bag'), t(label)])); };
   b.onclick = async () => {
-    const missing = items.find((p) => !size(p));
-    if (missing) {
-      // U11: take the customer to the picker instead of an error under the button.
-      const pick = card.querySelector(`[data-pick="${missing.id}"]`);
-      const text = t('kiosk.add.pick_size', { name: productName(missing) });
-      if (!pick) return void (msg.textContent = text);
-      pick.querySelector('.field-error').textContent = text;
-      pick.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
-      return pick.querySelector('.chip').focus({ preventScroll: true });
-    }
+    if (needSize(items, card, msg)) return;
     msg.textContent = '';
     b.disabled = true;
     try {
@@ -560,9 +569,51 @@ function card(heading, items, total, reason) {
     el('h2', { textContent: heading }),
     ...(reason ? [el('p', { className: 'muted reason', textContent: reason })] : []),
     el('ul', { className: 'items' }, ...items.map(itemRow)),
-    el('div', { className: 'outfit-foot' }, el('div', { className: 'total' }, el('span', { textContent: t('common.total') }), el('strong', { textContent: som(total) })), addButton(items, c)));
+    el('div', { className: 'outfit-foot' }, el('div', { className: 'total' }, el('span', { textContent: t('common.total') }), el('strong', { textContent: som(total) })), addButton(items, c), fittingBox(items, c)));
   c.append(look(items), body);
   return c;
+}
+
+// "Kabinaga olib keling": staff bring the outfit in the picked sizes to the customer's cabin (also counts as tried).
+function fittingBox(items, card) {
+  const box = el('div', { className: 'fit' });
+  const msg = el('p', { className: 'field-error', role: 'alert' });
+  const open = el('button', { type: 'button', className: 'ghost wide' }, icon('hanger'), t('kiosk.fit.btn'));
+  open.onclick = () => {
+    if (needSize(items, card, msg)) return;
+    msg.textContent = '';
+    const id = `cabin-${Math.random().toString(36).slice(2)}`;
+    const input = el('input', { id, inputMode: 'numeric', autocomplete: 'off', maxLength: 2 });
+    input.dataset.keys = 'digits';
+    input.setAttribute('aria-describedby', `${id}-hint ${id}-err`);
+    msg.id = `${id}-err`;
+    const send = el('button', { type: 'submit', className: 'primary' }, t('kiosk.fit.send'));
+    const f = el('form', { className: 'fit-form', noValidate: true },
+      el('label', { className: 'field', htmlFor: id }, el('span', { textContent: t('kiosk.fit.cabin') }), input, el('span', { className: 'hint', id: `${id}-hint`, textContent: t('kiosk.fit.hint') })),
+      send);
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const cabin = Number(input.value);
+      if (!/^\d{1,2}$/.test(input.value) || cabin < 1) {
+        msg.textContent = t('kiosk.fit.err');
+        input.setAttribute('aria-invalid', 'true');
+        return input.focus();
+      }
+      input.setAttribute('aria-invalid', 'false');
+      send.disabled = true;
+      try {
+        await api('/recommend/fitting', { rec: request.rec, cabin, items: items.map((p) => ({ product_id: p.id, size: sizeOf(p) })) });
+        box.replaceChildren(el('p', { className: 'notice', role: 'status' }, icon('check'), t('kiosk.fit.sent', { cabin })));
+      } catch (err) {
+        msg.textContent = err.message;
+        send.disabled = false;
+      }
+    };
+    box.replaceChildren(f, msg);
+    input.focus();
+  };
+  box.append(open, msg);
+  return box;
 }
 
 function outfitCard(o, n) {
@@ -619,15 +670,102 @@ function cartLine(i) {
   );
 }
 
+// Live hold countdown (U8): a warning with "extend" in the last 2 minutes; at 0 the cart is gone.
+// The deadline comes from the server's hold_ms, so a wrong device clock doesn't shift it.
+const WARN_MS = 2 * 60_000;
+function holdTick() {
+  const left = holdDeadline - Date.now();
+  if (!cart || left <= 0) {
+    clearInterval(holdTimer);
+    if (cart && left <= 0) return cartAction(() => Promise.reject(Object.assign(new Error(''), { status: 404 })));
+    return;
+  }
+  const warn = left <= WARN_MS;
+  const note = $('holdNote');
+  if (note.classList.contains('warn') !== warn || !note.firstChild) {
+    note.classList.toggle('warn', warn);
+    note.replaceChildren(icon('clock'), el('span', { className: 'hold-text' }),
+      ...(warn ? [el('button', { type: 'button', className: 'primary', onclick: extendHold }, t('kiosk.cart.extend'))] : []));
+  }
+  note.querySelector('.hold-text').textContent = t(warn ? 'kiosk.cart.hold_warn' : 'kiosk.cart.held', { left: fmt.countdown(left) });
+}
+function startHold() {
+  clearInterval(holdTimer);
+  $('holdNote').replaceChildren();
+  if (!cart?.items.length || current !== 'cart') return;
+  holdDeadline = Date.now() + cart.hold_ms;
+  holdTick();
+  holdTimer = setInterval(holdTick, 1000);
+}
+async function extendHold() {
+  await cartAction(() => api(`/cart/${cart.token}/extend`, {}));
+  if (cart) toast(t('kiosk.cart.extended'));
+}
+
 function renderCartScreen() {
   const empty = !cart?.items.length;
-  checkout.hidden = $('holdNote').hidden = empty;
+  checkout.hidden = $('holdNote').hidden = $('handoffBtn').hidden = empty;
+  if (!kiosk) $('handoffBtn').hidden = true;
+  startHold();
   if (empty) return $('cartBody').replaceChildren(el('div', { className: 'empty' }, icon('bag'), el('p', { textContent: t('kiosk.cart.empty') })));
-  $('holdNote').textContent = t('kiosk.cart.held', { time: fmt.time(cart.expires_at) });
   $('cartBody').replaceChildren(el('ul', { className: 'items lines' }, ...cart.items.map(cartLine)));
   renderPay();
   renderSum();
 }
+
+// Kiosk → phone (task 17): a one-time QR opens this cart on the customer's phone, where they check out.
+// The kiosk watches its cart: once the phone claims it, the kiosk's token stops working and the kiosk starts over.
+let handoff = null; // { dlg, timers } while the QR is on screen
+function stopHandoff() {
+  if (!handoff) return;
+  handoff.timers.forEach(clearInterval);
+  if (handoff.dlg.open) handoff.dlg.close();
+  handoff.dlg.remove();
+  handoff = null;
+}
+$('handoffBtn').onclick = async () => {
+  stopHandoff();
+  const dlg = el('dialog', { className: 'handoff' });
+  dlg.setAttribute('aria-labelledby', 'handoffTitle');
+  handoff = { dlg, timers: [] };
+  dlg.addEventListener('close', () => handoff?.dlg === dlg && stopHandoff());
+  document.body.append(dlg);
+  const qr = el('div', { className: 'tgqr' });
+  const left = el('p', { className: 'meta', role: 'status' });
+  const close = el('button', { type: 'button', onclick: stopHandoff }, t('common.close'));
+  dlg.append(el('h2', { id: 'handoffTitle', textContent: t('kiosk.handoff.title') }), el('p', { className: 'muted', textContent: t('kiosk.handoff.text') }), qr, left, el('div', { className: 'dialog-actions' }, close));
+  dlg.showModal();
+  let h;
+  try {
+    h = await api(`/cart/${cart.token}/handoff`, {});
+  } catch (err) {
+    left.textContent = err.message;
+    return;
+  }
+  if (handoff?.dlg !== dlg) return; // closed or reset meanwhile
+  qr.innerHTML = h.svg; // built by our server from our own URL
+  const until = Date.now() + h.ms, token = cart.token, holdUntil = Date.now() + cart.hold_ms;
+  const count = () => {
+    const ms = until - Date.now();
+    if (ms > 0) return void (left.textContent = t('kiosk.handoff.left', { left: fmt.countdown(ms) }));
+    handoff.timers.forEach(clearInterval);
+    qr.replaceChildren();
+    left.replaceChildren(t('kiosk.handoff.expired'), ' ', el('button', { type: 'button', className: 'primary', onclick: () => $('handoffBtn').click() }, t('kiosk.handoff.new')));
+  };
+  count();
+  handoff.timers.push(setInterval(count, 1000), setInterval(async () => {
+    try {
+      await api(`/cart/${token}`);
+    } catch (err) {
+      // 404 while the hold was still live = the phone took the cart (an expired cart is handled by the hold timer).
+      if (err.status !== 404 || Date.now() >= holdUntil || handoff?.dlg !== dlg) return;
+      handoff.timers.forEach(clearInterval);
+      cart = null; // the server cart now belongs to the phone; reset() must not delete it
+      dlg.replaceChildren(el('div', { className: 'done' }, icon('check'), el('h2', { textContent: t('kiosk.handoff.done') })));
+      setTimeout(reset, 4000);
+    }
+  }, 2000));
+};
 
 // Click/Payme only on the phone (no card entry on a shared kiosk) and only when the server has them configured.
 const PAY = { cashier: 'kiosk.checkout.pay_cashier', click: 'Click', payme: 'Payme' }; // brand names stay as they are
@@ -700,7 +838,7 @@ checkout.addEventListener('submit', async (e) => {
     });
     setCart(null);
     clearCheckout();
-    showDone(r.order, r.payment, r.notify);
+    showDone(r.order, r.payment, r.notify, r.track);
   } catch (err) {
     if (err.status === 404) return cartAction(() => Promise.reject(err));
     $('checkoutError').textContent = err.message;
@@ -709,10 +847,10 @@ checkout.addEventListener('submit', async (e) => {
   }
 });
 
-function showDone(o, pay = { method: 'cashier' }, notify = null) {
+function showDone(o, pay = { method: 'cashier' }, notify = null, track = null) {
   const online = pay.url && /^https:\/\//.test(pay.url);
   lastOrder = o;
-  $('orderNo').textContent = `№ ${o.id}`;
+  $('orderNo').textContent = `№ ${o.number}`;
   $('doneBody').replaceChildren(
     el('div', { className: 'sum card' },
       ...o.items.map((i) => sumRow(`${productName(i)} · ${sizeName(i.size)}${i.quantity > 1 ? ` × ${i.quantity}` : ''}`, som(i.unit_price * i.quantity))),
@@ -721,18 +859,23 @@ function showDone(o, pay = { method: 'cashier' }, notify = null) {
     el('p', { className: 'notice', textContent: t('kiosk.done.pay_note', { what: online ? t('kiosk.done.pay_online', { method: t(PAY[pay.method]) }) : t('kiosk.done.pay_cashier'), time: fmt.time(o.expires_at) }) }),
     ...(online ? [el('a', { className: 'button primary wide', href: pay.url, rel: 'noopener', textContent: t('kiosk.done.pay_btn', { method: t(PAY[pay.method]) }) })] : []),
     el('p', { textContent: o.fulfillment === 'pickup' ? t('kiosk.done.next_pickup') : t('kiosk.done.next_delivery', { phone: o.phone }) }),
-    ...(notify ? [telegramBlock(notify)] : []),
+    ...(track ? [trackBlock(track)] : []),
+    ...(notify && !kiosk ? [telegramBlock(notify)] : []), // the kiosk's status-page QR has the Telegram button
   );
   go('done', { replace: true }); // back from here goes to the outfits, not to a spent checkout
 }
-// Order status by Telegram: the phone opens the bot link; the kiosk shows it as a QR to scan with the customer's phone.
-// The SVG is built by our server from our own t.me link.
+// Order status by Telegram (phone only): the bot link.
 function telegramBlock(n) {
   if (!/^https:\/\/t\.me\//.test(n.url)) return el('div');
-  if (!kiosk) return el('a', { className: 'button wide', href: n.url, rel: 'noopener', textContent: t('kiosk.done.tg_track') });
+  return el('a', { className: 'button wide', href: n.url, rel: 'noopener', textContent: t('kiosk.done.tg_track') });
+}
+// The public status page (U7): a link on the phone, a QR on the kiosk. The SVG is built by our server from our own URL.
+function trackBlock(tr) {
+  const path = new URL(tr.url, location.href).pathname;
+  if (!kiosk) return el('a', { className: 'button primary wide', href: path, textContent: t('kiosk.track.link') });
   const qr = el('div', { className: 'tgqr' });
-  qr.innerHTML = n.svg;
-  return el('div', { className: 'notice stack' }, el('p', { textContent: t('kiosk.done.tg_scan') }), qr);
+  qr.innerHTML = tr.svg;
+  return el('div', { className: 'notice stack' }, el('p', { textContent: t('kiosk.track.scan') }), qr);
 }
 $('doneHome').onclick = () => reset();
 
@@ -745,6 +888,7 @@ $('home').onclick = async () => {
 };
 
 function reset() {
+  stopHandoff();
   if (cart) api(`/cart/${cart.token}`, null, 'DELETE').catch(() => {}); // give the held stock back now, not in 15 min
   setCart(null);
   request = body = sizeInfo = lastResult = lastOrder = null;
@@ -784,4 +928,19 @@ if (saved) {
 budgetChips();
 go(storeId > 0 ? allowedScreen(saved?.screen ?? 'start', appState()) : 'start', { replace: true });
 loadStore();
-if (savedCart()) api('/cart/' + savedCart()).then((c) => setCart(c.store_id === storeId ? c : null), () => setCart(null));
+const handoffToken = params.get('handoff');
+if (!kiosk && handoffToken) {
+  // Opened from the kiosk's QR: take over that cart once, then drop the one-time token from the address bar.
+  params.delete('handoff');
+  history.replaceState(history.state, '', `${location.pathname}?${params}`);
+  const own = savedCart();
+  api('/cart/claim', { handoff: handoffToken }).then((c) => {
+    if (own) api(`/cart/${own}`, null, 'DELETE').catch(() => {}); // the phone's own earlier cart gives its stock back
+    setCart(c);
+    toast(t('kiosk.handoff.claimed'));
+    go('cart');
+  }, (err) => {
+    $('startError').textContent = err.message;
+    if (savedCart()) api('/cart/' + savedCart()).then((c) => setCart(c.store_id === storeId ? c : null), () => setCart(null));
+  });
+} else if (savedCart()) api('/cart/' + savedCart()).then((c) => setCart(c.store_id === storeId ? c : null), () => setCart(null));

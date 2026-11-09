@@ -7,8 +7,10 @@ import { fail } from '../admin/routes.js';
 import { sizesFor } from '../db/seed.js';
 import { unitPrice } from '../recommend/engine.js';
 import { REC } from '../recommend/routes.js';
+import { qrSvg, publicBase } from '../qr.js';
 
 export const HOLD_MS = 15 * 60 * 1000;
+export const HANDOFF_MS = 5 * 60 * 1000; // how long the kiosk's "continue on your phone" QR works
 const MAX_UNITS = 20; // shortcut: per-cart cap only; anyone can open many carts, add a per-IP limit in task 11 if holds get abused
 const DELIVERY_RADIUS_KM = 30; // "within the city" = the map pin is this close to the store
 const TOKEN = /^[a-f0-9]{32}$/;
@@ -132,6 +134,7 @@ export async function markPaid(db, orderId, now = Date.now()) {
 
 // SQLite CURRENT_TIMESTAMP is 'YYYY-MM-DD HH:MM:SS' in UTC, which Date would read as local time.
 export const stamp = (v) => (v == null ? null : new Date(typeof v === 'string' && !v.includes('T') ? `${v.replace(' ', 'T')}Z` : v).toISOString());
+const msLeft = (v) => (v == null ? null : Math.max(0, Date.parse(stamp(v)) - Date.now()));
 const storeOf = (db, id) => db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold');
 
 // Prices always come from the products table, never from the request.
@@ -151,6 +154,7 @@ async function cartView(db, cart, payments) {
     token: cart.token,
     store_id: store.id,
     expires_at: stamp(cart.expires_at),
+    hold_ms: msLeft(cart.expires_at), // the countdown runs from this, so a wrong kiosk clock doesn't matter
     items,
     payments,
     delivery: { city: store.city, lat: store.lat, lon: store.lon, fee: store.delivery_fee, free_over: store.free_delivery_threshold },
@@ -161,9 +165,9 @@ async function cartView(db, cart, payments) {
 export async function orderView(db, order) {
   const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').where('i.order_id', order.id).orderBy('i.id')
     .select('i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price');
-  const { id, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total } = order;
+  const { id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total } = order;
   return {
-    id, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total,
+    id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total,
     expires_at: stamp(order.expires_at), paid_at: stamp(order.paid_at), created_at: stamp(order.created_at), items,
   };
 }
@@ -290,6 +294,36 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
     res.json(await view(cart));
   });
 
+  // "Extend" on the 2-minute warning: any live-cart request extends the hold, this one changes nothing else.
+  r.post('/:token/extend', async (req, res) => {
+    res.json(await view(await db.transaction((trx) => liveCart(trx, req.params.token))));
+  });
+
+  // Kiosk → phone: a one-time QR. Claiming it gives the phone a new cart token, so the kiosk's copy stops working.
+  r.post('/:token/handoff', async (req, res) => {
+    const handoff = randomBytes(16).toString('hex');
+    const expires = Date.now() + HANDOFF_MS;
+    const cart = await db.transaction(async (trx) => {
+      const cart = await liveCart(trx, req.params.token);
+      await trx('carts').where({ id: cart.id }).update({ handoff_token: handoff, handoff_expires_at: iso(expires) });
+      return cart;
+    });
+    const url = `${publicBase(req)}/m?store=${cart.store_id}&handoff=${handoff}`;
+    res.json({ url, svg: qrSvg(url), expires_at: iso(expires), ms: HANDOFF_MS });
+  });
+  r.post('/claim', async (req, res) => {
+    const handoff = req.body?.handoff;
+    const token = randomBytes(16).toString('hex');
+    const now = Date.now();
+    // One conditional UPDATE: a second scan (or a race) finds no row.
+    const n = typeof handoff === 'string' && TOKEN.test(handoff)
+      ? await db('carts').where({ handoff_token: handoff }).where('handoff_expires_at', '>', iso(now)).where('expires_at', '>', iso(now))
+        .update({ token, handoff_token: null, handoff_expires_at: null, expires_at: iso(now + HOLD_MS), updated_at: db.fn.now() })
+      : 0;
+    if (!n) throw fail(404, 'err.handoff_invalid');
+    res.json(await view(await db('carts').where({ token }).first()));
+  });
+
   // Kiosk idle reset and "Savatni tozalash": give every held unit back at once.
   r.delete('/:token', async (req, res) => {
     await db.transaction(async (trx) => {
@@ -316,14 +350,39 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
         .orderBy('c.id').select('c.product_id', 'c.size', 'c.quantity', 'p.price', 'p.discount_price');
       if (!lines.length) throw fail(400, 'err.cart_empty');
       const t = totals(store, lines.reduce((s, l) => s + unitPrice(l) * l.quantity, 0), c.fulfillment);
-      const [{ id }] = await trx('orders').insert({ store_id: store.id, ...c, ...t, payment_method: method, notify_token: notifyToken, recommendation_id: cart.recommendation_id, expires_at: iso(Date.now() + HOLD_MS) }).returning('id');
+      // Per-store display number. The UPDATE locks the store row, so parallel checkouts get 1, 2, 3… with no gaps or repeats.
+      await trx('stores').where({ id: store.id }).increment('order_seq', 1);
+      const { order_seq: number } = await trx('stores').where({ id: store.id }).first('order_seq');
+      const [{ id }] = await trx('orders').insert({ store_id: store.id, number, ...c, ...t, payment_method: method, notify_token: notifyToken, recommendation_id: cart.recommendation_id, expires_at: iso(Date.now() + HOLD_MS) }).returning('id');
       await trx('order_items').insert(lines.map((l) => ({ order_id: id, product_id: l.product_id, size: l.size, quantity: l.quantity, unit_price: unitPrice(l) })));
       await trx('carts').where({ id: cart.id }).del(); // reserved stays: the order owns the hold now
       return id;
     });
     const order = await orderView(db, await db('orders').where({ id }).first());
-    res.status(201).json({ order, payment: await methods[method](order), notify: link(notifyToken) });
+    const url = `${publicBase(req)}/order/${notifyToken}`; // the public status page
+    res.status(201).json({ order, payment: await methods[method]({ ...order, notify_token: notifyToken }), notify: link(notifyToken), track: { url, svg: qrSvg(url) } });
   });
 
+  return r;
+}
+
+// Public order status page (/order/<notify_token>): no name, phone or address, only what the customer needs to follow it.
+export function createOrderRouter(db, { methods = CASHIER, link = () => null } = {}) {
+  const r = express.Router();
+  r.get('/:token', async (req, res) => {
+    await releaseExpired(db);
+    const o = TOKEN.test(req.params.token) ? await db('orders').where({ notify_token: req.params.token }).first() : null;
+    if (!o) throw fail(404, 'err.order_not_found');
+    const v = await orderView(db, o);
+    const store = await db('stores').where({ id: o.store_id }).first('name', 'city', 'address');
+    const online = o.payment_status === 'pending' && o.payment_method !== 'cashier' && Object.hasOwn(methods, o.payment_method);
+    const pay = online ? await methods[o.payment_method]({ ...v, notify_token: o.notify_token }) : null;
+    res.json({
+      number: v.number, store, status: v.status, payment_status: v.payment_status, payment_method: v.payment_method, fulfillment: v.fulfillment,
+      items: v.items.map(({ name, name_ru, category, color, size, quantity, unit_price }) => ({ name, name_ru, category, color, size, quantity, unit_price })),
+      subtotal: v.subtotal, delivery_fee: v.delivery_fee, total: v.total, created_at: v.created_at, paid_at: v.paid_at, expires_at: v.expires_at,
+      pay_ms: o.payment_status === 'pending' ? msLeft(o.expires_at) : null, pay_url: pay?.url ?? null, telegram: link(o.notify_token)?.url ?? null,
+    });
+  });
   return r;
 }

@@ -21,7 +21,8 @@ export function paymentConfig(env = process.env) {
 
 // Checkout methods for createCartRouter: cashier always, plus each configured provider with its pay link.
 export function paymentMethods(cfg) {
-  const back = (o) => cfg.publicUrl && `${cfg.publicUrl}/m?store=${o.store_id}`; // where the provider sends the customer afterwards
+  // Where the provider sends the customer afterwards: the order's status page.
+  const back = (o) => cfg.publicUrl && (o.notify_token ? `${cfg.publicUrl}/order/${o.notify_token}` : `${cfg.publicUrl}/m?store=${o.store_id}`);
   const m = { cashier: async () => ({ method: 'cashier' }) };
   if (cfg.payme) {
     m.payme = async (o) => {

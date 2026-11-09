@@ -89,7 +89,9 @@ test('checkout with Payme returns the checkout link with the server total in tiy
   const url = new URL(body.payment.url);
   assert.equal(url.origin, 'https://test.paycom.uz');
   const params = Buffer.from(url.pathname.slice(1), 'base64').toString();
-  assert.equal(params, `m=pm-merchant;ac.order_id=${body.order.id};a=${body.order.total * 100};l=uz;c=https://fit.example.uz/m?store=${store}`);
+  const { notify_token } = await db('orders').where({ id: body.order.id }).first();
+  // After paying, the provider sends the customer to the order's status page.
+  assert.equal(params, `m=pm-merchant;ac.order_id=${body.order.id};a=${body.order.total * 100};l=uz;c=https://fit.example.uz/order/${notify_token}`);
 });
 
 test('Payme: auth, JSON and method errors come back as JSON-RPC errors', async () => {

@@ -13,8 +13,8 @@ const srcFiles = (dir = 'src') => readdirSync(new URL(`../${dir}`, import.meta.u
   .flatMap((e) => (e.isDirectory() ? srcFiles(`${dir}/${e.name}`) : e.name.endsWith('.js') ? [`${dir}/${e.name}`] : []));
 
 // Every file with user-facing text. i18n.js counts only below the dictionary (its helpers use keys too).
-const PAGES = ['public/app/index.html', 'public/admin/index.html'];
-const SCRIPTS = ['public/app/app.js', 'public/app/idle.js', 'public/app/pose.js', 'public/app/flow.js', 'public/app/keypad.js', 'public/shared/ui.js', ...srcFiles()];
+const PAGES = ['public/app/index.html', 'public/app/order.html', 'public/admin/index.html'];
+const SCRIPTS = ['public/app/app.js', 'public/app/idle.js', 'public/app/pose.js', 'public/app/flow.js', 'public/app/keypad.js', 'public/app/order.js', 'public/shared/ui.js', ...srcFiles()];
 const i18nSrc = read('public/shared/i18n.js');
 const sources = Object.fromEntries([...PAGES, ...SCRIPTS].map((f) => [f, read(f)]));
 sources['public/shared/i18n.js#helpers'] = i18nSrc.slice(i18nSrc.indexOf('export const DICT'));
@@ -69,6 +69,7 @@ test('every key used in code exists, and every dictionary key is used', () => {
     'adm.status': ['new', 'packing', 'shipping', 'delivered', 'cancelled'],
     'adm.step': ['packing', 'shipping', 'delivered', 'cancelled'],
     'adm.pay': ['pending', 'paid', 'cancelled'],
+    'kiosk.track.step': ['placed', 'paid', 'packing', 'shipping', 'delivered', 'handed'],
   };
   const all = Object.values(sources).join('\n');
   for (const [prefix, members] of Object.entries(FAMILIES)) {

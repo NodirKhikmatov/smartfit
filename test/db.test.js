@@ -33,6 +33,22 @@ test('all spec tables exist with key columns', async () => {
   }
 });
 
+test('reseeding restarts ids: stores are 1 and 2 again, so printed QR links keep working', async () => {
+  const fresh = testDb();
+  try {
+    await fresh.migrate.latest();
+    await seed(fresh);
+    const first = await fresh('products').orderBy('id').first('id');
+    await fresh('carts').insert({ store_id: 1, token: 'a'.repeat(32), expires_at: new Date().toISOString() });
+    await seed(fresh);
+    assert.deepEqual(await fresh('stores').orderBy('id').pluck('id'), [1, 2]);
+    assert.equal((await fresh('products').orderBy('id').first('id')).id, first.id);
+    assert.equal((await fresh('carts').count({ n: '*' }))[0].n, 0, 'carts are wiped too');
+  } finally {
+    await fresh.destroy();
+  }
+});
+
 const inStore = (code) => CATALOGUE.filter((p) => p.stores.includes(code));
 
 test('seed: Tashkent and Samarkand stores, ≥ 60 items each, with per-store differences', async () => {

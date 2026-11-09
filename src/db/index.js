@@ -7,12 +7,13 @@ import * as notify from './migrations/004_notify.js';
 import * as pilot from './migrations/005_pilot.js';
 import * as i18n from './migrations/006_i18n.js';
 import * as catalogue from './migrations/007_catalogue.js';
+import * as handoff from './migrations/008_handoff.js';
 
 // Postgres returns bigint (count(*), Telegram chat ids, Payme ms times) as strings; all of ours fit in a double.
 pg.types.setTypeParser(20, Number);
 
 // Migrations are listed in code so they load the same way from any cwd.
-const migrations = { '001_init': init, '002_cart': cart, '003_payments': payments, '004_notify': notify, '005_pilot': pilot, '006_i18n': i18n, '007_catalogue': catalogue };
+const migrations = { '001_init': init, '002_cart': cart, '003_payments': payments, '004_notify': notify, '005_pilot': pilot, '006_i18n': i18n, '007_catalogue': catalogue, '008_handoff': handoff };
 const migrationSource = {
   getMigrations: async () => Object.keys(migrations),
   getMigrationName: (name) => name,

@@ -1,5 +1,5 @@
 import express from 'express';
-import qrcode from 'qrcode-generator';
+import { qrSvg, publicBase } from '../qr.js';
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import { parseCsv } from './csv.js';
 import { hashPassword, verifyPassword, DUMMY_HASH, tokenSecret, signToken, verifyToken } from './auth.js';
 import { releaseExpired, markPaid, orderView, nextStatuses, changeStatus, stamp } from '../cart/cart.js';
 import { LANGS, errorText } from '../../public/shared/i18n.js';
+import { dbTime } from '../recommend/routes.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -177,12 +178,8 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     if (req.admin.role !== 'super' && id !== req.admin.store_id) throw fail(404, 'err.store_not_found');
     const store = Number.isInteger(id) ? await db('stores').where({ id }).first('id', 'name') : undefined;
     if (!store) throw fail(404, 'err.store_not_found');
-    const base = (process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
-    const url = `${base}/m?store=${store.id}`;
-    const qr = qrcode(0, 'M');
-    qr.addData(url);
-    qr.make();
-    res.json({ name: store.name, url, svg: qr.createSvgTag({ cellSize: 8, margin: 4, scalable: true }) });
+    const url = `${publicBase(req)}/m?store=${store.id}`;
+    res.json({ name: store.name, url, svg: qrSvg(url, 8) });
   });
 
   r.get('/products', async (req, res) => {
@@ -355,11 +352,12 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   r.get('/orders', async (req, res) => {
     await releaseExpired(db);
     const q = db('orders as o').join('stores as s', 's.id', 'o.store_id').orderBy('o.id', 'desc').limit(200)
-      .select('o.id', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.phone', 'o.fulfillment', 'o.status', 'o.payment_status',
+      .select('o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.phone', 'o.fulfillment', 'o.status', 'o.payment_status',
         'o.payment_method', 'o.total', 'o.created_at', 'o.telegram_chat_id');
     if (req.admin.role !== 'super') q.where('o.store_id', req.admin.store_id);
     if (req.query.store_id) q.where('o.store_id', Number(req.query.store_id) || 0);
     if (req.query.status) q.where('o.status', String(req.query.status));
+    if (req.query.number) q.where('o.number', Number(req.query.number) || 0); // the cashier looks orders up by display number
     res.json((await q).map(({ telegram_chat_id, created_at, ...o }) => ({
       ...o, created_at: stamp(created_at),
       telegram: telegram_chat_id != null, next: nextStatuses(o),
@@ -396,6 +394,21 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
       throw fail(409, now.payment_status === 'paid' ? 'err.already_paid' : 'err.order_expired');
     }
     res.json(await adminView(await db('orders').where({ id: o.id }).first()));
+  });
+
+  // Fitting-room requests (task 17): open ones from the last 2 hours, oldest first, with what to bring from which shelf.
+  r.get('/fitting', async (req, res) => {
+    const q = db('fitting_requests as f').join('stores as s', 's.id', 'f.store_id').where('f.status', 'new')
+      .where('f.created_at', '>', dbTime(Date.now() - FITTING_TTL_MS)).orderBy('f.id').limit(50)
+      .select('f.id', 'f.store_id', 's.name as store_name', 'f.cabin', 'f.items', 'f.created_at');
+    if (req.admin.role !== 'super') q.where('f.store_id', req.admin.store_id);
+    res.json(await fittingView(db, await q));
+  });
+  r.post('/fitting/:id/done', async (req, res) => {
+    const q = db('fitting_requests').where({ id: Number(req.params.id) || 0 });
+    if (req.admin.role !== 'super') q.where('store_id', req.admin.store_id);
+    if (!(await q.update({ status: 'done' }))) throw fail(404, 'err.not_found');
+    res.status(204).end();
   });
 
   // Recommendations per day (Tashkent time, zero-filled) and the most-suggested products.
@@ -456,6 +469,15 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   });
 
   return r;
+}
+
+const FITTING_TTL_MS = 2 * 60 * 60 * 1000; // an unanswered request older than this is stale (the customer has left)
+// Rows → items with name, category and shelf, for the admin list and the staff Telegram message.
+export async function fittingView(db, rows) {
+  const parsed = rows.map((r) => ({ ...r, items: typeof r.items === 'string' ? JSON.parse(r.items) : r.items, created_at: stamp(r.created_at) }));
+  const ids = [...new Set(parsed.flatMap((r) => r.items.map((i) => i.product_id)))];
+  const products = await db('products').whereIn('id', ids).select('id', 'name', 'name_ru', 'category', 'color', 'shelf_location');
+  return parsed.map((r) => ({ ...r, items: r.items.map((i) => ({ ...products.find((p) => p.id === i.product_id), size: i.size })) }));
 }
 
 export async function createAdmin(db, { email, password, storeId = null }) {
