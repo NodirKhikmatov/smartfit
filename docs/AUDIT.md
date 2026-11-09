@@ -129,3 +129,18 @@ These are tracked in the README launch checklist and are not phase-2 tasks:
 - the 20-person size accuracy check
 - the real printer
 - the POS vendor for a concrete stock connector
+
+## Phase 3 — features from similar products (2026-11-10)
+
+The user asked to look at similar apps and add what Smart Fit is missing. Products checked: size/fit engines (True Fit, Fit Analytics, Rendered Fits, TryOnAI, Measmerize, Perfitt), smart fitting-room mirrors (Oak Labs, Nordstrom and H&M/COS pilots, Keonn AdvanMirror), in-store try-on kiosks (Kody FitAI), and AI stylist apps/SaaS (Aiuta, DRESSX, Intelistyle, Sty AI, BeSpoke). Sources are mostly vendor pages, so these are feature ideas, not proven results.
+
+| What they have | Smart Fit today | Verdict |
+|---|---|---|
+| Fit learns from orders and returns ("runs small", return history) | Size from the photo and weight only, with no feedback | **Task 23**: returns/exchanges with a reason, "how did it fit?" feedback, a per-product fit offset |
+| Retailer data on demand: sessions, drop-off, conversion | Funnel and dashboard, but no record of what was asked for and not in stock | **Task 24**: missed demand ("asked for L, 0 in stock"), restock suggestions, drop-off by step, weekly owner report in Telegram |
+| "Complete the look", item page, check another size or another store | Only whole outfits from the recommender | **Task 25**: browse the catalogue, an item page with "goes well with", other sizes, and stock in the org's other stores with a reserve there |
+| Promotions at checkout | `discount_price` only | **Task 26**: promo codes and a "whole outfit" bundle discount, computed by the server |
+| A fit profile kept between visits, order history, saved looks sent to the phone | Every visit starts from zero; no accounts (no SMS provider) | **Task 27**: customer profile verified through Telegram (contact share, free), saved sizes as numbers (never the photo), order history, saved looks, delete my data |
+| Staff tablets: fitting-room alerts, pick lists | Fitting requests in admin and Telegram only | **Task 28**: staff PWA with the fitting-room queue, order pick list, "collected/handed over" |
+| AR or AI image try-on | — | **Defer**: needs the photo sent to a paid image API, which breaks the "photo never stored" rule and needs the user's key and consent text |
+| Loyalty points, billing | — | **Defer** (as before) |
