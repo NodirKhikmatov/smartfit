@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="/admin/admin.css">
 </head>
 <body class="ui-compact">
+<a class="skip" href="#main" data-i18n="adm.skip"></a>
 <form id="login" class="card raised" hidden>
   <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
   <h1 data-i18n="adm.login.title"></h1>
@@ -21,99 +22,208 @@
   <button class="primary" data-i18n="adm.login.submit"></button>
 </form>
 
-<div id="app" hidden>
-  <header class="appbar">
-    <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
-    <nav class="tabs" data-i18n-aria-label="adm.nav">
-      <button id="tabProducts" aria-current="page"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><span data-i18n="adm.tab.products"></span></button>
-      <button id="tabOrders"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#receipt"></use></svg><span data-i18n="adm.tab.orders"></span></button>
-      <button id="tabStats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.tab.stats"></span></button>
-    </nav>
-    <span class="spacer"></span>
-    <button id="payBtn" data-i18n-title="adm.cashier"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#cash"></use></svg><span class="label" data-i18n="adm.cashier"></span></button>
-    <button id="qrBtn" class="icon-btn" data-i18n-aria-label="adm.qr" data-i18n-title="adm.qr"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg></button>
-    <span id="adminLang"></span>
-    <span id="who" class="sizes"></span>
-    <button id="logout" class="icon-btn ghost" data-i18n-aria-label="adm.logout" data-i18n-title="adm.logout"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logout"></use></svg></button>
-  </header>
-  <main id="products">
-    <div class="bar">
-      <label class="grow"><span data-i18n="adm.products.search"></span> <input id="q" type="search" data-i18n-placeholder="adm.products.search_ph"></label>
-      <label><span data-i18n="adm.products.category"></span> <select id="cat"><option value="" data-i18n="common.all"></option></select></label>
-      <label id="storeFilterWrap"><span data-i18n="common.store"></span> <select id="storeFilter"></select></label>
-      <button id="importBtn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#upload"></use></svg><span data-i18n="adm.products.import"></span></button>
-      <button class="primary" id="add"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="adm.products.add"></span></button>
+<div id="app" class="shell" hidden>
+  <aside class="sidebar" id="sidebar">
+    <div class="side-inner" id="sideInner">
+      <a class="wordmark" href="#/dashboard"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</a>
+      <label class="scope" id="scopeWrap"><span data-i18n="common.store"></span> <select id="scope"></select></label>
+      <p class="scope-name" id="scopeName"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#store"></use></svg><span></span></p>
+      <nav data-i18n-aria-label="adm.nav">
+        <ul class="nav" id="nav">
+          <li><a href="#/dashboard" data-route="dashboard"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#home"></use></svg><span data-i18n="adm.route.dashboard"></span></a></li>
+          <li><a href="#/orders" data-route="orders"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#receipt"></use></svg><span data-i18n="adm.route.orders"></span><span class="nav-badge" id="ordersBadge" hidden></span></a></li>
+          <li><a href="#/cashier" data-route="cashier"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#cash"></use></svg><span data-i18n="adm.route.cashier"></span></a></li>
+          <li><a href="#/products" data-route="products"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><span data-i18n="adm.route.products"></span></a></li>
+          <li><a href="#/stats" data-route="stats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.route.stats"></span></a></li>
+          <li><a href="#/qr" data-route="qr"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg><span data-i18n="adm.route.qr"></span></a></li>
+          <li class="nav-sep"><a href="#/settings" data-route="settings"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#settings"></use></svg><span data-i18n="adm.route.settings"></span></a></li>
+        </ul>
+      </nav>
+      <div class="side-foot">
+        <button type="button" class="user-btn" id="userBtn" popovertarget="userMenu" aria-haspopup="menu">
+          <span class="avatar" id="avatar" aria-hidden="true"></span>
+          <span class="user-text"><strong id="userEmail"></strong><span id="userRole"></span></span>
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chevron-down"></use></svg>
+        </button>
+      </div>
     </div>
-    <p class="error" id="listError" role="alert"></p>
-    <div class="table-wrap">
-      <table class="table">
-        <thead><tr><th data-i18n="adm.products.name"></th><th data-i18n="adm.products.category"></th><th data-i18n="common.store"></th><th class="num" data-i18n="adm.products.price"></th><th data-i18n="adm.products.stock"></th><th></th></tr></thead>
-        <tbody id="rows"></tbody>
-      </table>
-    </div>
-  </main>
-  <main id="orders" hidden>
-    <div class="bar">
-      <label><span data-i18n="adm.orders.status"></span> <select id="ordersStatus"><option value="" data-i18n="common.all"></option></select></label>
-      <label id="ordersStoreWrap"><span data-i18n="common.store"></span> <select id="ordersStore"></select></label>
-      <button id="ordersReload"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#refresh"></use></svg><span data-i18n="adm.orders.reload"></span></button>
-    </div>
-    <p class="error" id="ordersError" role="alert"></p>
-    <section id="fitting" class="card fitting" hidden aria-labelledby="fittingTitle">
-      <h2 id="fittingTitle"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><span data-i18n="adm.fit.title"></span></h2>
-      <ul id="fittingList"></ul>
-    </section>
-    <div class="table-wrap">
-      <table class="table">
-        <thead><tr><th>№</th><th data-i18n="adm.orders.time"></th><th data-i18n="adm.orders.customer"></th><th data-i18n="adm.orders.fulfillment"></th><th class="num" data-i18n="adm.orders.total"></th><th data-i18n="adm.orders.payment"></th><th data-i18n="adm.orders.status"></th><th>Telegram</th></tr></thead>
-        <tbody id="orderRows"></tbody>
-      </table>
-    </div>
-  </main>
-  <main id="stats" hidden>
-    <div class="bar">
-      <label><span data-i18n="adm.stats.period"></span> <select id="statsDays"><option value="7"></option><option value="30" selected></option><option value="90"></option></select></label>
-      <label id="statsStoreWrap"><span data-i18n="common.store"></span> <select id="statsStore"></select></label>
-    </div>
-    <p class="error" id="statsError" role="alert"></p>
-    <div class="empty card" id="statsEmpty" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><h2 data-i18n="adm.stats.empty_title"></h2><p data-i18n="adm.stats.empty_text"></p></div>
-    <div id="statsBody">
-      <h2 id="statsTotal"></h2>
-      <h3 data-i18n="adm.stats.pilot"></h3>
-      <div class="table-wrap"><table class="table"><thead><tr><th data-i18n="adm.stats.stage"></th><th class="num" data-i18n="adm.stats.count"></th><th class="num" data-i18n="adm.stats.share"></th></tr></thead><tbody id="pilotRows"></tbody></table></div>
-      <p class="sizes" id="pilotOrders"></p>
-      <h3 data-i18n="adm.stats.top"></h3>
-      <div class="table-wrap"><table class="table"><thead><tr><th data-i18n="adm.stats.item"></th><th data-i18n="adm.products.category"></th><th class="num" data-i18n="adm.stats.times"></th></tr></thead><tbody id="topRows"></tbody></table></div>
-      <h3 data-i18n="adm.stats.daily"></h3>
-      <div class="table-wrap"><table class="table bars"><thead><tr><th data-i18n="adm.stats.day"></th><th class="num" data-i18n="adm.stats.count"></th><th></th></tr></thead><tbody id="dayRows"></tbody></table></div>
-    </div>
-  </main>
+  </aside>
+  <div id="userMenu" class="menu" popover>
+    <p class="menu-label" data-i18n="common.lang"></p>
+    <div id="menuLang"></div>
+    <hr>
+    <a class="menu-item" href="#/settings"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#settings"></use></svg><span data-i18n="adm.route.settings"></span></a>
+    <button type="button" class="menu-item" id="logout"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logout"></use></svg><span data-i18n="adm.logout"></span></button>
+  </div>
+
+  <div class="main-col">
+    <header class="topbar">
+      <button type="button" class="icon-btn ghost" id="menuBtn" data-i18n-aria-label="adm.menu" data-i18n-title="adm.menu"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#menu"></use></svg></button>
+      <h1 id="pageTitle"></h1>
+      <span class="spacer"></span>
+      <div class="top-actions" id="topActions"></div>
+    </header>
+    <main id="main" tabindex="-1">
+      <!-- Dashboard -->
+      <section data-page="dashboard" hidden>
+        <div class="page-head">
+          <p class="muted" id="dashDate"></p>
+          <div class="seg" role="group" data-i18n-aria-label="adm.stats.period" id="dashDays"></div>
+        </div>
+        <div id="dashError"></div>
+        <div class="kpis" id="kpis"></div>
+        <div class="dash-grid">
+          <section class="card panel span-2" aria-labelledby="dashChartTitle">
+            <div class="panel-head">
+              <div><h2 id="dashChartTitle"></h2><p class="panel-sub" id="dashChartSub"></p></div>
+              <div class="seg" role="group" data-i18n-aria-label="adm.dash.metric" id="dashMetric"></div>
+            </div>
+            <div class="chart-box" id="dashChart"></div>
+          </section>
+          <section class="card panel" aria-labelledby="dashFunnelTitle">
+            <div class="panel-head"><div><h2 id="dashFunnelTitle" data-i18n="adm.stats.pilot"></h2><p class="panel-sub" id="dashFunnelSub"></p></div></div>
+            <div class="funnel" id="dashFunnel"></div>
+          </section>
+          <section class="card panel" aria-labelledby="dashTopTitle">
+            <div class="panel-head"><div><h2 id="dashTopTitle" data-i18n="adm.dash.top"></h2><p class="panel-sub" id="dashTopSub"></p></div></div>
+            <ol class="rank" id="dashTop"></ol>
+          </section>
+          <section class="card panel span-2" aria-labelledby="dashLowTitle">
+            <div class="panel-head">
+              <div><h2 id="dashLowTitle" data-i18n="adm.dash.low"></h2><p class="panel-sub" id="dashLowSub"></p></div>
+              <a class="button ghost" href="#/products?filter=low" id="dashLowAll"><span data-i18n="adm.dash.low_all"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chevron-right"></use></svg></a>
+            </div>
+            <ul class="low-list" id="dashLow"></ul>
+          </section>
+        </div>
+      </section>
+
+      <!-- Orders -->
+      <section data-page="orders" hidden>
+        <section id="fitting" class="card fitting" hidden aria-labelledby="fittingTitle">
+          <h2 id="fittingTitle"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><span data-i18n="adm.fit.title"></span></h2>
+          <ul id="fittingList"></ul>
+        </section>
+        <div class="tabs-row" role="group" data-i18n-aria-label="adm.orders.status" id="ordersTabs"></div>
+        <form class="toolbar" id="ordersFilters" role="search">
+          <label class="grow"><span data-i18n="adm.orders.search"></span> <input name="q" type="search" autocomplete="off" data-i18n-placeholder="adm.orders.search_ph"></label>
+          <label><span data-i18n="adm.orders.from"></span> <input name="from" type="date"></label>
+          <label><span data-i18n="adm.orders.to"></span> <input name="to" type="date"></label>
+        </form>
+        <div id="ordersError"></div>
+        <div class="table-wrap">
+          <table class="table orders-table">
+            <caption class="visually-hidden" data-i18n="adm.route.orders"></caption>
+            <thead><tr><th>№</th><th class="hide-sm" data-i18n="adm.orders.time"></th><th data-i18n="adm.orders.customer"></th><th class="hide-sm" data-i18n="adm.orders.fulfillment"></th><th class="num" data-i18n="adm.orders.total"></th><th class="hide-sm" data-i18n="adm.orders.payment"></th><th data-i18n="adm.orders.status"></th></tr></thead>
+            <tbody id="orderRows"></tbody>
+          </table>
+        </div>
+        <nav class="pager" id="ordersPager" data-i18n-aria-label="adm.pager"></nav>
+      </section>
+
+      <!-- Cashier -->
+      <section data-page="cashier" hidden>
+        <div class="cashier">
+          <div class="cashier-list">
+            <form class="toolbar" id="payFind" role="search">
+              <label class="grow"><span data-i18n="adm.paydlg.no"></span> <input name="no" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="9" autocomplete="off" required></label>
+              <button class="primary"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#search"></use></svg><span data-i18n="adm.paydlg.find"></span></button>
+            </form>
+            <p class="error" id="payFindError" role="alert"></p>
+            <h2 class="section-title"><span data-i18n="adm.cash.pending"></span> <span class="badge" id="pendingCount"></span></h2>
+            <div id="cashError"></div>
+            <ul class="pending" id="pendingList"></ul>
+          </div>
+          <section class="card cashier-panel" id="payPanel" aria-live="polite"></section>
+        </div>
+      </section>
+
+      <!-- Products -->
+      <section data-page="products" hidden>
+        <div class="tabs-row" role="group" data-i18n-aria-label="adm.products.filter" id="productTabs"></div>
+        <form class="toolbar" id="productFilters" role="search">
+          <label class="grow"><span data-i18n="adm.products.search"></span> <input name="q" type="search" autocomplete="off" data-i18n-placeholder="adm.products.search_ph"></label>
+          <label><span data-i18n="adm.products.category"></span> <select name="category"><option value="" data-i18n="common.all"></option></select></label>
+        </form>
+        <div id="listError"></div>
+        <div class="table-wrap">
+          <table class="table products-table">
+            <caption class="visually-hidden" data-i18n="adm.route.products"></caption>
+            <thead><tr id="productHead"></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <nav class="pager" id="productsPager" data-i18n-aria-label="adm.pager"></nav>
+      </section>
+
+      <!-- Stats -->
+      <section data-page="stats" hidden>
+        <div class="page-head">
+          <p class="muted" id="statsRange"></p>
+          <div class="seg" role="group" data-i18n-aria-label="adm.stats.period" id="statsDays"></div>
+        </div>
+        <div id="statsError"></div>
+        <div class="kpis six" id="statsKpis"></div>
+        <div class="dash-grid">
+          <section class="card panel span-2" aria-labelledby="statsChartTitle">
+            <div class="panel-head">
+              <div><h2 id="statsChartTitle"></h2><p class="panel-sub" id="statsChartSub"></p></div>
+              <div class="seg" role="group" data-i18n-aria-label="adm.dash.metric" id="statsMetric"></div>
+            </div>
+            <div class="chart-box" id="statsChart"></div>
+            <details class="table-view">
+              <summary data-i18n="adm.stats.table"></summary>
+              <div class="table-wrap"><table class="table"><thead><tr><th data-i18n="adm.stats.day"></th><th class="num" data-i18n="adm.stats.count"></th><th class="num" data-i18n="adm.dash.paid"></th><th class="num" data-i18n="adm.dash.revenue"></th></tr></thead><tbody id="dayRows"></tbody></table></div>
+            </details>
+          </section>
+          <section class="card panel" aria-labelledby="statsFunnelTitle">
+            <div class="panel-head"><div><h2 id="statsFunnelTitle" data-i18n="adm.stats.pilot"></h2><p class="panel-sub" id="statsFunnelSub"></p></div></div>
+            <div class="funnel" id="statsFunnel"></div>
+          </section>
+          <section class="card panel" aria-labelledby="statsTopTitle">
+            <div class="panel-head"><div><h2 id="statsTopTitle" data-i18n="adm.stats.top"></h2></div></div>
+            <ol class="rank" id="topRows"></ol>
+          </section>
+        </div>
+      </section>
+
+      <!-- QR -->
+      <section data-page="qr" hidden>
+        <p class="muted lead" data-i18n="adm.qrdlg.text"></p>
+        <div id="qrError"></div>
+        <div class="qr-grid" id="qrGrid"></div>
+      </section>
+
+      <!-- Settings (task 19 fills this) -->
+      <section data-page="settings" hidden>
+        <div class="settings">
+          <section class="card" aria-labelledby="accTitle">
+            <h2 id="accTitle" data-i18n="adm.set.account"></h2>
+            <dl class="facts" id="accFacts"></dl>
+            <h3 data-i18n="common.lang"></h3>
+            <div id="setLang"></div>
+          </section>
+          <section class="card empty" aria-labelledby="soonTitle">
+            <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#settings"></use></svg>
+            <h2 id="soonTitle" data-i18n="adm.set.soon_title"></h2>
+            <p data-i18n="adm.set.soon_text"></p>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
 </div>
 
-<dialog id="qrDlg" aria-labelledby="qrTitle">
-  <h2 id="qrTitle" data-i18n="adm.qrdlg.title"></h2>
-  <p class="sizes" data-i18n="adm.qrdlg.text"></p>
-  <div class="table-wrap"><table class="table"><tbody id="qrRows"></tbody></table></div>
-  <p class="error" id="qrError" role="alert"></p>
-  <div class="actions"><button type="button" id="qrClose" data-i18n="common.close"></button></div>
-</dialog>
+<dialog id="navDrawer" class="drawer left" data-i18n-aria-label="adm.nav"></dialog>
 
-<dialog id="orderDlg" aria-labelledby="orderTitle">
-  <h2 id="orderTitle"></h2>
-  <div id="orderInfo"></div>
+<dialog id="orderDlg" class="drawer right" aria-labelledby="orderTitle">
+  <div class="drawer-head">
+    <h2 id="orderTitle" tabindex="-1"></h2>
+    <button type="button" class="icon-btn ghost" id="orderClose" data-i18n-aria-label="common.close" data-i18n-title="common.close"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#close"></use></svg></button>
+  </div>
+  <div class="drawer-body" id="orderInfo"></div>
   <p class="error" id="orderError" role="alert"></p>
-  <div class="actions" id="orderActions"></div>
-</dialog>
-
-<dialog id="payDlg" aria-labelledby="payTitle">
-  <h2 id="payTitle" data-i18n="adm.paydlg.title"></h2>
-  <form id="payFind" class="bar">
-    <label class="grow"><span data-i18n="adm.paydlg.no"></span> <input name="no" type="number" inputmode="numeric" min="1" required></label>
-    <button class="primary" data-i18n="adm.paydlg.find"></button>
-  </form>
-  <div id="payOrder"></div>
-  <p class="error" id="payError" role="alert"></p>
-  <div class="actions"><button type="button" class="primary" id="payConfirm" hidden data-i18n="adm.paydlg.confirm"></button><button type="button" id="payClose" data-i18n="common.close"></button></div>
+  <div class="drawer-foot" id="orderActions"></div>
 </dialog>
 
 <dialog id="importDlg" aria-labelledby="importTitle">
@@ -165,427 +275,13 @@
     <div class="stock" id="stock"></div>
     <p class="error" id="formError" role="alert"></p>
     <div class="actions">
+      <button type="button" class="danger ghost push-left" id="formDelete"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trash"></use></svg><span data-i18n="common.delete"></span></button>
       <button type="button" id="cancel" data-i18n="common.cancel"></button>
       <button class="primary" id="save" data-i18n="adm.form.save"></button>
     </div>
   </form>
 </dialog>
 
-<script type="module">
-import { icon, toast, confirmDialog } from '/shared/ui.js';
-import { t, fmt, initLang, getLang, langSwitch, productName } from '/shared/i18n.js';
-const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
-const cat = (c) => (c ? t(`cat.${c}`) : '—');
-const SIZES = { shoes: ['36','37','38','39','40','41','42','43','44','45'], accessory: ['ONE'] };
-const sizesFor = (c) => SIZES[c] || ['XS','S','M','L','XL','XXL'];
-const $ = (id) => document.getElementById(id);
-const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
-const som = (n) => fmt.num(n); // bare number: the column header names the currency
-let me = null, stores = [], editing = null;
-
-function token() { try { return localStorage.getItem('sfToken'); } catch { return null; } }
-function setToken(t) { try { t ? localStorage.setItem('sfToken', t) : localStorage.removeItem('sfToken'); } catch {} }
-
-async function call(path, opts = {}) {
-  const res = await fetch('/api/admin' + path, {
-    method: opts.method || 'GET',
-    headers: { 'content-type': opts.type || 'application/json', authorization: 'Bearer ' + token(), 'accept-language': getLang() },
-    body: opts.raw ?? (opts.body && JSON.stringify(opts.body)),
-  });
-  if (res.status === 401 && path !== '/login') { setToken(null); show(); throw new Error(t('adm.relogin')); }
-  const data = res.status === 204 ? null : await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || t('common.error')), { data });
-  return data;
-}
-
-initLang();
-// Language: one switch on the sign-in card, one in the header. A switch reloads the page (admin keeps its token,
-// and every list, select and dialog is drawn again in the new language).
-$('loginLang').replaceChildren(langSwitch(() => location.reload()));
-$('adminLang').replaceChildren(langSwitch(() => location.reload(), { short: true }));
-for (const v of CATEGORIES) {
-  $('cat').append(el('option', { value: v, textContent: cat(v) }));
-  $('form').category.append(el('option', { value: v, textContent: cat(v) }));
-}
-for (const o of $('statsDays').options) o.textContent = t('adm.stats.days', { n: Number(o.value) });
-
-async function show() {
-  me = null;
-  if (token()) { try { me = await call('/me'); } catch {} }
-  $('login').hidden = !!me;
-  $('app').hidden = !me;
-  if (!me) return;
-  stores = await call('/stores');
-  $('who').textContent = me.email + ' · ' + (me.role === 'super' ? t('adm.super') : stores[0]?.name || '');
-  $('storeFilterWrap').hidden = $('storeWrap').hidden = $('statsStoreWrap').hidden = $('ordersStoreWrap').hidden = me.role !== 'super';
-  for (const sel of [$('storeFilter'), $('statsStore'), $('ordersStore'), $('form').store_id]) {
-    sel.replaceChildren(...(sel.id ? [el('option', { value: '', textContent: t('common.all') })] : []), ...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
-  }
-  load();
-}
-
-$('login').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  $('loginError').textContent = '';
-  try {
-    const f = e.target;
-    const r = await call('/login', { method: 'POST', body: { email: f.email.value, password: f.password.value } });
-    setToken(r.token);
-    f.password.value = '';
-    show();
-  } catch (err) { $('loginError').textContent = err.message; }
-});
-$('logout').onclick = () => { setToken(null); show(); };
-
-let timer;
-async function load() {
-  const p = new URLSearchParams();
-  if ($('q').value.trim()) p.set('q', $('q').value.trim());
-  if ($('cat').value) p.set('category', $('cat').value);
-  if ($('storeFilter').value) p.set('store_id', $('storeFilter').value);
-  try {
-    const list = await call('/products?' + p);
-    $('listError').textContent = '';
-    const storeName = (id) => stores.find((s) => s.id === id)?.name || id;
-    $('rows').replaceChildren(...(list.length ? list.map((x) => el('tr', {},
-      el('td', {}, ...(x.image_url ? [el('img', { className: 'thumb', src: x.image_url, alt: '' })] : []), productName(x)),
-      el('td', { textContent: cat(x.category) }),
-      el('td', { textContent: storeName(x.store_id) }),
-      el('td', { className: 'num', textContent: x.discount_price ? som(x.discount_price) + ' (' + som(x.price) + ')' : som(x.price) }),
-      el('td', { className: 'sizes', textContent: x.stock.map((s) => s.size + ': ' + s.quantity).join(', ') }),
-      el('td', { className: 'row-actions' },
-        el('button', { className: 'icon-btn ghost', title: t('adm.products.edit'), ariaLabel: t('adm.products.edit_aria', { name: productName(x) }), onclick: () => openForm(x) }, icon('edit')),
-        el('button', { className: 'icon-btn ghost danger', title: t('common.delete'), ariaLabel: t('adm.products.delete_aria', { name: productName(x) }), onclick: () => remove(x) }, icon('trash'))),
-    )) : [el('tr', {}, el('td', { colSpan: 6, className: 'empty-row', textContent: t('adm.products.empty') }))]));
-  } catch (err) { $('listError').textContent = err.message; }
-}
-$('q').oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
-$('cat').onchange = $('storeFilter').onchange = load;
-
-function renderStock(category, stock = []) {
-  $('stock').replaceChildren(...sizesFor(category).map((size) => {
-    const row = stock.find((s) => s.size === size);
-    const input = el('input', { type: 'number', min: row?.reserved || 0, step: 1, value: row?.quantity ?? 0 });
-    input.dataset.size = size;
-    return el('label', { textContent: size }, input);
-  }));
-}
-
-function openForm(p) {
-  editing = p;
-  const f = $('form');
-  f.reset();
-  $('formError').textContent = '';
-  $('formTitle').textContent = t(p ? 'adm.form.edit' : 'adm.form.new');
-  for (const k of ['name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'shelf_location']) f[k].value = p?.[k] ?? '';
-  if (!p) { f.category.value = 'top'; f.gender.value = 'unisex'; }
-  f.waterproof.checked = !!p?.waterproof;
-  f.store_id.value = p?.store_id ?? stores[0]?.id ?? '';
-  f.store_id.disabled = !!p;
-  renderStock(f.category.value, p?.stock);
-  $('imgWrap').hidden = !p;
-  $('imgError').textContent = '';
-  $('imgFile').value = '';
-  showImage(p?.image_url);
-  $('dlg').showModal();
-}
-$('form').category.onchange = (e) => renderStock(e.target.value, editing?.stock);
-$('add').onclick = () => openForm(null);
-$('cancel').onclick = () => $('dlg').close();
-
-$('form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const f = e.target;
-  const num = (v) => (v === '' ? null : Number(v));
-  const body = {
-    name: f.name.value, name_ru: f.name_ru.value || null, category: f.category.value, gender: f.gender.value, color: f.color.value,
-    style: f.style.value || null, price: num(f.price.value), discount_price: num(f.discount_price.value),
-    temp_min: num(f.temp_min.value), temp_max: num(f.temp_max.value), waterproof: f.waterproof.checked,
-    shelf_location: f.shelf_location.value || null,
-    stock: Object.fromEntries([...$('stock').querySelectorAll('input')].map((i) => [i.dataset.size, num(i.value) ?? 0])),
-  };
-  if (!editing && me.role === 'super') body.store_id = Number(f.store_id.value);
-  try {
-    await call(editing ? '/products/' + editing.id : '/products', { method: editing ? 'PATCH' : 'POST', body });
-    $('dlg').close();
-    toast(t(editing ? 'adm.form.saved' : 'adm.form.added'));
-    load();
-  } catch (err) { $('formError').textContent = err.message; }
-});
-
-function showImage(url) {
-  $('imgPreview').hidden = !url;
-  $('imgRemove').hidden = !url;
-  if (url) $('imgPreview').src = url;
-}
-$('imgUpload').onclick = async () => {
-  const file = $('imgFile').files[0];
-  $('imgError').textContent = '';
-  if (!file) { $('imgError').textContent = t('adm.form.image_pick'); return; }
-  if (file.size > 2 * 1024 * 1024) { $('imgError').textContent = t('adm.form.image_big'); return; }
-  try {
-    const r = await call('/products/' + editing.id + '/image', { method: 'POST', raw: file, type: file.type || 'application/octet-stream' });
-    editing.image_url = r.image_url;
-    showImage(r.image_url);
-    $('imgFile').value = '';
-    load();
-  } catch (err) { $('imgError').textContent = err.message; }
-};
-$('imgRemove').onclick = async () => {
-  try {
-    await call('/products/' + editing.id + '/image', { method: 'DELETE' });
-    editing.image_url = null;
-    showImage(null);
-    load();
-  } catch (err) { $('imgError').textContent = err.message; }
-};
-
-$('importCols').textContent = 'id, store_id, name, name_ru, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, shelf_location, XS, S, M, L, XL, XXL, 36 … 45, ONE';
-$('importBtn').onclick = () => {
-  $('importForm').reset();
-  $('importError').textContent = '';
-  $('importErrors').replaceChildren();
-  $('importDlg').showModal();
-};
-$('importCancel').onclick = () => $('importDlg').close();
-$('importForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  $('importError').textContent = '';
-  $('importErrors').replaceChildren();
-  const file = e.target.file.files[0];
-  if (!file) return;
-  try {
-    const r = await call('/products/import', { method: 'POST', raw: await file.text(), type: 'text/csv' });
-    $('importError').textContent = '';
-    $('importErrors').replaceChildren();
-    $('importDlg').close();
-    toast(t('adm.import.done', { created: r.created, updated: r.updated }));
-    load();
-  } catch (err) {
-    $('importError').textContent = err.message;
-    $('importErrors').replaceChildren(...(err.data?.errors || []).map((x) => el('li', { textContent: t('adm.import.line', { line: x.line, error: x.error }) })));
-  }
-});
-
-const TABS = { products: () => load(), orders: () => loadOrders(), stats: () => loadStats() };
-function tab(name) {
-  for (const n of Object.keys(TABS)) {
-    $(n).hidden = n !== name;
-    const b = $('tab' + n[0].toUpperCase() + n.slice(1));
-    n === name ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current');
-  }
-  TABS[name]();
-}
-$('tabProducts').onclick = () => tab('products');
-$('tabOrders').onclick = () => tab('orders');
-$('tabStats').onclick = () => tab('stats');
-
-async function loadStats() {
-  const p = new URLSearchParams({ days: $('statsDays').value });
-  if ($('statsStore').value) p.set('store_id', $('statsStore').value);
-  try {
-    const s = await call('/stats?' + p);
-    $('statsError').textContent = '';
-    $('statsEmpty').hidden = s.total > 0;
-    $('statsBody').hidden = s.total === 0;
-    $('statsTotal').textContent = t('adm.stats.total', { days: s.days, total: s.total });
-    const f = s.pilot;
-    const pct = (n) => (f.shown ? `${Math.round((n / f.shown) * 100)}%` : '—');
-    $('pilotRows').replaceChildren(...[
-      ['adm.stats.shown', f.shown], ['adm.stats.accepted', f.accepted], ['adm.stats.tried', f.tried], ['adm.stats.bought', f.bought],
-    ].map(([label, n]) => el('tr', {}, el('td', { textContent: t(label) }), el('td', { className: 'num', textContent: n }), el('td', { className: 'num', textContent: pct(n) }))));
-    $('pilotOrders').textContent = t('adm.stats.orders', { orders: f.orders, delivery: f.delivery_orders, revenue: fmt.som(f.revenue), avg: fmt.som(f.avg_order) });
-    $('topRows').replaceChildren(...s.top.map((x) => el('tr', {},
-      el('td', { textContent: x.name ? productName(x) : t('adm.stats.deleted', { id: x.product_id }) }),
-      el('td', { textContent: cat(x.category) }),
-      el('td', { className: 'num', textContent: x.count }))));
-    const max = Math.max(1, ...s.per_day.map((d) => d.count));
-    $('dayRows').replaceChildren(...s.per_day.slice().reverse().map((d) => el('tr', {},
-      el('td', { textContent: d.day }),
-      el('td', { className: 'num', textContent: d.count }),
-      el('td', {}, el('div', { className: 'bar-fill', style: `width:${(d.count / max) * 100}%` })))));
-  } catch (err) { $('statsError').textContent = err.message; }
-}
-$('statsDays').onchange = $('statsStore').onchange = loadStats;
-
-// Cashier: find an order by its number, take the money, mark it paid (stock goes down on the server).
-const pay = (o) => t(`adm.pay.${o.payment_status}`);
-let payOrder = null;
-$('payBtn').onclick = () => {
-  payOrder = null;
-  $('payFind').reset();
-  $('payOrder').replaceChildren();
-  $('payError').textContent = '';
-  $('payConfirm').hidden = true;
-  $('payDlg').showModal();
-};
-$('payClose').onclick = () => $('payDlg').close();
-function renderPay(o) {
-  payOrder = o;
-  $('payConfirm').hidden = o.payment_status !== 'pending';
-  $('payOrder').replaceChildren(...orderInfo(o));
-}
-function orderInfo(o) {
-  const until = o.expires_at ? ` · ${t('adm.order.until', { time: fmt.time(o.expires_at) })}` : '';
-  return [
-    el('p', { textContent: `№ ${o.number} · ${o.customer_name} · ${o.phone} · ${o.fulfillment === 'pickup' ? t('adm.order.pickup') : t('adm.order.delivery_to', { address: o.address })}` }),
-    el('div', { className: 'table-wrap' }, el('table', { className: 'table' }, el('tbody', {}, ...o.items.map((i) => el('tr', {},
-      el('td', { textContent: productName(i) }), el('td', { textContent: i.size }), el('td', { textContent: i.shelf_location || '' }),
-      el('td', { className: 'num', textContent: `${i.quantity} × ${som(i.unit_price)}` })))))),
-    el('p', {}, el('strong', { textContent: t('adm.order.total', { sum: fmt.som(o.total) }) }), ` ${t('adm.order.fee', { fee: som(o.delivery_fee) })} · ${pay(o)}${o.payment_status === 'pending' ? until : ''}`),
-  ];
-}
-$('payFind').onsubmit = async (e) => {
-  e.preventDefault();
-  $('payError').textContent = '';
-  try {
-    // Customers say the per-store display number; a super-admin may find it in several stores and picks one.
-    const found = await call('/orders?number=' + Number($('payFind').no.value));
-    if (!found.length) throw new Error(t('err.order_not_found'));
-    if (found.length === 1) return renderPay(await call('/orders/' + found[0].id));
-    $('payConfirm').hidden = true;
-    $('payOrder').replaceChildren(el('p', { textContent: t('adm.paydlg.pick') }), el('div', { className: 'actions' }, ...found.map((o) =>
-      el('button', { type: 'button', textContent: `№ ${o.number} · ${o.store_name}`, onclick: async () => renderPay(await call('/orders/' + o.id)) }))));
-  } catch (err) {
-    $('payOrder').replaceChildren();
-    $('payConfirm').hidden = true;
-    $('payError').textContent = err.message;
-  }
-};
-$('payConfirm').onclick = async () => {
-  $('payError').textContent = '';
-  $('payConfirm').disabled = true;
-  try {
-    renderPay(await call(`/orders/${payOrder.id}/pay`, { method: 'POST' }));
-    toast(t('adm.paydlg.done', { id: payOrder.number }));
-    load(); // stock changed
-  } catch (err) {
-    $('payError').textContent = err.message;
-  } finally {
-    $('payConfirm').disabled = false;
-  }
-};
-
-// Orders: list with filters, details with one button per allowed next status (the server decides which).
-const STATUSES = ['new', 'packing', 'shipping', 'delivered', 'cancelled'];
-const handed = (o, s) => s === 'delivered' && o.fulfillment === 'pickup'; // a pickup order is handed over, not delivered
-const statusName = (o) => t(handed(o, o.status) ? 'adm.status.handed' : `adm.status.${o.status}`);
-const stepName = (o, s) => t(handed(o, s) ? 'adm.step.handed' : `adm.step.${s}`);
-const badge = (o) => el('span', { className: 'badge ' + ({ new: 'warn', packing: 'accent', shipping: 'accent', delivered: 'ok', cancelled: 'off' }[o.status] || ''), textContent: statusName(o) });
-const when = (iso) => fmt.dateTime(iso);
-for (const v of STATUSES) $('ordersStatus').append(el('option', { value: v, textContent: t(`adm.status.${v}`) }));
-
-async function loadOrders() {
-  const p = new URLSearchParams();
-  if ($('ordersStatus').value) p.set('status', $('ordersStatus').value);
-  if ($('ordersStore').value) p.set('store_id', $('ordersStore').value);
-  try {
-    const list = await call('/orders?' + p);
-    $('ordersError').textContent = '';
-    $('orderRows').replaceChildren(...(list.length ? list.map((o) => {
-      const tr = el('tr', { tabIndex: 0, onclick: () => openOrder(o.id), onkeydown: (e) => e.key === 'Enter' && openOrder(o.id) },
-        el('td', { textContent: o.number }),
-        el('td', { textContent: when(o.created_at) }),
-        el('td', {}, o.customer_name, el('div', { className: 'sizes', textContent: o.phone + (me.role === 'super' ? ' · ' + o.store_name : '') })),
-        el('td', { textContent: t(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery') }),
-        el('td', { className: 'num', textContent: som(o.total) }),
-        el('td', { textContent: pay(o) }),
-        el('td', {}, badge(o)),
-        el('td', { textContent: o.telegram ? t('adm.orders.tg_linked') : '—' }));
-      return tr;
-    }) : [el('tr', {}, el('td', { colSpan: 8, className: 'empty-row', textContent: t('adm.orders.empty') }))]));
-  } catch (err) { $('ordersError').textContent = err.message; }
-  loadFitting();
-}
-// Fitting-room requests (task 17): bring these sizes to this cabin, then tick it off.
-async function loadFitting() {
-  let list;
-  try { list = await call('/fitting'); } catch { return; } // the orders table above already shows any connection error
-  $('fitting').hidden = !list.length;
-  $('fittingList').replaceChildren(...list.map((f) => el('li', {},
-    el('div', {}, el('strong', { textContent: t('adm.fit.cabin', { cabin: f.cabin }) }), el('span', { className: 'sizes', textContent: ` · ${fmt.time(f.created_at)}${me.role === 'super' ? ' · ' + f.store_name : ''}` }),
-      el('div', { className: 'sizes', textContent: f.items.map((i) => `${productName(i)} — ${i.size === 'ONE' ? t('common.size_one') : i.size}${i.shelf_location ? ` (${i.shelf_location})` : ''}`).join(', ') })),
-    el('button', { type: 'button', onclick: async () => {
-      try { await call(`/fitting/${f.id}/done`, { method: 'POST' }); loadFitting(); } catch (err) { $('ordersError').textContent = err.message; }
-    } }, icon('check'), t('adm.fit.done')))));
-}
-$('ordersStatus').onchange = $('ordersStore').onchange = $('ordersReload').onclick = loadOrders;
-// New orders show up without a click while the tab is open.
-setInterval(() => { if (me && !$('orders').hidden && !$('orderDlg').open && !document.hidden) loadOrders(); }, 15000); // fitting-room requests are time-sensitive
-
-async function openOrder(id) {
-  $('orderError').textContent = '';
-  try { renderOrder(await call('/orders/' + id)); $('orderDlg').showModal(); }
-  catch (err) { $('ordersError').textContent = err.message; }
-}
-function renderOrder(o) {
-  $('orderTitle').replaceChildren(t('adm.order.title', { id: o.number }), ' ', badge(o));
-  $('orderInfo').replaceChildren(...orderInfo(o),
-    el('p', { className: 'sizes', textContent: `${when(o.created_at)} · ${o.payment_method === 'cashier' ? t('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] || o.payment_method} · ${t(o.telegram ? 'adm.order.tg_on' : 'adm.order.tg_off')}` }),
-    ...(o.status === 'cancelled' && o.payment_status === 'paid' ? [el('p', { className: 'error', textContent: t('adm.order.refund') })] : []));
-  $('orderActions').replaceChildren(
-    ...o.next.map((s) => el('button', { type: 'button', className: s === 'cancelled' ? 'danger' : 'primary', textContent: stepName(o, s), onclick: (e) => setStatus(o, s, e.target) })),
-    el('button', { type: 'button', textContent: t('common.close'), onclick: () => $('orderDlg').close() }));
-}
-async function setStatus(o, s, btn) {
-  if (s === 'cancelled' && !(await confirmDialog({ title: t('adm.order.cancel_title', { id: o.number }), text: t(o.payment_status === 'paid' ? 'adm.order.cancel_paid' : 'adm.order.cancel_unpaid'), ok: t('adm.step.cancelled'), cancel: t('common.back'), danger: true }))) return;
-  $('orderError').textContent = '';
-  btn.disabled = true;
-  try {
-    const next = await call(`/orders/${o.id}/status`, { method: 'POST', body: { status: s } });
-    renderOrder(next);
-    toast(t('adm.order.changed', { id: o.number, status: statusName(next) }));
-    loadOrders();
-  } catch (err) {
-    $('orderError').textContent = err.message;
-    btn.disabled = false;
-  }
-}
-
-$('qrBtn').onclick = () => {
-  $('qrError').textContent = '';
-  $('qrRows').replaceChildren(...stores.map((s) => el('tr', {},
-    el('td', { textContent: s.name }),
-    el('td', { className: 'num' }, el('button', { className: 'primary', onclick: () => printQr(s.id) }, icon('qr'), t('adm.qrdlg.print'))))));
-  $('qrDlg').showModal();
-};
-$('qrClose').onclick = () => $('qrDlg').close();
-
-// Prints from an off-screen iframe (no popup to block). The SVG is generated by our server; the store name goes in as text.
-async function printQr(id) {
-  $('qrError').textContent = '';
-  try {
-    const q = await call('/stores/' + id + '/qr');
-    document.getElementById('qrFrame')?.remove();
-    const frame = el('iframe', { id: 'qrFrame', title: 'QR', style: 'position:fixed;right:0;bottom:0;width:0;height:0;border:0' });
-    document.body.append(frame);
-    const d = frame.contentDocument;
-    d.title = 'QR — ' + q.name;
-    d.body.style.cssText = 'font-family:system-ui,sans-serif;text-align:center;margin:40px';
-    const box = d.createElement('div');
-    box.style.cssText = 'width:320px;margin:24px auto';
-    box.innerHTML = q.svg;
-    const h = d.createElement('h1');
-    h.textContent = q.name;
-    const p1 = d.createElement('p');
-    p1.style.fontSize = '20px';
-    p1.textContent = t('adm.qrdlg.scan');
-    const p2 = d.createElement('p');
-    p2.style.color = '#666';
-    p2.textContent = q.url;
-    d.body.append(h, p1, box, p2);
-    frame.contentWindow.focus();
-    frame.contentWindow.print();
-  } catch (err) { $('qrError').textContent = err.message; }
-}
-
-async function remove(p) {
-  if (!(await confirmDialog({ title: t('adm.products.delete_title', { name: productName(p) }), text: t('adm.products.delete_text'), ok: t('common.delete'), danger: true }))) return;
-  try { await call('/products/' + p.id, { method: 'DELETE' }); load(); toast(t('adm.products.deleted')); }
-  catch (err) { $('listError').textContent = err.message; }
-}
-
-show();
-</script>
+<script type="module" src="/admin/admin.js"></script>
 </body>
 </html>

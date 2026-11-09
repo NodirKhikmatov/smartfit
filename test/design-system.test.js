@@ -65,7 +65,7 @@ test('both pages use the shared ui.css and define no tokens or colours of their 
 
 test('every icon the pages use exists in the sprite, including categories and weather', () => {
   const symbols = new Set([...sprite.matchAll(/<symbol id="([\w-]+)"/g)].map((m) => m[1]));
-  const code = [pages.app, pages.admin, read('public/app/app.js'), read('public/shared/styleguide.html')].join('\n');
+  const code = [pages.app, pages.admin, read('public/admin/admin.js'), read('public/app/app.js'), read('public/shared/styleguide.html')].join('\n');
   const used = new Set([
     ...[...code.matchAll(/icon\('([\w-]+)'/g)].map((m) => m[1]),
     ...[...code.matchAll(/icons\.svg#([\w-]+)/g)].map((m) => m[1]),

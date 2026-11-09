@@ -14,7 +14,7 @@ const srcFiles = (dir = 'src') => readdirSync(new URL(`../${dir}`, import.meta.u
 
 // Every file with user-facing text. i18n.js counts only below the dictionary (its helpers use keys too).
 const PAGES = ['public/app/index.html', 'public/app/order.html', 'public/admin/index.html'];
-const SCRIPTS = ['public/app/app.js', 'public/app/idle.js', 'public/app/pose.js', 'public/app/flow.js', 'public/app/keypad.js', 'public/app/order.js', 'public/shared/ui.js', ...srcFiles()];
+const SCRIPTS = ['public/app/app.js', 'public/app/idle.js', 'public/app/pose.js', 'public/app/flow.js', 'public/app/keypad.js', 'public/app/order.js', 'public/admin/admin.js', 'public/admin/util.js', 'public/admin/charts.js', 'public/shared/ui.js', ...srcFiles()];
 const i18nSrc = read('public/shared/i18n.js');
 const sources = Object.fromEntries([...PAGES, ...SCRIPTS].map((f) => [f, read(f)]));
 sources['public/shared/i18n.js#helpers'] = i18nSrc.slice(i18nSrc.indexOf('export const DICT'));
@@ -219,7 +219,7 @@ test('name_ru: optional on products (form and CSV), searchable, sent to the apps
   const long = await call('/api/admin/products', { method: 'POST', auth: token, lang: 'ru', body: { ...base, name_ru: 'я'.repeat(121) } });
   assert.deepEqual(long.body, { code: 'invalid', error: 'Проверьте поле «Название на русском»' });
   const found = await call(`/api/admin/products?q=${encodeURIComponent('Тестовое')}`, { auth: token }); // same case: SQLite LIKE
-  assert.deepEqual(found.body.map((p) => p.id), [created.body.id], 'admin search matches the Russian name');
+  assert.deepEqual(found.body.items.map((p) => p.id), [created.body.id], 'admin search matches the Russian name');
 
   const csv = `id,name_ru\n${none.body.id},Пальто два\n`;
   const imp = await call('/api/admin/products/import', { method: 'POST', raw: csv, type: 'text/csv', auth: token });

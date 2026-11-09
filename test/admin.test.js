@@ -79,11 +79,12 @@ test('super-admin sees all stores, manager only their own', async () => {
   assert.equal((await api('/stores', { token: superToken })).body.length, 2);
   assert.deepEqual((await api('/stores', { token: tashToken })).body.map((s) => s.id), [tashkent]);
   const all = (await api('/products', { token: superToken })).body;
-  assert.equal(all.length, inStore('T') + inStore('S'));
-  const own = (await api('/products', { token: tashToken })).body;
+  assert.equal(all.total, inStore('T') + inStore('S'));
+  assert.equal(all.items.length, 25, 'first page');
+  const own = (await api('/products?limit=100', { token: tashToken })).body.items;
   assert.equal(own.length, inStore('T'));
   assert.ok(own.every((p) => p.store_id === tashkent));
-  assert.equal((await api(`/products?store_id=${samarkand}`, { token: tashToken })).body.length, 0);
+  assert.equal((await api(`/products?store_id=${samarkand}`, { token: tashToken })).body.total, 0);
 });
 
 test('store manager cannot read or change another store\'s products', async () => {
@@ -101,9 +102,9 @@ test('store manager cannot read or change another store\'s products', async () =
 });
 
 test('search and category filter', async () => {
-  const jinsi = (await api('/products?q=JINSI', { token: tashToken })).body;
+  const jinsi = (await api('/products?q=JINSI', { token: tashToken })).body.items;
   assert.deepEqual(jinsi.map((p) => p.name).sort(), ['Isitilgan jinsi', 'Jinsi kurtka', 'Jinsi shorti', 'Klassik jinsi', 'Premium jinsi', 'Slim jinsi']);
-  const shoes = (await api('/products?category=shoes', { token: tashToken })).body;
+  const shoes = (await api('/products?category=shoes&sort=name', { token: tashToken })).body.items;
   assert.ok(shoes.length > 0 && shoes.every((p) => p.category === 'shoes'));
   assert.deepEqual(shoes[0].stock.map((s) => s.size), ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45']);
   assert.equal(typeof shoes[0].waterproof, 'boolean');

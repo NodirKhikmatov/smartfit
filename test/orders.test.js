@@ -64,20 +64,20 @@ test('order list: newest first, store-scoped, filtered by status, with the allow
   const a = await order(tashkent), b = await order(samarkand, { paid: false });
   const mine = await call('GET', '/api/admin/orders', undefined, tashToken);
   assert.equal(mine.status, 200);
-  assert.ok(mine.body.every((o) => o.store_id === tashkent));
-  const row = mine.body.find((o) => o.id === a.id);
+  assert.ok(mine.body.items.every((o) => o.store_id === tashkent));
+  const row = mine.body.items.find((o) => o.id === a.id);
   assert.deepEqual([row.status, row.payment_status, row.telegram], ['new', 'paid', false]);
   assert.deepEqual(row.next, ['packing', 'cancelled']);
   assert.ok(Math.abs(Date.parse(row.created_at) - Date.now()) < 60_000, 'created_at is read as UTC');
-  assert.ok(!mine.body.some((o) => o.id === b.id));
+  assert.ok(!mine.body.items.some((o) => o.id === b.id));
   const all = await call('GET', '/api/admin/orders', undefined, superToken);
-  assert.ok(all.body.some((o) => o.id === a.id) && all.body.some((o) => o.id === b.id));
-  assert.deepEqual(all.body.map((o) => o.id), all.body.map((o) => o.id).sort((x, y) => y - x));
-  assert.ok((await call('GET', `/api/admin/orders?store_id=${samarkand}`, undefined, superToken)).body.every((o) => o.store_id === samarkand));
-  assert.equal((await call('GET', `/api/admin/orders?store_id=${samarkand}`, undefined, tashToken)).body.length, 0, "a manager can't widen the scope");
+  assert.ok(all.body.items.some((o) => o.id === a.id) && all.body.items.some((o) => o.id === b.id));
+  assert.deepEqual(all.body.items.map((o) => o.id), all.body.items.map((o) => o.id).sort((x, y) => y - x));
+  assert.ok((await call('GET', `/api/admin/orders?store_id=${samarkand}`, undefined, superToken)).body.items.every((o) => o.store_id === samarkand));
+  assert.equal((await call('GET', `/api/admin/orders?store_id=${samarkand}`, undefined, tashToken)).body.total, 0, "a manager can't widen the scope");
   await setStatus(a.id, 'packing');
   const packing = await call('GET', '/api/admin/orders?status=packing', undefined, tashToken);
-  assert.ok(packing.body.length && packing.body.every((o) => o.status === 'packing'));
+  assert.ok(packing.body.items.length && packing.body.items.every((o) => o.status === 'packing'));
   assert.equal((await call('GET', '/api/admin/orders')).status, 401);
 });
 

@@ -22,3 +22,14 @@ export function parseCsv(text) {
   if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
   return rows;
 }
+
+// Rows → CSV for Excel: UTF-8 BOM, ';' (the list separator of ru/uz Excel), every cell quoted.
+// A cell starting with = + - @ tab or CR would run as a formula when opened, so it gets a leading apostrophe.
+export function toCsv(rows) {
+  const cell = (v) => {
+    let s = String(v ?? '');
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+  return '﻿' + rows.map((r) => r.map(cell).join(';')).join('\r\n') + '\r\n';
+}

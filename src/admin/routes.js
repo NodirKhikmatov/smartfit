@@ -4,10 +4,10 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { sizesFor } from '../db/seed.js';
-import { parseCsv } from './csv.js';
+import { parseCsv, toCsv } from './csv.js';
 import { hashPassword, verifyPassword, DUMMY_HASH, tokenSecret, signToken, verifyToken } from './auth.js';
 import { releaseExpired, markPaid, orderView, nextStatuses, changeStatus, stamp } from '../cart/cart.js';
-import { LANGS, errorText } from '../../public/shared/i18n.js';
+import { LANGS, errorText, t } from '../../public/shared/i18n.js';
 import { dbTime } from '../recommend/routes.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
@@ -109,7 +109,37 @@ const IMAGE_TYPES = [
   ['webp', (b) => b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP'],
 ];
 const STATS_TZ = 'Asia/Tashkent'; // every store is in Uzbekistan (UTC+5, no DST)
+const DAY_MS = 86400000;
 const dayKey = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: STATS_TZ });
+const dayStart = (key) => Date.parse(`${key}T00:00:00+05:00`);
+const iso = (ms) => new Date(ms).toISOString(); // paid_at / expires_at are written as ISO strings (cart.js)
+// SQLite gives 'YYYY-MM-DD HH:MM:SS' (UTC) strings, Postgres gives Date objects.
+const msOf = (v) => (v instanceof Date ? v.getTime() : Date.parse(`${String(v).replace(' ', 'T')}${String(v).includes('Z') || String(v).includes('+') ? '' : 'Z'}`));
+
+// List paging: limit 1–100 (default 25), offset ≥ 0. Out-of-range values are clamped, not refused.
+export const PAGE_MAX = 100;
+export function paging(query) {
+  const n = (v) => Number.parseInt(v, 10);
+  return { limit: Math.min(Math.max(n(query.limit) || 25, 1), PAGE_MAX), offset: Math.max(n(query.offset) || 0, 0) };
+}
+// One of a fixed list; empty = the first (default). Anything else is a 400, never SQL.
+const pick = (v, allowed, field) => {
+  if (v === undefined || v === '') return allowed[0];
+  if (!allowed.includes(v)) throw fail(400, 'err.invalid', { field });
+  return v;
+};
+const ORDER_STATUSES = ['new', 'packing', 'shipping', 'delivered', 'cancelled'];
+const EXPORT_MAX = 10000;
+// '+998901234567' → '998 90 123 45 67': readable, and Excel keeps it as text (no leading '+', no 12-digit number).
+const phoneText = (p) => String(p ?? '').replace(/^\+?998(\d{2})(\d{3})(\d{2})(\d{2})$/, '998 $1 $2 $3 $4');
+const PRODUCT_SORT = { created: 'p.id', name: 'p.name', price: 'coalesce(p.discount_price, p.price)', stock: 'coalesce(s.free, 0)' };
+// A size with this many free units or fewer is running out (shown in the low-stock list). shortcut: fixed; task 20 makes it a setting.
+export const LOW_LEFT = 1;
+// Per product: free units over all sizes, and how many sizes are running out.
+const stockTotals = (db) => db('product_stock').select('product_id')
+  .sum({ free: db.raw('quantity - reserved') })
+  .sum({ thin: db.raw(`case when quantity - reserved <= ${LOW_LEFT} then 1 else 0 end`) })
+  .groupBy('product_id');
 
 export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   const imageDir = path.resolve(uploadDir, 'products');
@@ -182,16 +212,28 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     res.json({ name: store.name, url, svg: qrSvg(url, 8) });
   });
 
+  // Paged list: ?q&category&store_id&filter=low|out|no_image&sort=created|name|price|stock&dir=asc|desc&limit&offset
+  // → { items, total, limit, offset }. Sort and filter come from fixed lists, so nothing from the query reaches raw SQL.
   r.get('/products', async (req, res) => {
-    const q = scoped(req.admin).orderBy('id');
-    if (req.query.store_id) q.where('store_id', Number(req.query.store_id) || 0);
-    if (req.query.category) q.where('category', String(req.query.category));
+    const { limit, offset } = paging(req.query);
+    const sort = pick(req.query.sort, Object.keys(PRODUCT_SORT), 'field.sort');
+    const dir = pick(req.query.dir, sort === 'name' ? ['asc', 'desc'] : ['desc', 'asc'], 'field.sort');
+    const filter = pick(req.query.filter, ['', 'low', 'out', 'no_image'], 'field.filter');
+    const q = db('products as p').leftJoin(stockTotals(db).as('s'), 's.product_id', 'p.id');
+    if (req.admin.role !== 'super') q.where('p.store_id', req.admin.store_id);
+    if (req.query.store_id) q.where('p.store_id', Number(req.query.store_id) || 0);
+    if (req.query.category) q.where('p.category', String(req.query.category));
     if (req.query.q) {
       // shortcut: SQLite (dev) LIKE ignores case for ASCII only, so a Cyrillic search is case-sensitive there; Postgres ILIKE is fine.
-      const like = `%${String(req.query.q).trim()}%`;
-      q.where((w) => w.whereILike('name', like).orWhereILike('name_ru', like));
+      const like = `%${String(req.query.q).trim().slice(0, 100)}%`;
+      q.where((w) => w.whereILike('p.name', like).orWhereILike('p.name_ru', like).orWhereILike('p.sku', like));
     }
-    res.json(await withStock(await q));
+    if (filter === 'out') q.whereRaw('coalesce(s.free, 0) = 0');
+    if (filter === 'low') q.where('s.thin', '>', 0); // any size with ≤ LOW_LEFT free, fully sold-out ones included: the restock list
+    if (filter === 'no_image') q.whereNull('p.image_url');
+    const [{ n }] = await q.clone().count({ n: '*' });
+    const rows = await q.select('p.*').orderByRaw(`${PRODUCT_SORT[sort]} ${dir}, p.id ${dir}`).limit(limit).offset(offset);
+    res.json({ items: await withStock(rows), total: Number(n), limit, offset });
   });
 
   r.get('/products/:id', async (req, res) => {
@@ -348,20 +390,78 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     await unlink(path.join(imageDir, path.basename(url))).catch((err) => err.code === 'ENOENT' || console.error(err));
   }
 
-  // Orders: newest first, store-scoped, optional status/store filter. Capped; older ones are opened by number.
+  // Orders, store-scoped. Filters: status, payment, store_id, number (the cashier's display-number lookup),
+  // q (digits = number or phone, else customer name), from/to (Tashkent days, YYYY-MM-DD, inclusive).
+  function ordersQuery(req) {
+    const f = req.query;
+    const q = db('orders as o').join('stores as s', 's.id', 'o.store_id');
+    if (req.admin.role !== 'super') q.where('o.store_id', req.admin.store_id);
+    if (f.store_id) q.where('o.store_id', Number(f.store_id) || 0);
+    if (f.status) q.where('o.status', pick(f.status, ORDER_STATUSES, 'field.status'));
+    if (f.payment) q.where('o.payment_status', pick(f.payment, ['pending', 'paid', 'cancelled'], 'field.payment'));
+    if (f.number) q.where('o.number', Number(f.number) || 0);
+    const text = typeof f.q === 'string' ? f.q.trim().slice(0, 80) : '';
+    if (/^[\d\s+()-]+$/.test(text) && /\d/.test(text)) {
+      // Up to 6 digits is a display number; 7+ is (part of) a phone. Otherwise "5" would match every phone with a 5 in it.
+      const digits = text.replace(/\D/g, '');
+      if (digits.length <= 6) q.where('o.number', Number(digits));
+      else q.where('o.phone', 'like', `%${digits.slice(-12)}%`);
+    } else if (text) q.whereILike('o.customer_name', `%${text}%`);
+    const day = (v) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(dayStart(v))) throw fail(400, 'err.invalid', { field: 'field.date' });
+      return dayStart(v);
+    };
+    if (f.from) q.where('o.created_at', '>=', dbTime(day(f.from)));
+    if (f.to) q.where('o.created_at', '<', dbTime(day(f.to) + DAY_MS));
+    return q;
+  }
+  const ORDER_COLS = ['o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.phone', 'o.fulfillment', 'o.address', 'o.status',
+    'o.payment_status', 'o.payment_method', 'o.subtotal', 'o.delivery_fee', 'o.total', 'o.created_at', 'o.expires_at', 'o.telegram_chat_id'];
+
+  // → { items, total, limit, offset }, newest first (dir=asc: oldest first, so the cashier sees the soonest to expire on top).
   r.get('/orders', async (req, res) => {
     await releaseExpired(db);
-    const q = db('orders as o').join('stores as s', 's.id', 'o.store_id').orderBy('o.id', 'desc').limit(200)
-      .select('o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.phone', 'o.fulfillment', 'o.status', 'o.payment_status',
-        'o.payment_method', 'o.total', 'o.created_at', 'o.telegram_chat_id');
-    if (req.admin.role !== 'super') q.where('o.store_id', req.admin.store_id);
-    if (req.query.store_id) q.where('o.store_id', Number(req.query.store_id) || 0);
-    if (req.query.status) q.where('o.status', String(req.query.status));
-    if (req.query.number) q.where('o.number', Number(req.query.number) || 0); // the cashier looks orders up by display number
-    res.json((await q).map(({ telegram_chat_id, created_at, ...o }) => ({
-      ...o, created_at: stamp(created_at),
-      telegram: telegram_chat_id != null, next: nextStatuses(o),
-    })));
+    const { limit, offset } = paging(req.query);
+    const dir = pick(req.query.dir, ['desc', 'asc'], 'field.sort');
+    const q = ordersQuery(req);
+    const [{ n }] = await q.clone().count({ n: '*' });
+    const rows = await q.select(ORDER_COLS).orderBy('o.id', dir).limit(limit).offset(offset);
+    res.json({
+      items: rows.map(({ telegram_chat_id, created_at, expires_at, ...o }) => ({
+        ...o, created_at: stamp(created_at), expires_at: stamp(expires_at),
+        pay_ms: o.payment_status === 'pending' && expires_at ? Math.max(0, msOf(expires_at) - Date.now()) : null,
+        telegram: telegram_chat_id != null, next: nextStatuses(o),
+      })),
+      total: Number(n), limit, offset,
+    });
+  });
+
+  // Same filters as the list, as a CSV file for Excel. Customer-typed text (name, address) is escaped against formulas.
+  r.get('/orders/export', async (req, res) => {
+    await releaseExpired(db);
+    const lang = langOf(req);
+    const tr = (key) => t(key, {}, lang);
+    // shortcut: one capped query held in memory; stream it if a store ever exports more than this.
+    const rows = await ordersQuery(req).select(ORDER_COLS).orderBy('o.id', 'desc').limit(EXPORT_MAX);
+    const tashkent = (v) => new Date(msOf(v)).toLocaleString('sv-SE', { timeZone: STATS_TZ }).slice(0, 16);
+    const csv = toCsv([
+      ['№', tr('adm.orders.time'), tr('common.store'), tr('adm.orders.customer'), tr('adm.csv.phone'), tr('adm.orders.fulfillment'), tr('field.address'),
+        tr('adm.csv.subtotal'), tr('adm.csv.fee'), tr('adm.csv.total'), tr('field.payment'), tr('adm.orders.payment'), tr('adm.orders.status')],
+      ...rows.map((o) => [o.number, tashkent(o.created_at), o.store_name, o.customer_name, phoneText(o.phone), tr(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), o.address,
+        o.subtotal, o.delivery_fee, o.total, o.payment_method === 'cashier' ? tr('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] ?? o.payment_method, tr(`adm.pay.${o.payment_status}`),
+        tr(o.status === 'delivered' && o.fulfillment === 'pickup' ? 'adm.status.handed' : `adm.status.${o.status}`)]),
+    ]);
+    res.type('text/csv; charset=utf-8').attachment(`orders-${dayKey(Date.now())}.csv`).send(csv);
+  });
+
+  // Unseen-orders badge: how many orders (not cancelled) came in after the last one this admin saw, and the newest id.
+  r.get('/orders/unseen', async (req, res) => {
+    const q = db('orders').whereNot('status', 'cancelled');
+    if (req.admin.role !== 'super') q.where('store_id', req.admin.store_id);
+    const since = Math.max(Number.parseInt(req.query.since, 10) || 0, 0);
+    const [{ n }] = await q.clone().where('id', '>', since).count({ n: '*' });
+    const [{ latest }] = await q.clone().max({ latest: 'id' });
+    res.json({ count: Number(n), latest: latest ?? 0 });
   });
 
   // Cashier (task 8): look up an order by its number and mark it paid.
@@ -381,7 +481,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   r.post('/orders/:id/status', async (req, res) => {
     const o = await findOrder(req);
     const to = req.body?.status;
-    if (!['new', 'packing', 'shipping', 'delivered', 'cancelled'].includes(to)) throw fail(400, 'err.invalid', { field: 'field.status' });
+    if (!ORDER_STATUSES.includes(to)) throw fail(400, 'err.invalid', { field: 'field.status' });
     if (!(await changeStatus(db, o.id, to))) {
       throw fail(409, o.payment_status === 'pending' && to !== 'cancelled' ? 'err.pay_first' : 'err.status_conflict');
     }
@@ -411,28 +511,31 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     res.status(204).end();
   });
 
-  // Recommendations per day (Tashkent time, zero-filled) and the most-suggested products.
+  // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.
+  const inScope = (req, q, col = 'store_id') => {
+    if (req.admin.role !== 'super') q.where(col, req.admin.store_id);
+    if (req.query.store_id) q.where(col, Number(req.query.store_id) || 0);
+    return q;
+  };
+
+  // Recommendations per day (Tashkent time, zero-filled) with paid revenue per day, the pilot funnel, the most-suggested
+  // products, and the same funnel for the previous period of equal length (`prev`) for the deltas.
   r.get('/stats', async (req, res) => {
     const days = Math.min(Math.max(Number.parseInt(req.query.days, 10) || 30, 1), 90);
-    const keys = Array.from({ length: days }, (_, i) => dayKey(Date.now() - (days - 1 - i) * 86400000));
-    const since = new Date(`${keys[0]}T00:00:00+05:00`).toISOString().replace('T', ' ').slice(0, 19) + '+00:00';
+    const keys = Array.from({ length: days }, (_, i) => dayKey(Date.now() - (days - 1 - i) * DAY_MS));
+    const since = dayStart(keys[0]), prevSince = since - days * DAY_MS;
     // shortcut: aggregates in JS over the raw rows; fine for pilot volume, move to SQL GROUP BY if logs reach ~100k/90 days.
-    const inScope = (q, col = 'store_id') => {
-      if (req.admin.role !== 'super') q.where(col, req.admin.store_id);
-      if (req.query.store_id) q.where(col, Number(req.query.store_id) || 0);
-      return q;
-    };
-    const logs = await inScope(db('recommendation_logs').select('id', 'product_ids', 'created_at', 'accepted_at', 'tried_at').where('created_at', '>=', since));
+    const allLogs = await inScope(req, db('recommendation_logs').select('id', 'product_ids', 'created_at', 'accepted_at', 'tried_at').where('created_at', '>=', dbTime(prevSince)));
     // Pilot: paid orders that weren't cancelled afterwards (a cancelled paid order is a refund).
-    const orders = await inScope(db('orders').select('recommendation_id', 'fulfillment', 'total').where({ payment_status: 'paid' })
-      .whereNot('status', 'cancelled').where('created_at', '>=', since));
-    const perDay = Object.fromEntries(keys.map((k) => [k, 0]));
+    const allOrders = await inScope(req, db('orders').select('recommendation_id', 'fulfillment', 'total', 'created_at').where({ payment_status: 'paid' })
+      .whereNot('status', 'cancelled').where('created_at', '>=', dbTime(prevSince)));
+    const cur = (x) => msOf(x.created_at) >= since;
+    const logs = allLogs.filter(cur), orders = allOrders.filter(cur);
+    const perDay = Object.fromEntries(keys.map((k) => [k, { count: 0, revenue: 0, orders: 0 }]));
     const counts = new Map();
     for (const log of logs) {
-      // SQLite gives 'YYYY-MM-DD HH:MM:SS' (UTC) strings, Postgres gives Date objects.
-      const at = log.created_at instanceof Date ? log.created_at : new Date(`${String(log.created_at).replace(' ', 'T')}Z`);
-      const k = dayKey(at.getTime());
-      if (k in perDay) perDay[k]++;
+      const k = dayKey(msOf(log.created_at));
+      if (k in perDay) perDay[k].count++;
       let ids = log.product_ids;
       try {
         if (typeof ids === 'string') ids = JSON.parse(ids);
@@ -441,26 +544,20 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
       }
       for (const id of new Set(Array.isArray(ids) ? ids : [])) if (Number.isInteger(id)) counts.set(id, (counts.get(id) || 0) + 1);
     }
+    for (const o of orders) {
+      const k = dayKey(msOf(o.created_at));
+      if (k in perDay) { perDay[k].revenue += o.total; perDay[k].orders++; }
+    }
     const top = [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, 10);
     // Logged products may since have been deleted: they come back with name null.
     const names = await scoped(req.admin).whereIn('id', top.map(([id]) => id)).select('id', 'name', 'name_ru', 'category');
-    const fromRec = orders.filter((o) => o.recommendation_id != null);
-    const ids = new Set(logs.map((l) => l.id));
+    const prevLogs = allLogs.filter((x) => !cur(x)), prevOrders = allOrders.filter((x) => !cur(x));
     res.json({
       days,
-      total: Object.values(perDay).reduce((a, b) => a + b, 0),
-      // Funnel per results screen: shown → accepted (added to cart) → tried on → bought (paid order from it).
-      pilot: {
-        shown: logs.length,
-        accepted: logs.filter((l) => l.accepted_at != null).length,
-        tried: logs.filter((l) => l.tried_at != null).length,
-        bought: new Set(fromRec.map((o) => o.recommendation_id).filter((id) => ids.has(id))).size,
-        orders: orders.length,
-        delivery_orders: orders.filter((o) => o.fulfillment === 'delivery').length,
-        revenue: orders.reduce((a, o) => a + o.total, 0),
-        avg_order: orders.length ? Math.round(orders.reduce((a, o) => a + o.total, 0) / orders.length) : 0,
-      },
-      per_day: keys.map((day) => ({ day, count: perDay[day] })),
+      total: logs.length,
+      pilot: funnel(logs, orders),
+      prev: { total: prevLogs.length, pilot: funnel(prevLogs, prevOrders) },
+      per_day: keys.map((day) => ({ day, ...perDay[day] })),
       top: top.map(([product_id, count]) => {
         const p = names.find((x) => x.id === product_id);
         return { product_id, name: p?.name ?? null, name_ru: p?.name_ru ?? null, category: p?.category ?? null, count };
@@ -468,7 +565,58 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     });
   });
 
+  // Dashboard home: today so far against yesterday up to the same time, the orders that need work now, the best sellers
+  // of the last `days` (7 or 30), and products running out of sizes. The chart and the funnel come from /stats.
+  r.get('/dashboard', async (req, res) => {
+    await releaseExpired(db);
+    const days = req.query.days === '30' ? 30 : 7;
+    const now = Date.now(), today = dayStart(dayKey(now));
+    const paidIn = async (from, to) => {
+      const rows = await inScope(req, db('orders').where({ payment_status: 'paid' }).whereNot('status', 'cancelled')
+        .where('paid_at', '>=', iso(from)).where('paid_at', '<', iso(to)).select('total'));
+      return { revenue: rows.reduce((a, o) => a + o.total, 0), paid: rows.length };
+    };
+    const recsIn = async (from, to) => Number((await inScope(req, db('recommendation_logs').where('created_at', '>=', dbTime(from))
+      .where('created_at', '<', dbTime(to)).count({ n: '*' })))[0].n);
+    const [cur, prev, recs, recsPrev] = await Promise.all([paidIn(today, now + 1000), paidIn(today - DAY_MS, now - DAY_MS), recsIn(today, now + 1000), recsIn(today - DAY_MS, now - DAY_MS)]);
+    // Work queue: not finished, not cancelled. Unpaid ones wait at the cashier.
+    const open = await inScope(req, db('orders').whereIn('status', ['new', 'packing', 'shipping']).whereNot('payment_status', 'cancelled')
+      .select('payment_status'));
+    const sold = await inScope(req, db('order_items as i').join('orders as o', 'o.id', 'i.order_id').join('products as p', 'p.id', 'i.product_id')
+      .where('o.payment_status', 'paid').whereNot('o.status', 'cancelled').where('o.paid_at', '>=', iso(now - days * DAY_MS))
+      .groupBy('i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.image_url')
+      .select('i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.image_url')
+      .sum({ units: 'i.quantity' }).sum({ revenue: db.raw('i.quantity * i.unit_price') })
+      .orderBy([{ column: 'units', order: 'desc' }, { column: 'i.product_id' }]).limit(5), 'o.store_id');
+    const lowQ = inScope(req, db('products as p').join(stockTotals(db).as('s'), 's.product_id', 'p.id').where('s.thin', '>', 0), 'p.store_id');
+    const [{ n: lowTotal }] = await lowQ.clone().count({ n: '*' });
+    const low = await lowQ.select('p.*').orderByRaw('case when s.free = 0 then 0 else 1 end, s.thin desc, s.free, p.id').limit(6);
+    res.json({
+      days,
+      today: { ...cur, recs, prev: { ...prev, recs: recsPrev } },
+      waiting: { total: open.length, unpaid: open.filter((o) => o.payment_status === 'pending').length },
+      top_sold: sold.map((x) => ({ ...x, units: Number(x.units), revenue: Number(x.revenue) })),
+      low_stock: { total: Number(lowTotal), items: await withStock(low) },
+    });
+  });
+
   return r;
+}
+
+// Funnel per results screen: shown → accepted (added to cart) → tried on → bought (a paid order from it), plus order totals.
+function funnel(logs, orders) {
+  const ids = new Set(logs.map((l) => l.id));
+  const revenue = orders.reduce((a, o) => a + o.total, 0);
+  return {
+    shown: logs.length,
+    accepted: logs.filter((l) => l.accepted_at != null).length,
+    tried: logs.filter((l) => l.tried_at != null).length,
+    bought: new Set(orders.map((o) => o.recommendation_id).filter((id) => id != null && ids.has(id))).size,
+    orders: orders.length,
+    delivery_orders: orders.filter((o) => o.fulfillment === 'delivery').length,
+    revenue,
+    avg_order: orders.length ? Math.round(revenue / orders.length) : 0,
+  };
 }
 
 const FITTING_TTL_MS = 2 * 60 * 60 * 1000; // an unanswered request older than this is stale (the customer has left)

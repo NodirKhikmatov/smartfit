@@ -65,8 +65,8 @@ test('per-store order numbers: 1, 2, 3… in each store, no repeats under parall
   // The cashier finds an order by its display number, inside their own store only.
   const n2 = done.find((r) => r.body.order.store_id === samarkand && r.body.order.number === 2).body.order;
   const found = await call('GET', '/api/admin/orders?number=2', undefined, samToken);
-  assert.deepEqual(found.body.map((o) => o.id), [n2.id]);
-  assert.equal((await call('GET', '/api/admin/orders?number=2', undefined, superToken)).body.length, 2, 'super sees both stores\' № 2');
+  assert.deepEqual(found.body.items.map((o) => o.id), [n2.id]);
+  assert.equal((await call('GET', '/api/admin/orders?number=2', undefined, superToken)).body.total, 2, 'super sees both stores\' № 2');
 });
 
 test('status page: by token only, no name, phone or address; unknown token → 404', async () => {

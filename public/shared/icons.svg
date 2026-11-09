@@ -52,5 +52,12 @@
 <symbol id="sparkle" viewBox="0 0 24 24"><path d="M12 3.5c.5 4.4 4.1 8 8.5 8.5-4.4.5-8 4.1-8.5 8.5-.5-4.4-4.1-8-8.5-8.5 4.4-.5 8-4.1 8.5-8.5Z"/></symbol>
 <symbol id="backspace" viewBox="0 0 24 24"><path d="M8.5 5.5h11a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5h-11L3 12l5.5-6.5Z"/><path d="m11 9.5 5 5M16 9.5l-5 5"/></symbol>
 <!-- Pose guide (task 16): a standing figure, arms a little out, feet together. Drawn on a 120×240 grid, shown over the camera preview. -->
+<symbol id="menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+<symbol id="settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M2.8 12h2.4M18.8 12h2.4M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/><circle cx="12" cy="12" r="6.6"/></symbol>
+<symbol id="print" viewBox="0 0 24 24"><path d="M7 8V3.5h10V8"/><rect x="3.5" y="8" width="17" height="8.5" rx="1.5"/><path d="M7 14h10v6.5H7z"/><path d="M17 11h.5"/></symbol>
+<symbol id="chevron-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+<symbol id="trend-up" viewBox="0 0 24 24"><path d="m4 16 6-6 4 4 6-6"/><path d="M15 8h5v5"/></symbol>
+<symbol id="trend-down" viewBox="0 0 24 24"><path d="m4 8 6 6 4-4 6 6"/><path d="M15 16h5v-5"/></symbol>
+<symbol id="sort" viewBox="0 0 24 24"><path d="m8 9 4-4 4 4M8 15l4 4 4-4"/></symbol>
 <symbol id="pose" viewBox="0 0 120 240"><circle cx="60" cy="21" r="13"/><path d="M54 35v6c-8 1-15 3-19 8l-13 60c-1 5 4 7 6 3l11-41 1 47 2 105c0 6 13 6 13 0l3-84h4l3 84c0 6 13 6 13 0l2-105 1-47 11 41c2 4 7 2 6-3L85 49c-4-5-11-7-19-8v-6"/></symbol>
 </svg>
