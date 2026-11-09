@@ -9,6 +9,7 @@ import { unitPrice } from '../recommend/engine.js';
 import { REC } from '../recommend/routes.js';
 import { qrSvg, publicBase } from '../qr.js';
 import { clientKey } from '../limits.js';
+import { FITS } from '../size/size.js';
 
 export const HOLD_MS = 15 * 60 * 1000;
 export const HANDOFF_MS = 5 * 60 * 1000; // how long the kiosk's "continue on your phone" QR works
@@ -165,7 +166,7 @@ async function cartView(db, cart, payments) {
 
 export async function orderView(db, order) {
   const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').where('i.order_id', order.id).orderBy('i.id')
-    .select('i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price');
+    .select('i.id', 'i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price', 'i.returned', 'i.fit');
   const { id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total } = order;
   return {
     id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total,
@@ -386,10 +387,26 @@ export function createOrderRouter(db, { methods = CASHIER, link = () => null } =
     const pay = online ? await methods[o.payment_method]({ ...v, notify_token: o.notify_token }) : null;
     res.json({
       number: v.number, store, status: v.status, payment_status: v.payment_status, payment_method: v.payment_method, fulfillment: v.fulfillment,
-      items: v.items.map(({ name, name_ru, category, color, size, quantity, unit_price }) => ({ name, name_ru, category, color, size, quantity, unit_price })),
+      items: v.items.map(({ id, name, name_ru, category, color, size, quantity, unit_price, fit }) => ({ id, name, name_ru, category, color, size, quantity, unit_price, fit })),
+      fit_open: fitOpen(o),
       subtotal: v.subtotal, delivery_fee: v.delivery_fee, total: v.total, created_at: v.created_at, paid_at: v.paid_at, expires_at: v.expires_at,
       pay_ms: o.payment_status === 'pending' ? msLeft(o.expires_at) : null, pay_url: pay?.url ?? null, telegram: link(o.notify_token)?.url ?? null,
     });
   });
+
+  // Task 23: "how did it fit?" for one line of this order: { item, fit: small|right|big }. Only the holder of the status
+  // token can answer, only once the order is handed over or delivered, and a new answer replaces the old one.
+  r.post('/:token/fit', async (req, res) => {
+    const o = TOKEN.test(req.params.token) ? await db('orders').where({ notify_token: req.params.token }).first('id', 'status', 'payment_status') : null;
+    if (!o) throw fail(404, 'err.order_not_found');
+    if (!fitOpen(o)) throw fail(409, 'err.fit_not_yet');
+    const { item, fit } = req.body ?? {};
+    if (!FITS.includes(fit)) throw fail(400, 'err.invalid', { field: 'field.fit' });
+    const line = Number.isInteger(item) ? await db('order_items as i').join('products as p', 'p.id', 'i.product_id').where({ 'i.id': item, 'i.order_id': o.id }).first('i.id', 'p.category') : null;
+    if (!line || line.category === 'accessory') throw fail(404, 'err.not_found');
+    await db('order_items').where({ id: line.id }).update({ fit, fit_at: iso(Date.now()) });
+    res.json({ item: line.id, fit });
+  });
   return r;
 }
+const fitOpen = (o) => o.status === 'delivered' && o.payment_status === 'paid';

@@ -521,8 +521,16 @@ function itemRow(p) {
     el('div', { className: 'name', textContent: productName(p) }),
     el('div', { className: p.discount_price ? 'price sale' : 'price' }, ...(p.discount_price ? [el('s', { textContent: som(p.price) })] : []), som(p.unit_price)),
     el('div', { className: 'meta', textContent: [colorName(p.color), size, p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }),
+    fitHint(p),
     picker(p),
   );
+}
+
+// Task 23: this model runs small or big (learnt from buyers' answers and returns); the server already shifted the size.
+function fitHint(p) {
+  if (!p.fit_offset) return '';
+  const text = [t(p.fit_offset > 0 ? 'kiosk.fit.small' : 'kiosk.fit.big'), p.fit_from && t('kiosk.fit.shifted', { from: p.fit_from, size: p.size })].filter(Boolean).join(': ');
+  return el('div', { className: 'fit-hint' }, icon('info'), el('span', { textContent: text }));
 }
 
 // card: the outfit card, where a missing size picker is looked up.

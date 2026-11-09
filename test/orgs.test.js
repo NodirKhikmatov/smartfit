@@ -101,6 +101,7 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
     'POST /products': async () => refused(await admin('POST', '/products', { name: 'X', category: 'top', gender: 'male', color: 'oq', price: 1000, temp_min: 0, temp_max: 30, store_id: b1 }, ownerA)),
     'PATCH /products/:id': async () => refused(await admin('PATCH', `/products/${B.product.id}`, { price: 1 }, ownerA)),
     'DELETE /products/:id': async () => refused(await admin('DELETE', `/products/${B.product.id}`, undefined, ownerA)),
+    'PATCH /products/:id/fit': async () => refused(await admin('PATCH', `/products/${B.product.id}/fit`, { offset: 1 }, ownerA)),
     'POST /products/import': async () => {
       const r = await admin('POST', `/products/import?store_id=${b1}`, undefined, ownerA, { raw: 'name,category,gender,color,price,temp_min,temp_max,M\nX,top,male,oq,1000,0,30,1\n', type: 'text/csv' });
       assert.equal(r.status, 400);
@@ -126,6 +127,7 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
     'GET /orders/:id': async () => refused(await admin('GET', `/orders/${B.order.id}`, undefined, ownerA)),
     'POST /orders/:id/pay': async () => refused(await admin('POST', `/orders/${B.order.id}/pay`, {}, ownerA)),
     'POST /orders/:id/status': async () => refused(await admin('POST', `/orders/${B.order.id}/status`, { status: 'cancelled' }, ownerA)),
+    'POST /orders/:id/returns': async () => refused(await admin('POST', `/orders/${B.order.id}/returns`, { key: 'b'.repeat(32), item_id: B.order.items[0].id, kind: 'return', reason: 'too_small', quantity: 1, restock: true }, ownerA)),
     'GET /fitting': async () => noB(await admin('GET', '/fitting', undefined, ownerA)),
     'POST /fitting/:id/done': async () => refused(await admin('POST', `/fitting/${B.fitting}/done`, {}, ownerA)),
     'GET /stats': async () => {
@@ -173,6 +175,8 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
   // Nothing of org B changed.
   const p = await db('products').where({ id: B.product.id }).first();
   assert.equal(p.price, B.product.price);
+  assert.equal(p.fit_offset, null);
+  assert.equal((await db('order_returns').where({ order_id: B.order.id })).length, 0);
   assert.equal((await db('orders').where({ id: B.order.id }).first()).status, 'new');
   assert.equal((await db('admins').where({ id: B.member.id }).first()).disabled_at, null);
   assert.equal((await db('sync_keys').where({ id: B.key.id }).first()).revoked_at, null);
@@ -229,6 +233,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
     // An owner without a store is now allowed (made by an org invite).
     await m('admins').insert({ email: 'new.owner@old.uz', password_hash: pw, role: 'owner', organization_id: orgs[0].id });
     // Reachable through the API: the old owner signs in and sees both of their organisation's stores.
+    await m.migrate.up(); // 013: the app runs on the current schema
     const app = createApp(m, { telegram: null }).listen(0);
     await new Promise((r) => app.once('listening', r));
     try {
@@ -241,6 +246,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
+    await m.migrate.down(); // 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

@@ -1,3 +1,6 @@
+import { sizesFor } from '../db/seed.js';
+import { fitOf, shiftSize } from '../size/size.js';
+
 // Rule-based outfits. filterCandidates is the only source of items: task 7 sends its output to Claude as CANDIDATES.
 
 export const ORDER = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
@@ -10,6 +13,7 @@ export const totalOf = (items) => items.reduce((sum, i) => sum + i.unit_price, 0
 
 // Items in this store, for this gender, worn at this temperature, with free stock (quantity − reserved > 0) in the customer's size.
 // sizes = { top, bottom, shoes? }. No shoe size → shoes with stock in any size (size: null, picked in the cart).
+// Each item carries fit_offset (+1 runs small, -1 runs big) and fit_from (the customer's size when it was shifted).
 // spread widens the temperature window to ±spread °C (the relaxation fallback in ruleOutfits).
 export async function filterCandidates(db, { storeId, gender, sizes, temperature, spread = 0 }) {
   const rows = await db('products as p')
@@ -19,24 +23,25 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
     // Live weather is fractional (11.7 °C); Postgres would type the parameter as the integer column and refuse it.
     .whereRaw('p.temp_min <= cast(? as real) and p.temp_max >= cast(? as real)', [temperature + spread, temperature - spread])
     .whereRaw('s.quantity - s.reserved > 0')
-    .where((q) => {
-      for (const [cat, key] of Object.entries(sizeKey)) {
-        if (sizes[key]) q.orWhere((w) => w.where('p.category', cat).where('s.size', sizes[key]));
-        else q.orWhere('p.category', cat);
-      }
-      q.orWhere((w) => w.where('p.category', 'accessory').where('s.size', 'ONE'));
-    })
     .orderBy(['p.id', 's.id'])
-    .select('p.id', 'p.name', 'p.name_ru', 'p.category', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.waterproof', 'p.image_url', 'p.shelf_location', 's.size');
+    .select('p.id', 'p.name', 'p.name_ru', 'p.category', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.waterproof', 'p.image_url', 'p.shelf_location', 'p.fit_offset', 's.size');
+  // Task 23: a product that runs small or big is offered one size up or down (clamped to its sizes), and only if that
+  // size has free stock: never the customer's own size, which is known not to fit.
+  const fits = await fitOf(db, [...new Map(rows.map((r) => [r.id, r])).values()]);
   const byId = new Map();
-  for (const r of rows) {
-    const known = r.category === 'accessory' || sizes[sizeKey[r.category]];
+  for (const { fit_offset, ...r } of rows) {
+    const own = sizes[sizeKey[r.category]];
+    const offset = fits.get(r.id).offset;
+    const want = own ? shiftSize(sizesFor(r.category), own, offset) : null;
+    if (want && r.size !== want) continue;
+    const known = r.category === 'accessory' || own;
     // Several rows per item only when the shoe size is unknown: `sizes` lists them so the customer picks one.
     if (byId.has(r.id)) {
       byId.get(r.id).sizes.push(r.size);
       continue;
     }
-    byId.set(r.id, { ...r, waterproof: Boolean(r.waterproof), size: known ? r.size : null, ...(known ? {} : { sizes: [r.size] }), unit_price: unitPrice(r) });
+    byId.set(r.id, { ...r, waterproof: Boolean(r.waterproof), size: known ? r.size : null, ...(known ? {} : { sizes: [r.size] }), unit_price: unitPrice(r),
+      fit_offset: offset, fit_from: want && want !== own ? own : null });
   }
   return [...byId.values()];
 }

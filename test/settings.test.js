@@ -263,6 +263,14 @@ test('every mutating admin route writes an audit row', async () => {
     }],
     'POST /orders/:id/pay': ['order.pay', async () => admin('POST', `/orders/${(await pendingOrder()).id}/pay`, {}, managerToken)],
     'POST /orders/:id/status': ['order.status', async () => admin('POST', `/orders/${(await pendingOrder()).id}/status`, { status: 'cancelled' }, managerToken)],
+    'PATCH /products/:id/fit': ['product.fit', async () => admin('PATCH', `/products/${(await product()).id}/fit`, { offset: 1 }, ownerToken)],
+    'POST /orders/:id/returns': ['order.return', async () => {
+      const o = await pendingOrder();
+      for (const step of ['pay', 'packing', 'delivered']) {
+        await admin('POST', `/orders/${o.id}/${step === 'pay' ? 'pay' : 'status'}`, step === 'pay' ? {} : { status: step }, managerToken);
+      }
+      return admin('POST', `/orders/${o.id}/returns`, { key: 'c'.repeat(32), item_id: o.items[0].id, kind: 'return', reason: 'too_big', quantity: 1, restock: true }, managerToken);
+    }],
     'POST /fitting/:id/done': ['fitting.done', async () => {
       const [{ id }] = await db('fitting_requests').insert({ store_id: tashkent, cabin: 2, items: JSON.stringify([]) }).returning('id');
       return admin('POST', `/fitting/${id}/done`, {}, managerToken);

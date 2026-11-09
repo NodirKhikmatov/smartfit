@@ -103,6 +103,11 @@
             <div class="panel-head"><div><h2 id="dashTopTitle" data-i18n="adm.dash.top"></h2><p class="panel-sub" id="dashTopSub"></p></div></div>
             <ol class="rank" id="dashTop"></ol>
           </section>
+          <section class="card panel span-2" aria-labelledby="dashReturnsTitle">
+            <div class="panel-head"><div><h2 id="dashReturnsTitle" data-i18n="adm.dash.returns"></h2><p class="panel-sub" id="dashReturnsSub"></p></div><strong class="kpi-inline num" id="dashReturnsRate"></strong></div>
+            <ol class="rank" id="dashReturns"></ol>
+            <p class="panel-sub" id="dashReturnsRefund"></p>
+          </section>
           <section class="card panel span-2" aria-labelledby="dashLowTitle">
             <div class="panel-head">
               <div><h2 id="dashLowTitle" data-i18n="adm.dash.low"></h2><p class="panel-sub" id="dashLowSub"></p></div>
@@ -419,6 +424,33 @@
   <div class="drawer-foot" id="orderActions"></div>
 </dialog>
 
+<dialog id="retDlg" class="narrow" aria-labelledby="retTitle">
+  <form id="retForm" method="dialog">
+    <h2 id="retTitle" data-i18n="adm.ret.title"></h2>
+    <p class="muted" id="retItem"></p>
+    <fieldset class="field"><legend data-i18n="field.return_kind"></legend>
+      <div class="chips">
+        <label><input type="radio" name="kind" value="return" checked><span data-i18n="adm.ret.kind_return"></span></label>
+        <label><input type="radio" name="kind" value="exchange"><span data-i18n="adm.ret.kind_exchange"></span></label>
+      </div>
+    </fieldset>
+    <label class="field"><span data-i18n="field.return_reason"></span> <select name="reason" required>
+      <option value="too_small" data-i18n="adm.ret.reason_too_small"></option><option value="too_big" data-i18n="adm.ret.reason_too_big"></option>
+      <option value="disliked" data-i18n="adm.ret.reason_disliked"></option><option value="defect" data-i18n="adm.ret.reason_defect"></option>
+    </select></label>
+    <label class="field"><span data-i18n="field.quantity"></span> <input name="quantity" type="number" min="1" step="1" required></label>
+    <label class="field" id="retSizeWrap"><span data-i18n="adm.ret.new_size"></span> <select name="new_size"></select></label>
+    <label class="field" id="retRefundWrap"><span data-i18n="field.refund"></span> <input name="refund" type="number" min="0" step="1" aria-describedby="retRefundMax"><span class="hint" id="retRefundMax"></span></label>
+    <label class="check"><input name="restock" type="checkbox" checked aria-describedby="retRestockHint"> <span data-i18n="field.restock"></span></label>
+    <p class="hint" id="retRestockHint" data-i18n="adm.ret.restock_hint"></p>
+    <p class="error" id="retError" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="retCancel" data-i18n="common.cancel"></button>
+      <button class="primary" id="retSave" data-i18n="adm.ret.save"></button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="importDlg" aria-labelledby="importTitle">
   <form id="importForm" method="dialog">
     <h2 id="importTitle" data-i18n="adm.import.title"></h2>
@@ -533,6 +565,19 @@
     </div>
     <h3 data-i18n="adm.form.sizes"></h3>
     <div class="stock" id="stock"></div>
+    <div id="fitWrap">
+      <h3 data-i18n="adm.sizefit.title"></h3>
+      <p class="muted" id="fitStats"></p>
+      <div class="bar">
+        <label class="grow"><span data-i18n="field.fit_offset"></span> <select id="fitOffset" aria-describedby="fitNote">
+          <option value="" data-i18n="adm.sizefit.auto_opt"></option><option value="1" data-i18n="adm.sizefit.v_small"></option>
+          <option value="0" data-i18n="adm.sizefit.v_right"></option><option value="-1" data-i18n="adm.sizefit.v_big"></option>
+        </select></label>
+        <button type="button" id="fitSave" data-i18n="adm.sizefit.save"></button>
+      </div>
+      <p class="hint" id="fitNote"></p>
+      <p class="error" id="fitError" role="alert"></p>
+    </div>
     <p class="error" id="formError" role="alert"></p>
     <div class="actions">
       <button type="button" class="danger ghost push-left" id="formDelete"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trash"></use></svg><span data-i18n="common.delete"></span></button>

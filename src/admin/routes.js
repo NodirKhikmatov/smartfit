@@ -13,6 +13,7 @@ import { audit, diff } from './audit.js';
 import { kioskStatus } from '../kiosk.js';
 import { publicTeamRoutes, settingsRoutes, ROLES } from './settings.js';
 import { orgRoutes } from './orgs.js';
+import { fitOf } from '../size/size.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -176,6 +177,7 @@ const pick = (v, allowed, field) => {
   return v;
 };
 const ORDER_STATUSES = ['new', 'packing', 'shipping', 'delivered', 'cancelled'];
+export const RETURN_REASONS = ['too_small', 'too_big', 'disliked', 'defect'];
 const EXPORT_MAX = 10000;
 // '+998901234567' → '998 90 123 45 67': readable, and Excel keeps it as text (no leading '+', no 12-digit number).
 const phoneText = (p) => String(p ?? '').replace(/^\+?998(\d{2})(\d{3})(\d{2})(\d{2})$/, '998 $1 $2 $3 $4');
@@ -248,13 +250,14 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const rows = await db('product_stock').whereIn('product_id', products.map((p) => p.id));
     const low = Object.fromEntries((await db('stores').whereIn('id', [...new Set(products.map((p) => p.store_id))]).select('id', 'low_stock_threshold'))
       .map((s) => [s.id, s.low_stock_threshold]));
+    const fits = await fitOf(db, products);
     return products.map((p) => {
       const sizes = sizesFor(p.category);
       const stock = rows
         .filter((s) => s.product_id === p.id)
         .sort((a, b) => sizes.indexOf(a.size) - sizes.indexOf(b.size))
         .map(({ size, quantity, reserved }) => ({ size, quantity, reserved }));
-      return { ...p, waterproof: Boolean(p.waterproof), low_stock_threshold: low[p.store_id], stock };
+      return { ...p, waterproof: Boolean(p.waterproof), low_stock_threshold: low[p.store_id], stock, fit: fits.get(p.id) };
     });
   }
 
@@ -373,6 +376,23 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     });
     await removeImage(p.image_url);
     res.status(204).end();
+  });
+
+  // Task 23: the owner's fit override. { offset: -1 (runs big) | 0 (true to size) | 1 (runs small) | null (automatic) }.
+  r.patch('/products/:id/fit', async (req, res) => {
+    if (req.admin.role === 'manager') throw fail(403, 'err.forbidden');
+    const p = await findProduct(req);
+    const offset = req.body?.offset ?? null;
+    if (offset !== null && ![-1, 0, 1].includes(offset)) throw fail(400, 'err.invalid', { field: 'field.fit_offset' });
+    if (p.category === 'accessory') throw fail(400, 'err.invalid', { field: 'field.fit_offset' });
+    if ((p.fit_offset ?? null) !== offset) {
+      await db.transaction(async (trx) => {
+        await trx('products').where({ id: p.id }).update({ fit_offset: offset, updated_at: trx.fn.now() });
+        await audit(trx, req.admin, { action: 'product.fit', storeId: p.store_id, entityId: p.id, label: p.name, before: { fit_offset: p.fit_offset ?? null }, after: { fit_offset: offset } });
+      });
+    }
+    const [out] = await withStock([await db('products').where({ id: p.id }).first()]);
+    res.json(out);
   });
 
   // Body is the raw CSV file. All-or-nothing: any bad row rolls back the whole import.
@@ -558,7 +578,13 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     if (!o) throw fail(404, 'err.order_not_found');
     return o;
   };
-  const adminView = async (o) => ({ ...(await orderView(db, o)), telegram: o.telegram_chat_id != null, next: nextStatuses(o) });
+  const adminView = async (o) => ({
+    ...(await orderView(db, o)), telegram: o.telegram_chat_id != null, next: nextStatuses(o),
+    can_return: o.payment_status === 'paid' && o.status === 'delivered',
+    returns: (await db('order_returns').where({ order_id: o.id }).orderBy('id')
+      .select('id', 'order_item_id', 'kind', 'reason', 'quantity', 'refund', 'restock', 'new_size', 'created_at'))
+      .map((x) => ({ ...x, restock: Boolean(x.restock), created_at: stamp(x.created_at) })),
+  });
   r.get('/orders/:id', async (req, res) => res.json(await adminView(await findOrder(req))));
   // { status }: one step along the flow in nextStatuses. Cancelling releases holds (unpaid) or restocks (paid), once.
   // The customer's Telegram message goes out from the notifier loop, so it can't slow or fail this request.
@@ -579,6 +605,51 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     }
     res.json(await adminView(await db('orders').where({ id: o.id }).first()));
   });
+  // Task 23: a return or a size exchange on one line of a delivered order.
+  // { key, item_id, kind: return|exchange, reason, quantity, restock, refund? (return; default the full line share), new_size? (exchange) }.
+  // `key` is the dialog's one-time id: a double submit finds the first row and changes nothing. Units are claimed with a
+  // conditional UPDATE, so returned never passes the line's quantity and stock comes back once.
+  r.post('/orders/:id/returns', async (req, res) => {
+    const o = await findOrder(req);
+    const b = req.body ?? {};
+    if (typeof b.key !== 'string' || !/^[a-f0-9]{32}$/.test(b.key)) throw fail(400, 'err.bad_request');
+    const done = async () => (await db('order_returns').where({ request_key: b.key }).first('order_id'))?.order_id === o.id;
+    if (await done()) return res.json(await adminView(o));
+    if (o.payment_status !== 'paid' || o.status !== 'delivered') throw fail(409, 'err.return_not_delivered');
+    if (!['return', 'exchange'].includes(b.kind)) throw fail(400, 'err.invalid', { field: 'field.return_kind' });
+    if (!RETURN_REASONS.includes(b.reason)) throw fail(400, 'err.invalid', { field: 'field.return_reason' });
+    if (typeof b.restock !== 'boolean') throw fail(400, 'err.invalid', { field: 'field.restock' });
+    const line = Number.isInteger(b.item_id) ? await db('order_items').where({ id: b.item_id, order_id: o.id }).first() : undefined;
+    if (!line) throw fail(404, 'err.not_found');
+    const p = await db('products').where({ id: line.product_id }).first('name', 'name_ru', 'category');
+    const qty = int(b.quantity, 1, line.quantity, 'field.quantity');
+    const refund = b.kind === 'exchange' ? int(b.refund ?? 0, 0, 0, 'field.refund') : int(b.refund ?? qty * line.unit_price, 0, qty * line.unit_price, 'field.refund');
+    const newSize = b.kind === 'exchange' ? b.new_size : null;
+    if (b.kind === 'exchange' && (!sizesFor(p.category).includes(newSize) || newSize === line.size)) throw fail(400, 'err.invalid', { field: 'field.size' });
+    try {
+      await db.transaction(async (trx) => {
+        // The key row first: a parallel double submit waits on its unique index, then fails and is answered below.
+        await trx('order_returns').insert({ order_id: o.id, order_item_id: line.id, store_id: o.store_id, kind: b.kind, reason: b.reason, quantity: qty,
+          refund, restock: b.restock, new_size: newSize, request_key: b.key, admin_id: req.admin.id });
+        if (!(await trx('order_items').where({ id: line.id }).whereRaw('returned + ? <= quantity', [qty]).increment('returned', qty))) {
+          const { returned } = await trx('order_items').where({ id: line.id }).first('returned');
+          throw fail(409, 'err.return_too_many', { n: line.quantity - returned });
+        }
+        if (b.restock) await trx('product_stock').where({ product_id: line.product_id, size: line.size }).increment('quantity', qty);
+        // Main rule: the new size must be on the shelf (free stock), and it leaves the shelf now.
+        if (newSize && !(await trx('product_stock').where({ product_id: line.product_id, size: newSize }).whereRaw('quantity - reserved >= ?', [qty]).decrement('quantity', qty))) {
+          throw fail(409, 'err.out_of_stock', { product: p, size: newSize });
+        }
+        await audit(trx, req.admin, { action: 'order.return', storeId: o.store_id, entityId: o.id, label: o.number,
+          after: { product: p.name, size: line.size, kind: b.kind, reason: b.reason, quantity: qty, refund, restock: b.restock, new_size: newSize } });
+      });
+    } catch (err) {
+      if (!err.publicKey && (await done())) return res.json(await adminView(o)); // lost the race to the same submit
+      throw err;
+    }
+    res.status(201).json(await adminView(await db('orders').where({ id: o.id }).first()));
+  });
+
   // Runs one order change (changeStatus / markPaid nest as a savepoint) and logs it in the same transaction.
   const orderStep = (req, o, action, change) => db.transaction(async (trx) => {
     if (!(await change(trx))) return false;
@@ -688,6 +759,13 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
       .select('i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.image_url')
       .sum({ units: 'i.quantity' }).sum({ revenue: db.raw('i.quantity * i.unit_price') })
       .orderBy([{ column: 'units', order: 'desc' }, { column: 'i.product_id' }]).limit(5), 'o.store_id');
+    // Task 23: units returned or exchanged in the period against units sold in it, and why.
+    const since = dbTime(now - days * DAY_MS);
+    const reasons = await inScope(req, db('order_returns').where('created_at', '>=', since).groupBy('reason').select('reason')
+      .sum({ units: 'quantity' }).sum({ refund: 'refund' }).orderBy([{ column: 'units', order: 'desc' }, { column: 'reason' }]));
+    const [{ units: soldUnits }] = await inScope(req, db('order_items as i').join('orders as o', 'o.id', 'i.order_id').where('o.payment_status', 'paid')
+      .whereNot('o.status', 'cancelled').where('o.paid_at', '>=', iso(now - days * DAY_MS)).sum({ units: 'i.quantity' }), 'o.store_id');
+    const returned = reasons.reduce((a, x) => a + Number(x.units), 0);
     const lowQ = inScope(req, db('products as p').join(stockTotals(db).as('s'), 's.product_id', 'p.id').where('s.thin', '>', 0), 'p.store_id');
     const [{ n: lowTotal }] = await lowQ.clone().count({ n: '*' });
     const low = await lowQ.select('p.*').orderByRaw('case when s.free = 0 then 0 else 1 end, s.thin desc, s.free, p.id').limit(6);
@@ -698,6 +776,8 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
       top_sold: sold.map((x) => ({ ...x, units: Number(x.units), revenue: Number(x.revenue) })),
       low_stock: { total: Number(lowTotal), items: await withStock(low) },
       kiosks: await kioskStatus(inScope(req, db('kiosks'))),
+      returns: { units: returned, sold: Number(soldUnits ?? 0), refund: reasons.reduce((a, x) => a + Number(x.refund), 0),
+        reasons: reasons.map((x) => ({ reason: x.reason, units: Number(x.units) })) },
     });
   });
 

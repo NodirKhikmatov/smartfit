@@ -80,3 +80,46 @@ export function createSizeRouter() {
   });
   return r;
 }
+
+// Task 23: per-product fit offset, learnt from "how did it fit?" answers and size returns.
+// +1 = runs small (take one size up), -1 = runs big, 0 = true to size.
+export const FITS = ['small', 'right', 'big'];
+export const FIT_MIN = 5; // fewer answers than this never move a size
+// Pure: the owner's override wins; otherwise more than half of at least FIT_MIN answers must agree.
+export function fitOffset({ small = 0, right = 0, big = 0 } = {}, override = null) {
+  if (override != null) return override;
+  const n = small + right + big;
+  if (n < FIT_MIN) return 0;
+  return small * 2 > n ? 1 : big * 2 > n ? -1 : 0;
+}
+// The size `offset` steps away in this product's size list, clamped to its ends; unknown sizes stay as they are.
+export function shiftSize(sizes, size, offset) {
+  const i = sizes.indexOf(size);
+  return i < 0 ? size : sizes[Math.min(sizes.length - 1, Math.max(0, i + offset))];
+}
+
+// One signal per order line: a size return (staff saw it) wins over the customer's own answer.
+// → Map product_id → { small, right, big }.
+export async function fitStats(db, productIds) {
+  const out = new Map();
+  if (!productIds.length) return out;
+  const sizeReturns = db('order_returns').whereIn('reason', ['too_small', 'too_big']).groupBy('order_item_id').select('order_item_id').max({ reason: 'reason' });
+  const rows = await db('order_items as i').leftJoin(sizeReturns.as('r'), 'r.order_item_id', 'i.id').whereIn('i.product_id', productIds)
+    .where((w) => w.whereNotNull('i.fit').orWhereNotNull('r.reason')).select('i.product_id', 'i.fit', 'r.reason');
+  for (const r of rows) {
+    const fit = r.reason === 'too_small' ? 'small' : r.reason === 'too_big' ? 'big' : r.fit;
+    const s = out.get(r.product_id) ?? { small: 0, right: 0, big: 0 };
+    if (FITS.includes(fit)) s[fit]++;
+    out.set(r.product_id, s);
+  }
+  return out;
+}
+
+// products: rows with id and fit_offset (the override) → Map product_id → { small, right, big, auto, override, offset }.
+export async function fitOf(db, products) {
+  const stats = await fitStats(db, products.map((p) => p.id));
+  return new Map(products.map((p) => {
+    const s = stats.get(p.id) ?? { small: 0, right: 0, big: 0 };
+    return [p.id, { ...s, auto: fitOffset(s), override: p.fit_offset ?? null, offset: fitOffset(s, p.fit_offset) }];
+  }));
+}

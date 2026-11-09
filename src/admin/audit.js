@@ -3,7 +3,7 @@
 // Every action the admin API writes (the viewer translates them as adm.act.<action>).
 export const AUDIT_ACTIONS = [
   'product.create', 'product.update', 'product.delete', 'product.image', 'product.image_delete',
-  'order.status', 'order.pay', 'fitting.done',
+  'order.status', 'order.pay', 'order.return', 'fitting.done', 'product.fit',
   'store.update', 'store.kiosk_pin', 'team.invite', 'team.invite_revoke', 'team.join', 'team.disable', 'team.enable', 'account.password',
   'sync_key.create', 'sync_key.revoke', 'stock.sync', 'store.create', 'org.create', 'demo.handle',
 ];

@@ -369,6 +369,14 @@ async function loadDashboard(quiet) {
     heat(x.stock, x.low_stock_threshold),
     el('button', { type: 'button', className: 'icon-btn ghost', title: t('adm.products.edit'), ariaLabel: t('adm.products.edit_aria', { name: productName(x) }), onclick: () => openForm(x) }, icon('edit')))) :
     [el('li', { className: 'li-empty' }, emptyState({ ic: 'check', title: t('adm.dash.low_empty'), text: t('adm.dash.low_empty_text') }))]));
+  const ret = d.returns;
+  $('dashReturnsSub').textContent = t('adm.dash.returns_sub', { n: days, units: ret.units, sold: ret.sold });
+  $('dashReturnsRate').textContent = ret.sold ? `${dec(Math.round((ret.units / ret.sold) * 1000) / 10)}%` : '—';
+  $('dashReturnsRefund').textContent = t('adm.dash.returns_refund', { sum: money(ret.refund) });
+  $('dashReturns').replaceChildren(...(ret.reasons.length ? ret.reasons.map((x) => el('li', {},
+    el('span', { className: 'rank-name' }, el('strong', { textContent: t(REASON[x.reason]) })),
+    el('span', { className: 'rank-num num' }, el('strong', { textContent: t('adm.dash.units', { n: x.units }) })))) :
+    [el('li', { className: 'li-empty' }, emptyState({ ic: 'check', title: t('adm.dash.returns_empty'), text: t('adm.dash.returns_empty_text') }))]));
   $('dashKiosks').replaceChildren(...(d.kiosks.length ? d.kiosks.map((k) => el('li', {},
     el('div', { className: 'grow' }, el('strong', { textContent: t('adm.dash.kiosk_name', { id: k.id }) }),
       el('div', { className: 'sizes', textContent: [!scope && many() && stores.find((s) => s.id === k.store_id)?.name, t('adm.dash.seen', { at: fmt.dateTime(k.last_seen_at) })].filter(Boolean).join(' · ') })),
@@ -492,11 +500,73 @@ function orderClosed() {
 }
 $('orderDlg').addEventListener('close', orderClosed);
 
-function itemsList(o) {
+// withReturns: the order drawer adds what came back, the customer's fit answer and a return button per line (task 23).
+const FIT_WORD = { small: 'kiosk.track.fit_small', right: 'kiosk.track.fit_right', big: 'kiosk.track.fit_big' };
+function itemsList(o, withReturns = false) {
   return el('ul', { className: 'lines' }, ...o.items.map((i) => el('li', {},
-    el('span', {}, el('strong', { textContent: productName(i) }), el('span', { className: 'muted', textContent: [i.size === 'ONE' ? t('common.size_one') : i.size, i.shelf_location].filter(Boolean).join(' · ') })),
+    el('span', {}, el('strong', { textContent: productName(i) }), el('span', { className: 'muted', textContent: [i.size === 'ONE' ? t('common.size_one') : i.size, i.shelf_location,
+      withReturns && i.returned > 0 && t('adm.ret.returned', { n: i.returned }), withReturns && i.fit && t('adm.ret.fit', { fit: t(FIT_WORD[i.fit]) })].filter(Boolean).join(' · ') }),
+    ...(withReturns && o.can_return && i.returned < i.quantity ? [el('button', { type: 'button', className: 'ret-btn', textContent: t('adm.ret.btn'), ariaLabel: t('adm.ret.btn_aria', { name: productName(i) }), onclick: () => openReturn(o, i) })] : [])),
     el('span', { className: 'num' }, `${i.quantity} × ${som(i.unit_price)}`, el('strong', { textContent: som(i.quantity * i.unit_price) })))));
 }
+const REASON = { too_small: 'adm.ret.reason_too_small', too_big: 'adm.ret.reason_too_big', disliked: 'adm.ret.reason_disliked', defect: 'adm.ret.reason_defect' };
+function returnsList(o) {
+  if (!o.returns?.length) return [];
+  const name = (id) => productName(o.items.find((i) => i.id === id) || {});
+  return [el('h3', { textContent: t('adm.dash.returns') }), el('ul', { className: 'lines ret-list' }, ...o.returns.map((r) => el('li', {},
+    el('span', {}, el('strong', { textContent: name(r.order_item_id) }), el('span', { className: 'muted', textContent: [
+      r.kind === 'exchange' ? t('adm.ret.row_exchange', { qty: r.quantity, size: r.new_size, reason: t(REASON[r.reason]) }) : t('adm.ret.row_return', { qty: r.quantity, reason: t(REASON[r.reason]), sum: money(r.refund) }),
+      t(r.restock ? 'adm.ret.restocked' : 'adm.ret.not_restocked'), fmt.dateTime(r.created_at)].join(' · ') })))))];
+}
+
+// Return / exchange dialog over the order drawer. One random key per opening: a double submit is answered, not repeated.
+let returning = null;
+const rf = $('retForm');
+function openReturn(o, i) {
+  const left = i.quantity - i.returned;
+  returning = { o, i, key: Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('') };
+  rf.reset();
+  $('retError').textContent = '';
+  $('retItem').textContent = `${productName(i)} · ${i.size} · ${som(i.unit_price)}`;
+  rf.quantity.max = left;
+  rf.quantity.value = 1;
+  rf.new_size.replaceChildren(...sizesFor(i.category).filter((s) => s !== i.size).map((s) => el('option', { value: s, textContent: s })));
+  syncReturn();
+  $('retDlg').showModal();
+}
+function syncReturn() {
+  const { i } = returning;
+  const exchange = rf.kind.value === 'exchange';
+  const qty = Math.min(Math.max(Number(rf.quantity.value) || 1, 1), i.quantity - i.returned);
+  $('retSizeWrap').hidden = !exchange;
+  $('retRefundWrap').hidden = exchange;
+  rf.refund.max = qty * i.unit_price;
+  if (!rf.refund.dataset.touched) rf.refund.value = qty * i.unit_price;
+  $('retRefundMax').textContent = t('adm.ret.refund_max', { sum: money(qty * i.unit_price) });
+}
+rf.addEventListener('change', (e) => {
+  if (e.target.name === 'refund') rf.refund.dataset.touched = '1';
+  if (e.target.name === 'reason') rf.restock.checked = rf.reason.value !== 'defect';
+  syncReturn();
+});
+rf.quantity.oninput = syncReturn;
+rf.addEventListener('reset', () => delete rf.refund.dataset.touched);
+$('retCancel').onclick = () => $('retDlg').close();
+rf.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const { o, i, key } = returning;
+  const exchange = rf.kind.value === 'exchange';
+  const body = { key, item_id: i.id, kind: rf.kind.value, reason: rf.reason.value, quantity: Number(rf.quantity.value), restock: rf.restock.checked,
+    ...(exchange ? { new_size: rf.new_size.value } : { refund: Number(rf.refund.value) }) };
+  $('retSave').disabled = true;
+  $('retError').textContent = '';
+  try {
+    const next = await call(`/orders/${o.id}/returns`, { method: 'POST', body });
+    $('retDlg').close();
+    toast(t('adm.ret.done', { id: o.number }));
+    if (openId === o.id) { renderOrder(next); keepFocus(); }
+  } catch (err) { $('retError').textContent = err.message; } finally { $('retSave').disabled = false; }
+});
 function totalsBlock(o) {
   return el('dl', { className: 'totals' },
     el('dt', { textContent: t('adm.receipt.subtotal') }), el('dd', { className: 'num', textContent: money(o.subtotal) }),
@@ -517,7 +587,7 @@ function renderOrder(o) {
       ...fact('adm.orders.fulfillment', o.fulfillment === 'pickup' ? t('adm.orders.pickup') : t('adm.order.delivery_to', { address: o.address })),
       ...fact('adm.orders.payment', payBadge(o), ` ${method(o)}`, ...(o.payment_status === 'pending' && o.expires_at ? [' · ', deadline(Math.max(0, Date.parse(o.expires_at) - Date.now()))] : [])),
       ...fact('adm.order.tg', t(o.telegram ? 'adm.order.tg_on' : 'adm.order.tg_off'))),
-    el('h3', { textContent: t('adm.order.items') }), itemsList(o), totalsBlock(o));
+    el('h3', { textContent: t('adm.order.items') }), itemsList(o, true), totalsBlock(o), ...returnsList(o));
   $('orderActions').replaceChildren(
     ...(o.payment_status === 'pending' ? [el('button', { type: 'button', className: 'primary', onclick: (e) => markPaid(o, e.currentTarget) }, icon('cash'), t('adm.paydlg.confirm'))] : []),
     ...o.next.map((s) => el('button', { type: 'button', className: s === 'cancelled' ? 'danger' : 'primary', textContent: stepName(o, s), onclick: (e) => setStatus(o, s, e.currentTarget) })),
@@ -727,6 +797,7 @@ function openForm(p) {
   f.store_id.value = p?.store_id ?? (scope || stores[0]?.id || '');
   f.store_id.disabled = !!p;
   renderStock(f.category.value, p?.stock);
+  renderFit(p);
   $('imgWrap').hidden = !p;
   $('formDelete').hidden = !p;
   $('imgError').textContent = '';
@@ -757,6 +828,30 @@ $('form').addEventListener('submit', async (e) => {
     reloadProducts();
   } catch (err) { $('formError').textContent = err.message; } finally { $('save').disabled = false; }
 });
+// Task 23: what buyers said about the fit, the automatic offset (≥ 5 answers) and the owner's override.
+const FIT_MIN = 5;
+const FIT_V = { 1: 'adm.sizefit.v_small', 0: 'adm.sizefit.v_right', '-1': 'adm.sizefit.v_big' };
+function renderFit(p) {
+  $('fitWrap').hidden = !p || p.category === 'accessory' || !p.fit;
+  $('fitError').textContent = '';
+  if ($('fitWrap').hidden) return;
+  const n = p.fit.small + p.fit.right + p.fit.big;
+  $('fitStats').textContent = [t('adm.sizefit.stats', p.fit), t('adm.sizefit.auto', { v: n < FIT_MIN ? t('adm.sizefit.few', { n: FIT_MIN }) : t(FIT_V[p.fit.auto]) })].join('. ');
+  $('fitOffset').value = p.fit.override == null ? '' : String(p.fit.override);
+  const owner = me?.role !== 'manager';
+  $('fitOffset').disabled = $('fitSave').disabled = !owner;
+  $('fitNote').textContent = owner ? '' : t('adm.sizefit.owner_only');
+}
+$('fitSave').onclick = async () => {
+  $('fitError').textContent = '';
+  const v = $('fitOffset').value;
+  try {
+    const p = await call(`/products/${editing.id}/fit`, { method: 'PATCH', body: { offset: v === '' ? null : Number(v) } });
+    editing.fit = p.fit;
+    renderFit(p);
+    toast(t('adm.sizefit.saved'));
+  } catch (err) { $('fitError').textContent = err.message; }
+};
 function showImage(url) {
   $('imgPreview').hidden = !url;
   $('imgRemove').hidden = !url;

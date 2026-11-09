@@ -40,7 +40,9 @@ export function message(o, statusUrl = null) {
     delivered: `${head} ${o.fulfillment === 'pickup' ? 'topshirildi' : 'yetkazildi'}. Xaridingiz uchun rahmat!`,
     cancelled: `${head} bekor qilindi.${o.payment_status === 'paid' ? " To'langan pul qaytariladi." : ''}`,
   }[stageOf(o)];
-  return statusUrl ? `${text}\n${statusUrl}` : text;
+  if (!statusUrl) return text;
+  // Task 23: the "how did it fit?" buttons are on the status page.
+  return stageOf(o) === 'delivered' ? `${text}\nKiyimlar o'lchamiga mos keldimi? Shu yerda belgilang:\n${statusUrl}` : `${text}\n${statusUrl}`;
 }
 const statusUrl = (o, base = process.env.PUBLIC_URL) => (base && o.notify_token ? `${base.replace(/\/+$/, '')}/order/${o.notify_token}` : null);
 

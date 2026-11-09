@@ -224,6 +224,10 @@ a.kpi:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); col
 .lines { list-style: none; margin: 0 0 var(--s-3); padding: 0; }
 .lines li { display: flex; justify-content: space-between; gap: var(--s-3); padding: var(--s-2) 0; border-bottom: 1px solid var(--line); }
 .lines li > span { display: grid; line-height: 1.35; }
+.lines .ret-btn { justify-self: start; margin-top: var(--s-1); min-height: 2rem; padding: 0 var(--s-3); font-size: var(--text-sm); }
+.lines.ret-list li > span:last-child { justify-items: start; text-align: left; white-space: normal; font-size: inherit; color: inherit; }
+#retDlg .chips span { white-space: nowrap; }
+.kpi-inline { font-size: var(--text-2xl); font-variant-numeric: tabular-nums; }
 .lines li > span:last-child { justify-items: end; text-align: right; white-space: nowrap; font-size: var(--text-sm); color: var(--ink-2); }
 .lines li > span:last-child strong { color: var(--ink); font-size: var(--text-md); }
 .lines .muted { font-size: var(--text-sm); }
