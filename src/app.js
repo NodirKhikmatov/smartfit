@@ -18,6 +18,7 @@ import { createLandingRouter } from './landing.js';
 import { createFunnelRouter } from './demand.js';
 import { createCatalogRouter } from './catalog.js';
 import { VENDOR, MODEL } from './vendor.js';
+import { createProfileRouter } from './profile.js';
 
 // X1: same-origin only, plus OpenStreetMap tiles for the delivery map. 'wasm-unsafe-eval' lets MediaPipe compile its wasm
 // (it can't run JS from strings). No 'unsafe-inline': styles are files or CSSOM, scripts are modules.
@@ -70,7 +71,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/admin', createAdminRouter(db, { uploadDir }));
   api.use('/sync', createSyncRouter(db)); // POS / ERP stock push, per-store API key
   api.use('/recommend', bucket('recommend'), createRecommendRouter(db, { weather, stylist, stylistTimeoutMs }));
-  api.use('/stores', createStoreRouter(db, { weather }));
+  api.use('/stores', createStoreRouter(db, { weather, profiles: !!telegram }));
   api.use('/size', bucket('size'), createSizeRouter());
   const methods = paymentMethods(payments), link = telegramLink(telegram);
   api.use('/cart', bucket('cart'), createCartRouter(db, { methods, link, maxOpenCarts: lim.openCarts, promoLimit: bucket('promo') }));
@@ -79,6 +80,8 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/catalog', bucket('catalog'), createCatalogRouter(db, { link, maxOpen: lim.openCarts })); // task 25
   api.use('/funnel', bucket('funnel'), createFunnelRouter(db)); // task 24: drop-off by step
   api.use('/orders', createOrderRouter(db, { methods, link }));
+  // Task 27: customer profiles exist only with a Telegram bot (it verifies the phone); without one the routes are 404.
+  if (telegram) api.use('/profile', createProfileRouter(db, { telegram, limit: bucket('profile'), pollLimit: bucket('profilePoll'), now }));
   api.use('/demo-requests', bucket('demo'), createDemoRouter(db));
   api.use(() => { throw fail(404, 'err.not_found'); });
   app.use('/api', api);
@@ -111,6 +114,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   });
   // Order status page; the token in its URL must not leak to the payment provider through Referer.
   app.get('/order/:token', (req, res) => res.set('Referrer-Policy', 'no-referrer').sendFile('order.html', { root: customer }));
+  app.get('/profile/:token', (req, res) => res.set('Referrer-Policy', 'no-referrer').sendFile('profile.html', { root: customer }));
   app.use('/app', express.static(customer, { index: false }));
   app.use('/uploads', express.static(uploadDir, { index: false, setHeaders: (res) => res.set('X-Content-Type-Options', 'nosniff') }));
 

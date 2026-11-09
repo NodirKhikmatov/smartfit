@@ -218,8 +218,9 @@ dialog.handoff .done .icon { width: 3rem; height: 3rem; color: var(--accent); ma
 .fit-form .field { margin: 0; }
 
 /* ---------- Catalogue and item page (task 25) */
-#catalogBtn { margin-top: var(--s-3); }
-html.kiosk #catalogBtn { min-height: 3.5rem; font-size: var(--text-lg); }
+/* Catalogue and (task 27) profile login side by side under "Boshlash"; a hidden one takes no column. */
+.start-more { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: var(--s-3); margin-top: var(--s-3); }
+html.kiosk .start-more button { min-height: 3.5rem; font-size: var(--text-lg); }
 .filters { display: grid; gap: var(--s-3); margin-bottom: var(--s-3); }
 .filter { display: grid; gap: var(--s-1); }
 html.kiosk .filter .chip { min-height: 2.75rem; padding-inline: var(--s-3); font-size: var(--text-md); }
@@ -281,6 +282,13 @@ html.kiosk .catalog-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap
 .timeline.off li.done .dot { border-color: var(--line-strong); background: var(--sunken); color: var(--ink-2); }
 .track .notice strong { display: block; font-variant-numeric: tabular-nums; }
 .track .notice p { margin: var(--s-1) 0 0; }
+
+/* ---------- Task 27: profile (save box, profile page) */
+.profile-box { margin-top: var(--s-5); text-align: left; }
+.profile-box > :last-child { margin-bottom: 0; }
+.profile-box .tgqr { margin-bottom: var(--s-2); }
+.track section h2 { font-size: var(--text-lg); margin-bottom: var(--s-2); }
+.track .sum .muted { color: var(--ink-3); }
 
 /* ---------- Done */
 .done { text-align: center; }

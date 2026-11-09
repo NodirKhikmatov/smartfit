@@ -151,7 +151,7 @@ async function api(path, body, method = body ? 'POST' : 'GET') {
 
 async function loadStore() {
   $('startError').textContent = '';
-  $('catalogBtn').hidden = true;
+  $('catalogBtn').hidden = $('profileLogin').hidden = true;
   $('storePicker').hidden = true;
   $('start').disabled = true;
   if (!Number.isInteger(storeId) || storeId < 1) return showPicker('kiosk.start.no_store');
@@ -169,6 +169,7 @@ async function loadStore() {
   $('startLabel').textContent = t('kiosk.start.go');
   $('start').disabled = false;
   $('catalogBtn').hidden = false;
+  $('profileLogin').hidden = !(kiosk && store.profile); // task 27: only with the Telegram bot
   renderWeather();
   $('lookbook').replaceChildren(...store.looks.map((l) => el('img', { src: l.image_url, alt: '' })));
   $('lookbook').hidden = store.looks.length < 2;
@@ -473,6 +474,7 @@ function renderResults(r) {
     ...(r.over_budget > 0 ? [warn('kiosk.results.over_budget', { sum: som(r.over_budget) })] : []),
     el('div', { className: 'outfits' }, ...(r.partial ? [partialCard(r.partial)] : []), ...r.outfits.map((o, i) => outfitCard(o, i + 1))),
     triedCard(),
+    ...(store?.profile && !kiosk ? [profileBox(r.outfits.map((o) => o.items.map((i) => i.id)))] : []), // phone flow: keep sizes + these looks
   );
 }
 
@@ -1167,6 +1169,7 @@ function showDone(o, pay = { method: 'cashier' }, notify = null, track = null) {
     el('p', { textContent: o.fulfillment === 'pickup' ? t('kiosk.done.next_pickup') : t('kiosk.done.next_delivery', { phone: o.phone }) }),
     ...(track ? [trackBlock(track)] : []),
     ...(notify && !kiosk ? [telegramBlock(notify)] : []), // the kiosk's status-page QR has the Telegram button
+    ...(store?.profile ? [profileBox()] : []), // at checkout: kiosk shows a QR, the phone a button
   );
   go('done', { replace: true }); // back from here goes to the outfits, not to a spent checkout
 }
@@ -1185,6 +1188,124 @@ function trackBlock(tr) {
 }
 $('doneHome').onclick = () => reset();
 
+// --- Task 27: profile through Telegram. "Profilimni saqlash" opens the bot with a one-time link (a QR on the kiosk);
+// the bot asks for the contact. The screen only learns "saved": the profile page link goes to the bot chat alone.
+let profilePoll = null; // the one link a screen is waiting on
+const stopProfilePoll = () => {
+  clearInterval(profilePoll);
+  profilePoll = null;
+};
+function pollProfile(poll, onState) {
+  stopProfilePoll();
+  const id = profilePoll = setInterval(async () => {
+    let s;
+    try {
+      s = await api(`/profile/token/${poll}`);
+    } catch (err) {
+      if (err.status !== 404) return; // offline for a moment: ask again
+      s = { state: 'expired' };
+    }
+    if (profilePoll !== id) return; // stopped meanwhile
+    if (!['new', 'opened'].includes(s.state)) stopProfilePoll();
+    onState(s);
+  }, 3000);
+}
+// Numbers only (form, chosen sizes, the photo's cm estimates); never the photo, name or phone.
+function profileNumbers() {
+  const m = sizeInfo?.measurements;
+  return { ...body, ...(request && { top: request.sizes.top, bottom: request.sizes.bottom, shoes: request.sizes.shoes }), ...(m && { shoulder: m.shoulder_cm, hip: m.hip_cm }) };
+}
+function profileBox(looks = null) {
+  const box = el('div', { className: 'card profile-box' });
+  const intro = () => box.replaceChildren(el('p', { className: 'muted', textContent: t('kiosk.profile.save_hint') }),
+    el('button', { type: 'button', className: 'secondary wide', onclick: open }, icon('user'), el('span', { textContent: t('kiosk.profile.save') })));
+  async function open(e) {
+    e.currentTarget.disabled = true;
+    let r;
+    try {
+      r = await api('/profile/link', { store_id: storeId, lang: getLang(), ...profileNumbers(), ...(looks && { rec: request?.rec, looks }) });
+    } catch (err) {
+      intro();
+      return toast(err.message, { tone: 'danger' });
+    }
+    const qr = el('div', { className: 'tgqr' });
+    qr.innerHTML = r.svg; // built by our server from the bot's t.me link
+    const goTo = kiosk ? [el('p', { textContent: t('kiosk.profile.scan') }), qr]
+      : /^https:\/\/t\.me\//.test(r.url) ? [el('a', { className: 'button primary wide', href: r.url, target: '_blank', rel: 'noopener' }, t('kiosk.profile.open_tg'))] : [];
+    box.replaceChildren(el('p', { className: 'meta', textContent: t('kiosk.profile.consent') }), ...goTo, el('p', { className: 'meta', role: 'status', textContent: t('kiosk.profile.waiting') }));
+    pollProfile(r.poll, (s) => {
+      if (!box.isConnected) return stopProfilePoll();
+      if (s.state === 'done') box.replaceChildren(el('div', { className: 'notice' }, icon('check'), el('p', { textContent: t('kiosk.profile.saved') })));
+      else if (s.state === 'expired') box.replaceChildren(el('p', { className: 'meta', textContent: t('kiosk.profile.expired') }), el('button', { type: 'button', className: 'secondary', onclick: open }, t('kiosk.profile.again')));
+    });
+  }
+  intro();
+  return box;
+}
+
+// Kiosk: "Profil bilan kirish" → one-time QR → the customer's Telegram confirms → the sizes arrive once.
+let loginDlg = null;
+function stopLogin() {
+  stopProfilePoll();
+  const dlg = loginDlg;
+  loginDlg = null;
+  if (dlg?.open) dlg.close();
+  dlg?.remove();
+}
+$('profileLogin').onclick = async () => {
+  stopLogin();
+  const dlg = loginDlg = el('dialog', { className: 'handoff' });
+  dlg.setAttribute('aria-labelledby', 'loginTitle');
+  dlg.addEventListener('close', () => loginDlg === dlg && stopLogin());
+  const qr = el('div', { className: 'tgqr' }), status = el('p', { className: 'meta', role: 'status' });
+  dlg.append(el('h2', { id: 'loginTitle', textContent: t('kiosk.profile.login') }), el('p', { className: 'muted', textContent: t('kiosk.profile.login_text') }),
+    qr, status, el('div', { className: 'dialog-actions' }, el('button', { type: 'button', onclick: stopLogin }, t('common.close'))));
+  document.body.append(dlg);
+  dlg.showModal();
+  let r;
+  try {
+    r = await api('/profile/login', { store_id: storeId, lang: getLang() });
+  } catch (err) {
+    status.textContent = err.message;
+    return;
+  }
+  if (loginDlg !== dlg) return; // closed or reset meanwhile
+  qr.innerHTML = r.svg;
+  pollProfile(r.poll, (s) => {
+    if (loginDlg !== dlg) return;
+    if (s.state === 'done') {
+      stopLogin();
+      applyProfile(s.profile);
+    } else if (s.state === 'missing' || s.state === 'expired') {
+      qr.replaceChildren();
+      status.replaceChildren(t(s.state === 'missing' ? 'kiosk.profile.login_missing' : 'kiosk.profile.expired'), ' ',
+        el('button', { type: 'button', className: 'primary', onclick: () => $('profileLogin').click() }, t('kiosk.profile.again')));
+    }
+  });
+};
+// Fill the form from the profile; with both clothing sizes known the camera step is skipped.
+function applyProfile(p) {
+  if (p.lang !== getLang()) {
+    setLang(p.lang);
+    switcher.sync();
+  }
+  form.reset();
+  budgetChips();
+  form.gender.value = p.gender ?? '';
+  form.height.value = p.height ?? '';
+  form.weight.value = p.weight ?? '';
+  form.shoes.value = p.shoes ?? '';
+  toast(t('kiosk.profile.loaded'));
+  const r = toRequest(formValues(), storeId);
+  if (!r) return go('form');
+  ({ body, request } = r);
+  sizeInfo = lastResult = null;
+  if (!p.top || !p.bottom) return go('form');
+  Object.assign(request.sizes, { top: p.top, bottom: p.bottom });
+  sizeInfo = { manual: true };
+  go('results');
+}
+
 // Back to start keeps the cart; only the kiosk idle reset clears it for the next customer.
 // Icon button, so it is not mistaken for the cart (U15); with items in the cart it asks first.
 $('home').onclick = async () => {
@@ -1195,6 +1316,8 @@ $('home').onclick = async () => {
 
 function reset() {
   stopHandoff();
+  stopLogin();
+  $('doneBody').replaceChildren(); // its profile QR must not wait for the next customer
   if (cart) api(`/cart/${cart.token}`, null, 'DELETE').catch(() => {}); // give the held stock back now, not in 15 min
   setCart(null);
   request = body = sizeInfo = lastResult = lastOrder = visit = null;

@@ -184,14 +184,14 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
 // Public store list for the customer app's store picker (audit U10): names only.
 // GET /:id also gives the attract screen up to 4 photos of items in stock now that suit today's weather.
 const LOOK = ['outerwear', 'top', 'bottom', 'shoes'];
-export function createStoreRouter(db, { weather }) {
+export function createStoreRouter(db, { weather, profiles = false }) {
   const r = express.Router();
   r.get('/', async (req, res) => {
     res.json(await db('stores').orderBy('id').select('id', 'name', 'city'));
   });
   r.get('/:id', async (req, res) => {
     const id = Number(req.params.id);
-    const store = Number.isInteger(id) && id > 0 ? await db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon') : undefined;
+    const store = Number.isInteger(id) && id > 0 ? await db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon', 'organization_id') : undefined;
     if (!store) throw fail(404, 'err.store_not_found');
     const w = await weather(store);
     const rows = await db('products as p')
@@ -200,7 +200,8 @@ export function createStoreRouter(db, { weather }) {
       .whereExists(db('product_stock as s').whereRaw('s.product_id = p.id').whereRaw('s.quantity - s.reserved > 0'))
       .orderBy('p.id').select('p.category', 'p.image_url');
     const looks = LOOK.map((c) => rows.find((p) => p.category === c)).filter(Boolean);
-    res.json({ id: store.id, name: store.name, city: store.city, weather: w, looks });
+    // profile: show the task 27 buttons (needs the Telegram bot and an organisation to scope the profile to).
+    res.json({ id: store.id, name: store.name, city: store.city, weather: w, looks, profile: profiles && store.organization_id != null });
   });
   return r;
 }

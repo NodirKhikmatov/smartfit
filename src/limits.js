@@ -22,6 +22,8 @@ export function limitConfig() {
     funnel: env('RATE_FUNNEL_PER_MIN', 120), // ≤ 5 events per customer visit, every device on the shop IP shares it
     demo: env('RATE_DEMO_PER_MIN', 3), // landing page "Demo so'rash" form
     promo: env('RATE_PROMO_PER_MIN', 20), // task 26: promo code tries (right or wrong), on top of the cart bucket
+    profile: env('RATE_PROFILE_PER_MIN', 20), // task 27: new profile links / kiosk login QRs, the profile page
+    profilePoll: env('RATE_PROFILE_POLL_PER_MIN', 300), // the screens waiting for the bot poll every 3 s
     openCarts: env('MAX_OPEN_CARTS_PER_IP', 30),
   };
 }

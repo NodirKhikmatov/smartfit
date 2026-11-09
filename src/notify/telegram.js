@@ -8,6 +8,7 @@ import { smsSender } from './sms.js';
 import { fittingView, dayStart, DAY_MS } from '../admin/routes.js';
 import { demandItems, funnelStats } from '../demand.js';
 import { dbTime } from '../recommend/routes.js';
+import { handleProfileMessage } from '../profile.js';
 
 const DONE = ['delivered', 'cancelled']; // nothing more to say after these
 const START = /^\/start(?:@\w+)?\s+([a-f0-9]{32})$/;
@@ -193,9 +194,12 @@ export async function flushWeeklyReport(db, telegram, now = Date.now()) {
 }
 
 // "/start <token>" from the order link → the order's messages go to this chat. The first chat to link keeps it.
-export async function handleUpdate(db, update, send) {
+// Profile deep links, shared contacts, /delete and /profile (task 27) go to src/profile.js first.
+export async function handleUpdate(db, update, send, opts) {
   const m = update?.message;
-  if (typeof m?.text !== 'string' || m.chat?.type !== 'private') return;
+  if (m?.chat?.type !== 'private') return;
+  if (await handleProfileMessage(db, m, send, opts)) return;
+  if (typeof m.text !== 'string') return;
   const token = START.exec(m.text.trim())?.[1];
   const chat = m.chat.id;
   if (!token) return send(chat, "Salom! Buyurtmani kuzatish uchun buyurtma ekranidagi Telegram tugmasini bosing yoki QR kodni skanerlang.");
@@ -219,7 +223,7 @@ export const telegramApi = (token, fetchFn = fetch) => async (method, body, time
 // (setWebhook + secret_token) and a DB lock on the outbox if the app ever runs as several instances.
 export function startNotifications(db, { telegram = telegramConfig(), sms = smsSender(), everyMs = 5000 } = {}) {
   const api = telegram && telegramApi(telegram.token);
-  const send = api && ((chat_id, text) => api('sendMessage', { chat_id, text }));
+  const send = api && ((chat_id, text, extra) => api('sendMessage', { chat_id, text, ...extra })); // extra: reply_markup
   if (!send && !sms) return console.log('Notifications off: set TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_USERNAME to enable');
   let busy = false;
   const flush = async () => {
