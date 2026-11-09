@@ -158,6 +158,17 @@
           <legend data-i18n="kiosk.checkout.pay_how"></legend>
           <div class="chips" id="payChoices"></div>
         </fieldset>
+        <div class="promo" id="promoBox">
+          <div class="promo-row" id="promoAsk">
+            <label class="field grow" for="promoInput"><span data-i18n="kiosk.promo.label"></span><input id="promoInput" name="promo" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="32" data-keys="code" aria-describedby="promoMsg"></label>
+            <button type="button" id="promoApply" data-i18n="kiosk.promo.apply"></button>
+          </div>
+          <div class="promo-row" id="promoOn" hidden>
+            <p class="grow" id="promoOnText"></p>
+            <button type="button" class="ghost danger" id="promoRemove" data-i18n="kiosk.promo.remove"></button>
+          </div>
+          <p class="field-error" id="promoMsg" role="alert"></p>
+        </div>
         <div class="sum" id="cartSum"></div>
         <p class="meta" id="payNote"></p>
         <p class="error" id="checkoutError" role="alert"></p>

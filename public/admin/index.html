@@ -369,6 +369,7 @@
                 <label class="field span-all"><span data-i18n="field.telegram_chat"></span> <input name="telegram_chat_id" inputmode="numeric" pattern="-?[0-9]{1,15}" maxlength="16" autocomplete="off"><span class="hint" data-i18n="adm.set.chat_hint"></span></label>
                 <label class="field span-all"><span data-i18n="field.report_chat"></span> <input name="report_chat_id" inputmode="numeric" pattern="-?[0-9]{1,15}" maxlength="16" autocomplete="off"><span class="hint" data-i18n="adm.set.report_hint"></span></label>
                 <label class="field"><span data-i18n="field.low_stock"></span> <input name="low_stock_threshold" type="number" min="0" max="1000" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.low_hint"></span></label>
+                <label class="field"><span data-i18n="field.bundle_percent"></span> <input name="bundle_percent" type="number" min="0" max="90" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.bundle_hint"></span></label>
                 <label class="field"><span data-i18n="field.kiosk_pin"></span> <input name="kiosk_pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" autocomplete="new-password" aria-describedby="pinState"><span class="hint"><strong id="pinState"></strong> <span data-i18n="adm.set.kiosk_pin_hint"></span></span></label>
               </div>
             </fieldset>
@@ -404,6 +405,21 @@
           <h2 class="section-title" data-i18n="adm.sync.how"></h2>
           <p class="muted" data-i18n="adm.sync.how_text"></p>
           <pre class="card code-sample"><code id="keySample"></code></pre>
+        </section>
+
+        <section data-tab="promo" hidden>
+          <div class="page-head">
+            <p class="muted" data-i18n="adm.promo.sub"></p>
+            <button type="button" class="primary" id="promoBtn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="adm.promo.create"></span></button>
+          </div>
+          <div id="promoError"></div>
+          <div class="table-wrap">
+            <table class="table">
+              <caption class="visually-hidden" data-i18n="adm.set.promo"></caption>
+              <thead><tr><th data-i18n="field.promo_code"></th><th data-i18n="adm.promo.discount"></th><th class="hide-sm" data-i18n="common.store"></th><th class="hide-sm" data-i18n="adm.promo.dates"></th><th class="num" data-i18n="adm.promo.used"></th><th data-i18n="adm.promo.state"></th><th><span class="visually-hidden" data-i18n="adm.promo.edit"></span></th></tr></thead>
+              <tbody id="promoRows"></tbody>
+            </table>
+          </div>
         </section>
 
         <section data-tab="audit" hidden>
@@ -564,6 +580,30 @@
       <button type="button" id="keyCancel" data-i18n="common.cancel"></button>
       <button class="primary" id="keyCreate" data-i18n="adm.sync.create"></button>
       <button type="button" class="primary" id="keyCopy" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="adm.qr.copy"></span></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="promoDlg" aria-labelledby="promoTitle">
+  <form id="promoForm" method="dialog">
+    <h2 id="promoTitle"></h2>
+    <div class="grid">
+      <label><span data-i18n="field.promo_code"></span> <input name="code" required maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{2,31}" autocomplete="off" spellcheck="false"></label>
+      <label><span data-i18n="common.store"></span> <select name="store_id"></select></label>
+      <label><span data-i18n="field.promo_kind"></span> <select name="kind"><option value="percent" data-i18n="adm.promo.percent"></option><option value="fixed" data-i18n="adm.promo.fixed"></option></select></label>
+      <label><span data-i18n="field.promo_value"></span> <input name="value" type="number" min="1" step="1" required inputmode="numeric"></label>
+      <label><span data-i18n="field.promo_min"></span> <input name="min_order" type="number" min="0" step="1" inputmode="numeric"></label>
+      <label><span data-i18n="field.promo_max_uses"></span> <input name="max_uses" type="number" min="1" step="1" inputmode="numeric"></label>
+      <label><span data-i18n="adm.promo.starts"></span> <input name="starts_on" type="date"></label>
+      <label><span data-i18n="adm.promo.ends"></span> <input name="ends_on" type="date"></label>
+      <label><span data-i18n="field.promo_per_phone"></span> <input name="max_per_phone" type="number" min="1" step="1" inputmode="numeric"></label>
+      <label class="check"><input name="active" type="checkbox"> <span data-i18n="field.promo_active"></span></label>
+    </div>
+    <p class="muted" data-i18n="adm.promo.form_hint"></p>
+    <p class="error" id="promoDlgError" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="promoCancel" data-i18n="common.cancel"></button>
+      <button class="primary" id="promoSave" data-i18n="adm.form.save"></button>
     </div>
   </form>
 </dialog>

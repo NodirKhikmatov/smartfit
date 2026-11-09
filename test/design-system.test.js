@@ -117,3 +117,16 @@ test('favicon, design-system assets and the styleguide are served', async () => 
   }
   assert.equal((await fetch(base + '/shared/')).status, 404, 'no directory index');
 });
+
+// Browser modules aren't imported by any test, so a syntax error (e.g. a name declared twice) would only show in the
+// browser. Each one must at least parse as a module. (sw.js is a classic worker script; it parses as a module too.)
+test('every browser script parses', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { readdirSync } = await import('node:fs');
+  for (const dir of ['admin', 'app', 'landing', 'shared']) {
+    for (const f of readdirSync(new URL(`../public/${dir}/`, import.meta.url)).filter((x) => x.endsWith('.js'))) {
+      const r = spawnSync(process.execPath, ['--input-type=module', '--check'], { input: read(`public/${dir}/${f}`) });
+      assert.equal(r.status, 0, `public/${dir}/${f}: ${r.stderr}`);
+    }
+  }
+});

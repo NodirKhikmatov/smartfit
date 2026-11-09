@@ -11,6 +11,8 @@ import { qrSvg, publicBase } from '../qr.js';
 import { clientKey } from '../limits.js';
 import { FITS } from '../size/size.js';
 import { logMissed } from '../demand.js';
+import { price, findPromo, promoProblem, claimPromo, releasePromo, setKey, parseJson } from './promo.js';
+import { fmt } from '../../public/shared/i18n.js';
 
 export const HOLD_MS = 15 * 60 * 1000;
 export const HANDOFF_MS = 5 * 60 * 1000; // how long the kiosk's "continue on your phone" QR works
@@ -22,14 +24,15 @@ const iso = (ms) => new Date(ms).toISOString(); // ISO strings compare correctly
 // Payment methods offered at checkout. Each returns what the client needs; online ones add a pay `url` (src/cart/payments.js).
 const CASHIER = { cashier: async () => ({ method: 'cashier' }) };
 
-// Pickup is free. Delivery: the store's flat city fee, free when the subtotal is above the store's threshold (null = never free).
+// Pickup is free. Delivery: the store's flat city fee, free when the goods amount is above the store's threshold (null = never free).
 export function deliveryFee(store, subtotal, fulfillment) {
   if (fulfillment !== 'delivery') return 0;
   return store.free_delivery_threshold != null && subtotal > store.free_delivery_threshold ? 0 : store.delivery_fee;
 }
-export const totals = (store, subtotal, fulfillment) => {
-  const delivery_fee = deliveryFee(store, subtotal, fulfillment);
-  return { subtotal, delivery_fee, total: subtotal + delivery_fee };
+// discount (task 26) = bundle + promo; the free-delivery threshold looks at what the customer pays for the goods.
+export const totals = (store, subtotal, fulfillment, discount = 0) => {
+  const delivery_fee = deliveryFee(store, subtotal - discount, fulfillment);
+  return { subtotal, delivery_fee, total: subtotal - discount + delivery_fee };
 };
 
 // Takes n units of free stock; false when fewer than n are free.
@@ -75,6 +78,7 @@ export async function cancelPending(trx, orderId, now = Date.now(), { expiredOnl
   if (expiredOnly) q = q.where('expires_at', '<=', iso(now));
   if (!(await q.update({ payment_status: 'cancelled', status: 'cancelled', expires_at: null, updated_at: trx.fn.now() }))) return false;
   await release(trx, await trx('order_items').where({ order_id: orderId }));
+  await releasePromo(trx, orderId);
   await trx('payment_transactions').where({ order_id: orderId, state: 1 }).update({ state: -1, reason: 4, cancel_time: now });
   return true;
 }
@@ -88,6 +92,7 @@ async function cancelPaid(trx, orderId) {
   for (const i of await trx('order_items').where({ order_id: orderId })) {
     await trx('product_stock').where({ product_id: i.product_id, size: i.size }).increment('quantity', i.quantity);
   }
+  await releasePromo(trx, orderId);
   return true;
 }
 
@@ -138,7 +143,18 @@ export async function markPaid(db, orderId, now = Date.now()) {
 // SQLite CURRENT_TIMESTAMP is 'YYYY-MM-DD HH:MM:SS' in UTC, which Date would read as local time.
 export const stamp = (v) => (v == null ? null : new Date(typeof v === 'string' && !v.includes('T') ? `${v.replace(' ', 'T')}Z` : v).toISOString());
 const msLeft = (v) => (v == null ? null : Math.max(0, Date.parse(stamp(v)) - Date.now()));
-export const storeOf = (db, id) => db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold');
+export const storeOf = (db, id) => db('stores').where({ id }).first('id', 'organization_id', 'name', 'city', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'bundle_percent');
+
+// Task 26: the cart's discounts. → { ...price(), promo: { code, value, kind, error, sum } | null }. A promo that no longer
+// applies (switched off, used up, under its minimum after a removal) stays on the cart with its error and takes nothing off.
+async function pricing(q, cart, store, lines) {
+  const p = cart.promo_code_id ? await q('promo_codes').where({ id: cart.promo_code_id }).first() : null;
+  const problem = p && promoProblem(p);
+  const r = price(lines, { bundles: parseJson(cart.bundles, []), bundlePercent: store.bundle_percent, promo: p && !problem ? p : null });
+  const error = problem || (p && !r.minOk ? 'err.promo_min' : null);
+  return { ...r, promo: p ? { ...p, error } : null }; // the whole row: checkout's claim needs its limits
+}
+const promoError = (pr) => fail(409, pr.promo.error, pr.promo.error === 'err.promo_min' ? { sum: fmt.num(pr.promo.min_order) } : {});
 
 // Prices always come from the products table, never from the request.
 async function cartView(db, cart, payments) {
@@ -152,7 +168,8 @@ async function cartView(db, cart, payments) {
     line_total: unitPrice(r) * r.quantity,
     sizes: sizesFor(r.category).filter((s) => s === r.size || free.some((f) => f.product_id === r.product_id && f.size === s)),
   }));
-  const subtotal = items.reduce((s, i) => s + i.line_total, 0);
+  const pr = await pricing(db, cart, store, items);
+  const off = pr.subtotal - pr.goods;
   return {
     token: cart.token,
     store_id: store.id,
@@ -161,16 +178,18 @@ async function cartView(db, cart, payments) {
     items,
     payments,
     delivery: { city: store.city, lat: store.lat, lon: store.lon, fee: store.delivery_fee, free_over: store.free_delivery_threshold },
-    totals: { pickup: totals(store, subtotal, 'pickup'), delivery: totals(store, subtotal, 'delivery') },
+    discounts: { bundle: pr.bundle_discount, bundle_percent: store.bundle_percent, promo: pr.promo_discount, code: pr.promo && { code: pr.promo.code, error: pr.promo.error, min_order: pr.promo.min_order } },
+    totals: { pickup: totals(store, pr.subtotal, 'pickup', off), delivery: totals(store, pr.subtotal, 'delivery', off) },
   };
 }
 
 export async function orderView(db, order) {
   const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').where('i.order_id', order.id).orderBy('i.id')
-    .select('i.id', 'i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price', 'i.returned', 'i.fit');
-  const { id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total } = order;
+    .select('i.id', 'i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price', 'i.discount', 'i.returned', 'i.fit');
+  const { id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total, promo_code, promo_discount, bundle_discount } = order;
   return {
     id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total,
+    promo_code, promo_discount, bundle_discount,
     expires_at: stamp(order.expires_at), paid_at: stamp(order.paid_at), created_at: stamp(order.created_at), items,
   };
 }
@@ -215,20 +234,23 @@ function parseItems(items) {
   });
 }
 
-// One order from lines priced from the DB ({ product_id, size, quantity, unit_price }); the caller already holds their stock.
+// One order from lines priced from the DB ({ product_id, size, quantity, unit_price, discount? }); the caller already holds
+// their stock. pr (task 26) = price() of these lines and the claimed promo row, or nothing (no discounts).
 // Per-store display number: the UPDATE locks the store row, so parallel orders get 1, 2, 3… with no gaps or repeats.
-export async function insertOrder(trx, store, c, lines, { method = 'cashier', notifyToken, recommendationId = null, holdMs = HOLD_MS, client = null }) {
-  const t = totals(store, lines.reduce((s, l) => s + l.unit_price * l.quantity, 0), c.fulfillment);
+export async function insertOrder(trx, store, c, lines, { method = 'cashier', notifyToken, recommendationId = null, holdMs = HOLD_MS, client = null, pr = null, promo = null }) {
+  const subtotal = lines.reduce((s, l) => s + l.unit_price * l.quantity, 0);
+  const d = pr ? { bundle_discount: pr.bundle_discount, promo_discount: pr.promo_discount, promo_code_id: promo?.id ?? null, promo_code: promo?.code ?? null } : {};
+  const t = totals(store, subtotal, c.fulfillment, (d.bundle_discount ?? 0) + (d.promo_discount ?? 0));
   await trx('stores').where({ id: store.id }).increment('order_seq', 1);
   const { order_seq: number } = await trx('stores').where({ id: store.id }).first('order_seq');
-  const [{ id }] = await trx('orders').insert({ store_id: store.id, number, ...c, ...t, payment_method: method, notify_token: notifyToken, recommendation_id: recommendationId, client, expires_at: iso(Date.now() + holdMs) }).returning('id');
-  await trx('order_items').insert(lines.map((l) => ({ order_id: id, product_id: l.product_id, size: l.size, quantity: l.quantity, unit_price: l.unit_price })));
+  const [{ id }] = await trx('orders').insert({ store_id: store.id, number, ...c, ...t, ...d, payment_method: method, notify_token: notifyToken, recommendation_id: recommendationId, client, expires_at: iso(Date.now() + holdMs) }).returning('id');
+  await trx('order_items').insert(lines.map((l, i) => ({ order_id: id, product_id: l.product_id, size: l.size, quantity: l.quantity, unit_price: l.unit_price, discount: pr?.discounts[i] ?? 0 })));
   return id;
 }
 
 // Public, keyed by an unguessable cart token. The token is the customer's only handle on the cart.
 // `link(notifyToken)` → how the customer subscribes to order messages ({ url, svg } for Telegram), or null when off.
-export function createCartRouter(db, { methods = CASHIER, link = () => null, maxOpenCarts = 0 } = {}) {
+export function createCartRouter(db, { methods = CASHIER, link = () => null, maxOpenCarts = 0, promoLimit = (req, res, next) => next() } = {}) {
   // A 409 carrying `missed` (task 24) is logged as missed demand after its transaction rolled back, then rethrown.
   const missedThen = async (err) => {
     if (err.missed) await logMissed(db, { ...err.missed, source: 'cart' }).catch((e) => console.error('missed demand not logged:', e.message));
@@ -241,8 +263,9 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
     next();
   });
 
-  // { token?, store_id, items: [{ product_id, size }], rec? }: one item or a whole outfit, all or nothing.
-  // A missing or expired token opens a new cart.
+  // { token?, store_id, items: [{ product_id, size }], rec?, outfit? }: one item or a whole outfit, all or nothing.
+  // A missing or expired token opens a new cart. outfit (task 26) = every product id of the outfit card the items came
+  // from; when that set is one the results screen `rec` really showed, the cart remembers it for the bundle discount.
   r.post('/items', async (req, res) => {
     const b = req.body ?? {};
     const items = parseItems(b.items);
@@ -276,12 +299,18 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
           .onConflict(['cart_id', 'product_id', 'size']).merge({ quantity: trx.raw('?? + 1', ['cart_items.quantity']) });
       }
       // Pilot funnel: added from a results screen (`rec`) → that suggestion was accepted; the order inherits it.
-      const rec = typeof b.rec === 'string' && REC.test(b.rec) ? await trx('recommendation_logs').where({ token: b.rec, store_id: cart.store_id }).first('id', 'accepted_at') : null;
+      const rec = typeof b.rec === 'string' && REC.test(b.rec) ? await trx('recommendation_logs').where({ token: b.rec, store_id: cart.store_id }).first('id', 'accepted_at', 'outfits') : null;
       if (rec) {
         if (!rec.accepted_at) await trx('recommendation_logs').where({ id: rec.id }).update({ accepted_at: iso(Date.now()) });
         await trx('carts').where({ id: cart.id }).update({ recommendation_id: rec.id });
+        const shown = parseJson(rec.outfits, []);
+        const key = Array.isArray(b.outfit) && b.outfit.length <= 6 && b.outfit.every((x) => Number.isInteger(x)) ? setKey(b.outfit) : null;
+        const bundles = parseJson((await trx('carts').where({ id: cart.id }).first('bundles')).bundles, []);
+        if (key && shown.some((o) => setKey(o) === key) && !bundles.some((o) => setKey(o) === key) && bundles.length < MAX_UNITS) {
+          await trx('carts').where({ id: cart.id }).update({ bundles: JSON.stringify([...bundles, [...b.outfit].sort((x, y) => x - y)]) });
+        }
       }
-      return cart;
+      return trx('carts').where({ id: cart.id }).first(); // fresh: the view prices with the bundles just saved
     }).catch(missedThen);
     res.json(await view(cart));
   });
@@ -357,6 +386,29 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
     res.json(await view(await db('carts').where({ token }).first()));
   });
 
+  // Task 26: { code } puts a promo code on the cart (one at a time; a new one replaces it). Codes of another store or
+  // organisation, switched off or out of dates are all "doesn't work", so a guesser learns nothing; tries are rate-limited.
+  r.post('/:token/promo', promoLimit, async (req, res) => {
+    const cart = await db.transaction(async (trx) => {
+      const cart = await liveCart(trx, req.params.token);
+      const store = await storeOf(trx, cart.store_id);
+      const p = await findPromo(trx, store, req.body?.code);
+      const problem = promoProblem(p);
+      if (problem) throw fail(409, problem);
+      await trx('carts').where({ id: cart.id }).update({ promo_code_id: p.id });
+      return { ...cart, promo_code_id: p.id };
+    });
+    res.json(await view(cart));
+  });
+  r.delete('/:token/promo', async (req, res) => {
+    const cart = await db.transaction(async (trx) => {
+      const cart = await liveCart(trx, req.params.token);
+      await trx('carts').where({ id: cart.id }).update({ promo_code_id: null });
+      return { ...cart, promo_code_id: null };
+    });
+    res.json(await view(cart));
+  });
+
   // Kiosk idle reset and "Savatni tozalash": give every held unit back at once.
   r.delete('/:token', async (req, res) => {
     await db.transaction(async (trx) => {
@@ -369,7 +421,7 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
   });
 
   // { fulfillment, name, phone, address?, lat?, lon?, payment? } → order. The cart's holds move to the order
-  // (a fresh 15 minutes to pay); totals are computed here from DB prices.
+  // (a fresh 15 minutes to pay); totals and discounts are computed here from DB prices (any amount in the body is ignored).
   r.post('/:token/checkout', async (req, res) => {
     const b = req.body ?? {};
     const method = b.payment ?? 'cashier';
@@ -382,7 +434,13 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
       const lines = await trx('cart_items as c').join('products as p', 'p.id', 'c.product_id').where('c.cart_id', cart.id)
         .orderBy('c.id').select('c.product_id', 'c.size', 'c.quantity', 'p.price', 'p.discount_price');
       if (!lines.length) throw fail(400, 'err.cart_empty');
-      const id = await insertOrder(trx, store, c, lines.map((l) => ({ ...l, unit_price: unitPrice(l) })), { method, notifyToken, recommendationId: cart.recommendation_id });
+      const priced = lines.map((l) => ({ ...l, unit_price: unitPrice(l) }));
+      const pr = await pricing(trx, cart, store, priced);
+      if (pr.promo?.error) throw promoError(pr);
+      if (pr.promo) await claimPromo(trx, pr.promo, c.phone);
+      // Payme/Click can't take 0 so'm: a fully discounted order is settled at the cashier.
+      if (method !== 'cashier' && totals(store, pr.subtotal, c.fulfillment, pr.subtotal - pr.goods).total < 1) throw fail(400, 'err.invalid', { field: 'field.payment' });
+      const id = await insertOrder(trx, store, c, priced, { method, notifyToken, recommendationId: cart.recommendation_id, pr, promo: pr.promo });
       await trx('carts').where({ id: cart.id }).del(); // reserved stays: the order owns the hold now
       return id;
     });
@@ -409,7 +467,8 @@ export function createOrderRouter(db, { methods = CASHIER, link = () => null } =
       number: v.number, store, status: v.status, payment_status: v.payment_status, payment_method: v.payment_method, fulfillment: v.fulfillment,
       items: v.items.map(({ id, name, name_ru, category, color, size, quantity, unit_price, fit }) => ({ id, name, name_ru, category, color, size, quantity, unit_price, fit })),
       fit_open: fitOpen(o),
-      subtotal: v.subtotal, delivery_fee: v.delivery_fee, total: v.total, created_at: v.created_at, paid_at: v.paid_at, expires_at: v.expires_at,
+      subtotal: v.subtotal, bundle_discount: v.bundle_discount, promo_discount: v.promo_discount, promo_code: v.promo_code,
+      delivery_fee: v.delivery_fee, total: v.total, created_at: v.created_at, paid_at: v.paid_at, expires_at: v.expires_at,
       pay_ms: o.payment_status === 'pending' ? msLeft(o.expires_at) : null, pay_url: pay?.url ?? null, telegram: link(o.notify_token)?.url ?? null,
     });
   });

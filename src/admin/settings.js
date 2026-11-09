@@ -73,7 +73,7 @@ export async function createInvite(req, q, { email, role, storeId, orgId }) {
 }
 
 // Store profile as the settings form edits it.
-const STORE_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'opens_at', 'closes_at', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id'];
+const STORE_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'opens_at', 'closes_at', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id', 'bundle_percent'];
 function validStore(b) {
   const num = (v, min, max, field) => {
     const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
@@ -104,6 +104,7 @@ function validStore(b) {
     telegram_chat_id: chat(b.telegram_chat_id, 'field.telegram_chat'),
     report_chat_id: chat(b.report_chat_id, 'field.report_chat'), // task 24: the owner's weekly report
     low_stock_threshold: int(typeof b.low_stock_threshold === 'string' && b.low_stock_threshold.trim() !== '' ? Number(b.low_stock_threshold) : b.low_stock_threshold, 0, 1000, 'field.low_stock'),
+    bundle_percent: int(b.bundle_percent ?? 0, 0, 90, 'field.bundle_percent'), // task 26: "whole outfit" discount, 0 = off
   };
   if ((s.opens_at === null) !== (s.closes_at === null)) throw fail(400, 'err.invalid', { field: 'field.hours' });
   return s;
@@ -153,7 +154,7 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
     const b = req.body && typeof req.body === 'object' ? req.body : {};
     const orgId = req.admin.role === 'super' ? (await db('organizations').where({ id: Number(b.organization_id) || 0 }).first('id'))?.id : req.admin.organization_id;
     if (!orgId) throw fail(400, 'err.invalid', { field: 'field.org' });
-    const s = validStore({ ...Object.fromEntries(STORE_COLS.map((k) => [k, b[k]])), delivery_fee: b.delivery_fee ?? 0, low_stock_threshold: b.low_stock_threshold ?? 1 });
+    const s = validStore({ ...Object.fromEntries(STORE_COLS.map((k) => [k, b[k]])), delivery_fee: b.delivery_fee ?? 0, low_stock_threshold: b.low_stock_threshold ?? 1, bundle_percent: b.bundle_percent ?? 0 });
     if (Number((await db('stores').where({ organization_id: orgId }).count({ n: '*' }))[0].n) >= STORES_MAX) throw fail(409, 'err.stores_max', { max: STORES_MAX });
     const id = await db.transaction(async (trx) => {
       const [{ id }] = await trx('stores').insert({ ...s, organization_id: orgId }).returning('id');

@@ -289,6 +289,11 @@ test('every mutating admin route writes an audit row', async () => {
     'POST /sync-keys': ['sync_key.create', () => admin('POST', '/sync-keys', { name: 'Kassa' }, ownerToken)],
     'DELETE /sync-keys/:id': ['sync_key.revoke', async () => admin('DELETE', `/sync-keys/${(await admin('POST', '/sync-keys', { name: 'Eski' }, ownerToken)).body.id}`, undefined, ownerToken)],
     'POST /stores': ['store.create', () => admin('POST', '/stores', { name: `Filial ${Date.now()}`, city: 'Toshkent', address: 'Chilonzor 1', lat: 41.28, lon: 69.2 }, ownerToken)],
+    'POST /promos': ['promo.create', () => admin('POST', '/promos', { code: `WALK${Date.now()}`, kind: 'percent', value: 10 }, ownerToken)],
+    'PATCH /promos/:id': ['promo.update', async () => {
+      const p = (await admin('POST', '/promos', { code: `OFF${Date.now()}`, kind: 'fixed', value: 5000 }, ownerToken)).body;
+      return admin('PATCH', `/promos/${p.id}`, { active: false }, ownerToken);
+    }],
     'POST /orgs': ['org.create', () => admin('POST', '/orgs', { name: 'Audit brand', owner_email: `org${Date.now()}@smartfit.uz` }, superToken)],
     'PATCH /demo-requests/:id': ['demo.handle', async () => {
       const [{ id }] = await db('demo_requests').insert({ name: 'Aziz', phone: '+998901234567', company: 'Moda', lang: 'uz' }).returning('id');

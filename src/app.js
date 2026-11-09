@@ -73,7 +73,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/stores', createStoreRouter(db, { weather }));
   api.use('/size', bucket('size'), createSizeRouter());
   const methods = paymentMethods(payments), link = telegramLink(telegram);
-  api.use('/cart', bucket('cart'), createCartRouter(db, { methods, link, maxOpenCarts: lim.openCarts }));
+  api.use('/cart', bucket('cart'), createCartRouter(db, { methods, link, maxOpenCarts: lim.openCarts, promoLimit: bucket('promo') }));
   api.post('/kiosk/exit', bucket('pin'));
   api.use('/kiosk', bucket('kiosk'), createKioskRouter(db));
   api.use('/catalog', bucket('catalog'), createCatalogRouter(db, { link, maxOpen: lim.openCarts })); // task 25

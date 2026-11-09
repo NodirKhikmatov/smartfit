@@ -542,9 +542,10 @@ function syncReturn() {
   const qty = Math.min(Math.max(Number(rf.quantity.value) || 1, 1), i.quantity - i.returned);
   $('retSizeWrap').hidden = !exchange;
   $('retRefundWrap').hidden = exchange;
-  rf.refund.max = qty * i.unit_price;
-  if (!rf.refund.dataset.touched) rf.refund.value = qty * i.unit_price;
-  $('retRefundMax').textContent = t('adm.ret.refund_max', { sum: money(qty * i.unit_price) });
+  const paid = Math.floor(((i.unit_price * i.quantity - (i.discount || 0)) * qty) / i.quantity); // less the line's discount share, as the server caps it
+  rf.refund.max = paid;
+  if (!rf.refund.dataset.touched) rf.refund.value = paid;
+  $('retRefundMax').textContent = t('adm.ret.refund_max', { sum: money(paid) });
 }
 rf.addEventListener('change', (e) => {
   if (e.target.name === 'refund') rf.refund.dataset.touched = '1';
@@ -569,9 +570,12 @@ rf.addEventListener('submit', async (e) => {
     if (openId === o.id) { renderOrder(next); keepFocus(); }
   } catch (err) { $('retError').textContent = err.message; } finally { $('retSave').disabled = false; }
 });
+// Task 26: the order's discounts as [label, so'm] rows, bundle first (the order the server applies them in).
+const discountLines = (o) => [...(o.bundle_discount ? [[t('common.bundle_off'), o.bundle_discount]] : []), ...(o.promo_discount ? [[t('common.promo_off', { code: o.promo_code }), o.promo_discount]] : [])];
 function totalsBlock(o) {
   return el('dl', { className: 'totals' },
     el('dt', { textContent: t('adm.receipt.subtotal') }), el('dd', { className: 'num', textContent: money(o.subtotal) }),
+    ...discountLines(o).flatMap(([label, sum]) => [el('dt', { textContent: label }), el('dd', { className: 'num', textContent: `−${money(sum)}` })]),
     el('dt', { textContent: t('adm.receipt.fee') }), el('dd', { className: 'num', textContent: money(o.delivery_fee) }),
     el('dt', { className: 'total', textContent: t('adm.receipt.total') }), el('dd', { className: 'num total', textContent: money(o.total) }));
 }
@@ -638,6 +642,7 @@ function printReceipt(o) {
       mk('td', {}, productName(i), mk('br'), mk('small', { textContent: `${i.size === 'ONE' ? t('common.size_one') : i.size} · ${i.quantity} × ${som(i.unit_price)}` })),
       mk('td', { textContent: som(i.quantity * i.unit_price) }))),
     mk('tr', { className: 'sum' }, mk('td', { textContent: t('adm.receipt.subtotal') }), mk('td', { textContent: som(o.subtotal) })),
+    ...discountLines(o).map(([label, sum]) => mk('tr', {}, mk('td', { textContent: label }), mk('td', { textContent: `−${som(sum)}` }))),
     mk('tr', {}, mk('td', { textContent: t('adm.receipt.fee') }), mk('td', { textContent: som(o.delivery_fee) })),
     mk('tr', { className: 'big' }, mk('td', { textContent: t('adm.receipt.total') }), mk('td', { textContent: money(o.total) }))),
     mk('p', { textContent: `${pay(o)} · ${method(o)}` }),
@@ -1047,7 +1052,7 @@ function printQr(q) {
 // ---------- Settings: store profile, team, audit log, my account (#/settings?tab=…).
 // The server decides who may do what; the tabs only hide what a role can't open.
 
-const SET_TABS = [['store', 'adm.set.store'], ['team', 'adm.set.team'], ['sync', 'adm.set.sync'], ['audit', 'adm.set.audit'], ['account', 'adm.set.account']];
+const SET_TABS = [['store', 'adm.set.store'], ['team', 'adm.set.team'], ['promo', 'adm.set.promo'], ['sync', 'adm.set.sync'], ['audit', 'adm.set.audit'], ['account', 'adm.set.account']];
 function loadSettings() {
   const tabs = SET_TABS.filter(([k]) => me.role !== 'manager' || k === 'store' || k === 'account');
   const tab = tabs.some(([k]) => k === route.params.tab) ? route.params.tab : stores.length ? 'store' : 'account'; // a new owner has no store yet
@@ -1057,11 +1062,11 @@ function loadSettings() {
     return a;
   }));
   for (const s of document.querySelectorAll('[data-tab]')) s.hidden = s.dataset.tab !== tab;
-  ({ store: loadStore, team: loadTeam, sync: loadKeys, audit: loadAudit, account: loadAccount })[tab]();
+  ({ store: loadStore, team: loadTeam, promo: loadPromos, sync: loadKeys, audit: loadAudit, account: loadAccount })[tab]();
 }
 
 // Store profile. A super-admin picks the store here (defaults to the sidebar's); everyone else has one.
-const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id'];
+const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id', 'bundle_percent'];
 const sf = $('storeForm');
 const storeId = () => (many() ? $('storePick').value : String(stores[0]?.id ?? me.store_id));
 function mapLink() {
@@ -1107,6 +1112,7 @@ sf.onsubmit = async (e) => {
     opens_at: v('opens_at') || null, closes_at: v('closes_at') || null,
     delivery_fee: Number(v('delivery_fee')), free_delivery_threshold: v('free_delivery_threshold') ? Number(v('free_delivery_threshold')) : null,
     telegram_chat_id: v('telegram_chat_id') || null, report_chat_id: v('report_chat_id') || null, low_stock_threshold: Number(v('low_stock_threshold')),
+    bundle_percent: Number(v('bundle_percent')),
     ...(v('kiosk_pin') && { kiosk_pin: v('kiosk_pin') }),
   };
   try {
@@ -1271,6 +1277,78 @@ kf.onsubmit = async (e) => {
 $('keyCopy').onclick = () => navigator.clipboard?.writeText($('keyValue').value)
   .then(() => toast(t('adm.qr.copied'), { tone: 'ok' }), () => toast(t('common.error'), { tone: 'danger' }));
 
+// Promo codes (task 26): owner / super-admin. Codes are switched off, never deleted (orders keep them).
+let promos = [];
+const promoState = (p) => {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Tashkent' });
+  if (!p.active) return ['adm.promo.off', 'off'];
+  if (p.ends_on && p.ends_on < today) return ['adm.promo.ended', 'off'];
+  if (p.max_uses != null && p.used >= p.max_uses) return ['adm.promo.used_up', 'warn'];
+  if (p.starts_on && p.starts_on > today) return ['adm.promo.scheduled', 'warn'];
+  return ['adm.promo.on', 'ok'];
+};
+const promoValue = (p) => (p.kind === 'percent' ? `${p.value}%` : money(p.value));
+const dayText = (d) => d.split('-').reverse().join('.');
+async function loadPromos() {
+  const seq = (loads.promo = (loads.promo || 0) + 1);
+  const stop = skeletonRows($('promoRows'), 7, 3);
+  try {
+    promos = await call('/promos');
+    if (seq !== loads.promo) return;
+    stateBox($('promoError'));
+    $('promoRows').replaceChildren(...(promos.length ? promos.map((p) => {
+      const [state, tone] = promoState(p);
+      const tr = el('tr', {},
+        el('td', {}, el('strong', { textContent: p.code })),
+        el('td', { textContent: [promoValue(p), p.min_order && t('adm.promo.min_short', { sum: money(p.min_order) })].filter(Boolean).join(' · ') }),
+        el('td', { className: 'hide-sm', textContent: p.store_id ? p.store_name : t('adm.promo.all_stores') }),
+        el('td', { className: 'hide-sm', textContent: p.starts_on || p.ends_on ? `${p.starts_on ? dayText(p.starts_on) : '…'} – ${p.ends_on ? dayText(p.ends_on) : '…'}` : t('adm.promo.no_dates') }),
+        el('td', { className: 'num', textContent: p.max_uses != null ? `${p.used} / ${p.max_uses}` : String(p.used) }),
+        el('td', {}, el('span', { className: `badge ${tone}`, textContent: t(state) })),
+        el('td', {}, el('button', { type: 'button', className: 'icon-btn ghost', title: t('adm.promo.edit'), ariaLabel: t('adm.promo.edit_aria', { code: p.code }), onclick: () => openPromo(p) }, icon('edit'))));
+      return tr;
+    }) : [el('tr', {}, el('td', { colSpan: 7 }, emptyState({ ic: 'sparkle', title: t('adm.promo.none'), text: t('adm.promo.none_text') })))]));
+  } catch (err) {
+    if (seq === loads.promo) { $('promoRows').replaceChildren(); stateBox($('promoError'), err, () => loadPromos()); }
+  } finally { stop?.(); }
+}
+const promoF = $('promoForm');
+let editingPromo = null;
+function openPromo(p = null) {
+  editingPromo = p;
+  promoF.reset();
+  $('promoDlgError').textContent = '';
+  $('promoTitle').textContent = p ? t('adm.promo.edit_title', { code: p.code }) : t('adm.promo.create');
+  const owned = stores.filter((s) => !p || s.organization_id === p.organization_id); // an edit stays in the code's organisation
+  promoF.store_id.replaceChildren(el('option', { value: '', textContent: t('adm.promo.all_stores') }), ...owned.map((s) => el('option', { value: s.id, textContent: s.name })));
+  promoF.code.disabled = Boolean(p); // the code stays; orders keep it
+  for (const k of ['code', 'kind', 'value', 'min_order', 'max_uses', 'max_per_phone', 'starts_on', 'ends_on']) promoF[k].value = p?.[k] ?? (k === 'kind' ? 'percent' : '');
+  promoF.store_id.value = p?.store_id ?? (p ? '' : scope || '');
+  promoF.active.checked = p ? p.active : true;
+  $('promoDlg').showModal();
+}
+$('promoBtn').onclick = () => openPromo();
+$('promoCancel').onclick = () => $('promoDlg').close();
+$('promoDlg').addEventListener('close', () => $('promoBtn').focus());
+promoF.onsubmit = async (e) => {
+  e.preventDefault();
+  $('promoDlgError').textContent = '';
+  if (!promoF.reportValidity()) return;
+  const n = (k) => (promoF[k].value === '' ? null : Number(promoF[k].value));
+  const body = {
+    store_id: promoF.store_id.value ? Number(promoF.store_id.value) : null, kind: promoF.kind.value, value: n('value'), min_order: n('min_order') ?? 0,
+    max_uses: n('max_uses'), max_per_phone: n('max_per_phone'), starts_on: promoF.starts_on.value || null, ends_on: promoF.ends_on.value || null, active: promoF.active.checked,
+    ...(!editingPromo && { code: promoF.code.value.trim(), ...(me.role === 'super' && !promoF.store_id.value && { organization_id: stores.find((s) => String(s.id) === String(scope))?.organization_id }) }),
+  };
+  $('promoSave').disabled = true;
+  try {
+    const p = await call(editingPromo ? `/promos/${editingPromo.id}` : '/promos', { method: editingPromo ? 'PATCH' : 'POST', body });
+    $('promoDlg').close();
+    toast(t('adm.promo.saved', { code: p.code }), { tone: 'ok' });
+    loadPromos();
+  } catch (err) { $('promoDlgError').textContent = err.message; } finally { $('promoSave').disabled = false; }
+};
+
 // Audit log: newest first, filtered by what / who / dates (all in the hash), paged.
 const AUDIT_FIELDS = {
   name: 'field.name', name_ru: 'field.name_ru', category: 'field.category', gender: 'field.gender', color: 'field.color', style: 'field.style',
@@ -1280,8 +1358,10 @@ const AUDIT_FIELDS = {
   delivery_fee: 'field.delivery_fee', free_delivery_threshold: 'field.free_threshold', telegram_chat_id: 'field.telegram_chat', report_chat_id: 'field.report_chat',
   sku: 'field.sku', barcode: 'field.barcode', low_stock_threshold: 'field.low_stock', prefix: 'adm.sync.key',
   email: 'field.email', role: 'field.role', disabled: 'adm.team.status',
+  bundle_percent: 'field.bundle_percent', store_id: 'common.store', kind: 'field.promo_kind', value: 'field.promo_value', min_order: 'field.promo_min',
+  starts_on: 'adm.promo.starts', ends_on: 'adm.promo.ends', max_uses: 'field.promo_max_uses', max_per_phone: 'field.promo_per_phone', active: 'field.promo_active',
 };
-const MONEY = ['price', 'discount_price', 'delivery_fee', 'free_delivery_threshold'];
+const MONEY = ['price', 'discount_price', 'delivery_fee', 'free_delivery_threshold', 'min_order'];
 function auditValue(k, v) {
   if (v == null || v === '') return '—';
   if (k === 'image_url') return t('adm.audit.photo');
@@ -1292,6 +1372,8 @@ function auditValue(k, v) {
   if (k === 'payment_status') return t(`adm.pay.${v}`);
   if (k === 'role') return roleName(v);
   if (k === 'category') return cat(v);
+  if (k === 'store_id') return storeName(v) || `#${v}`;
+  if (k === 'kind') return t(v === 'percent' ? 'adm.promo.percent' : 'adm.promo.fixed');
   return String(v);
 }
 // One line per changed field: "Narxi: 200 000 so'm → 180 000 so'm"; stock lists only the sizes that moved.

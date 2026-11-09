@@ -13,6 +13,7 @@ import { audit, diff } from './audit.js';
 import { kioskStatus } from '../kiosk.js';
 import { publicTeamRoutes, settingsRoutes, ROLES } from './settings.js';
 import { orgRoutes } from './orgs.js';
+import { promoRoutes } from './promos.js';
 import { fitOf } from '../size/size.js';
 import { demandItems, funnelStats } from '../demand.js';
 
@@ -265,7 +266,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   r.get('/me', (req, res) => res.json(publicAdmin(req.admin)));
 
   r.get('/stores', async (req, res) => {
-    const q = db('stores').select('id', 'name', 'city').orderBy('id');
+    const q = db('stores').select('id', 'name', 'city', 'organization_id').orderBy('id');
     res.json(await inStores(req.admin, q, 'id'));
   });
 
@@ -521,7 +522,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     return dateRange(q, 'o.created_at', f);
   }
   const ORDER_COLS = ['o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.phone', 'o.fulfillment', 'o.address', 'o.status',
-    'o.payment_status', 'o.payment_method', 'o.subtotal', 'o.delivery_fee', 'o.total', 'o.created_at', 'o.expires_at', 'o.telegram_chat_id'];
+    'o.payment_status', 'o.payment_method', 'o.subtotal', 'o.bundle_discount', 'o.promo_discount', 'o.promo_code', 'o.delivery_fee', 'o.total', 'o.created_at', 'o.expires_at', 'o.telegram_chat_id'];
 
   // → { items, total, limit, offset }, newest first (dir=asc: oldest first, so the cashier sees the soonest to expire on top).
   r.get('/orders', async (req, res) => {
@@ -551,9 +552,9 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const tashkent = (v) => new Date(msOf(v)).toLocaleString('sv-SE', { timeZone: STATS_TZ }).slice(0, 16);
     const csv = toCsv([
       ['№', tr('adm.orders.time'), tr('common.store'), tr('adm.orders.customer'), tr('adm.csv.phone'), tr('adm.orders.fulfillment'), tr('field.address'),
-        tr('adm.csv.subtotal'), tr('adm.csv.fee'), tr('adm.csv.total'), tr('field.payment'), tr('adm.orders.payment'), tr('adm.orders.status')],
+        tr('adm.csv.subtotal'), tr('adm.csv.discount'), tr('field.promo_code'), tr('adm.csv.fee'), tr('adm.csv.total'), tr('field.payment'), tr('adm.orders.payment'), tr('adm.orders.status')],
       ...rows.map((o) => [o.number, tashkent(o.created_at), o.store_name, o.customer_name, phoneText(o.phone), tr(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), o.address,
-        o.subtotal, o.delivery_fee, o.total, o.payment_method === 'cashier' ? tr('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] ?? o.payment_method, tr(`adm.pay.${o.payment_status}`),
+        o.subtotal, o.bundle_discount + o.promo_discount, o.promo_code, o.delivery_fee, o.total, o.payment_method === 'cashier' ? tr('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] ?? o.payment_method, tr(`adm.pay.${o.payment_status}`),
         tr(o.status === 'delivered' && o.fulfillment === 'pickup' ? 'adm.status.handed' : `adm.status.${o.status}`)]),
     ]);
     res.type('text/csv; charset=utf-8').attachment(`orders-${dayKey(Date.now())}.csv`).send(csv);
@@ -624,7 +625,9 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     if (!line) throw fail(404, 'err.not_found');
     const p = await db('products').where({ id: line.product_id }).first('name', 'name_ru', 'category');
     const qty = int(b.quantity, 1, line.quantity, 'field.quantity');
-    const refund = b.kind === 'exchange' ? int(b.refund ?? 0, 0, 0, 'field.refund') : int(b.refund ?? qty * line.unit_price, 0, qty * line.unit_price, 'field.refund');
+    // What these units cost the customer: the line's price less its share of the order's discounts (task 26).
+    const paid = Math.floor(((line.unit_price * line.quantity - line.discount) * qty) / line.quantity);
+    const refund = b.kind === 'exchange' ? int(b.refund ?? 0, 0, 0, 'field.refund') : int(b.refund ?? paid, 0, paid, 'field.refund');
     const newSize = b.kind === 'exchange' ? b.new_size : null;
     if (b.kind === 'exchange' && (!sizesFor(p.category).includes(newSize) || newSize === line.size)) throw fail(400, 'err.invalid', { field: 'field.size' });
     try {
@@ -682,6 +685,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
 
   settingsRoutes(r, db, { secret, lock, resolveStore });
   orgRoutes(r, db);
+  promoRoutes(r, db); // task 26
 
   // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.
   const inScope = (req, q, col = 'store_id') => {
@@ -781,7 +785,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
       .where('o.payment_status', 'paid').whereNot('o.status', 'cancelled').where('o.paid_at', '>=', iso(now - days * DAY_MS))
       .groupBy('i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.image_url')
       .select('i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.image_url')
-      .sum({ units: 'i.quantity' }).sum({ revenue: db.raw('i.quantity * i.unit_price') })
+      .sum({ units: 'i.quantity' }).sum({ revenue: db.raw('i.quantity * i.unit_price - i.discount') })
       .orderBy([{ column: 'units', order: 'desc' }, { column: 'i.product_id' }]).limit(5), 'o.store_id');
     // Task 23: units returned or exchanged in the period against units sold in it, and why.
     const since = dbTime(now - days * DAY_MS);

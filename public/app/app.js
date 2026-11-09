@@ -128,7 +128,7 @@ function syncCartUi() {
   $('cartBtn').replaceChildren(icon('bag'), el('span', { className: 'cart-label', textContent: t('kiosk.cart') }), el('span', { className: 'count-pill', textContent: n }));
   if (!n) return;
   $('barCount').textContent = t('kiosk.bar.count', { n });
-  $('barTotal').textContent = som(cart.totals.pickup.subtotal);
+  $('barTotal').textContent = som(cart.totals.pickup.total); // after the bundle / promo discounts
 }
 $('barGo').onclick = () => go('cart');
 
@@ -588,7 +588,8 @@ function addButton(items, card, className = 'primary wide', label = 'kiosk.add.b
     b.disabled = true;
     try {
       const todo = items.filter((p) => !has(p)).map((p) => ({ product_id: p.id, size: size(p) }));
-      setCart(await api('/cart/items', { token: cart?.token, store_id: storeId, items: todo, rec }));
+      // outfit (task 26): the whole card, so the server can match it to an outfit it showed (bundle discount).
+      setCart(await api('/cart/items', { token: cart?.token, store_id: storeId, items: todo, rec, ...(rec && { outfit: items.map((p) => p.id) }) }));
     } catch (err) {
       msg.textContent = err.message;
     }
@@ -601,9 +602,11 @@ function addButton(items, card, className = 'primary wide', label = 'kiosk.add.b
 
 function card(heading, items, total, reason, swap) {
   const c = el('article', { className: 'outfit card' });
+  const pct = swap && lastResult?.bundle_percent; // task 26: only whole outfits (not the partial card) get the bundle discount
   const body = el('div', { className: 'outfit-body' },
     el('h2', { textContent: heading, tabIndex: -1 }),
     ...(reason ? [el('p', { className: 'muted reason', textContent: reason })] : []),
+    ...(pct ? [el('p', { className: 'bundle-hint' }, icon('check'), t('kiosk.bundle.hint', { pct }))] : []),
     el('ul', { className: 'items' }, ...items.map((p) => itemRow(p, swap))),
     el('div', { className: 'outfit-foot' }, el('div', { className: 'total' }, el('span', { textContent: t('common.total') }), el('strong', { textContent: som(total) })), addButton(items, c), fittingBox(items, c)));
   c.append(look(items), body);
@@ -970,6 +973,7 @@ function renderCartScreen() {
   if (empty) return $('cartBody').replaceChildren(el('div', { className: 'empty' }, icon('bag'), el('p', { textContent: t('kiosk.cart.empty') })));
   $('cartBody').replaceChildren(el('ul', { className: 'items lines' }, ...cart.items.map(cartLine)));
   renderPay();
+  renderPromo();
   renderSum();
 }
 
@@ -1039,12 +1043,53 @@ function renderPay() {
     el('label', {}, el('input', { type: 'radio', name: 'payment', value: m, checked: m === picked }), el('span', { textContent: t(PAY[m]) }))));
 }
 
+// Task 26: one promo code per cart. The server checks it and computes every discount; the kiosk shows what comes back.
+function renderPromo() {
+  const c = cart.discounts.code;
+  $('promoAsk').hidden = Boolean(c);
+  $('promoOn').hidden = !c;
+  if (c) $('promoOnText').textContent = t('kiosk.promo.on', { code: c.code });
+  $('promoMsg').textContent = c?.error ? t(c.error, { sum: fmt.num(c.min_order) }) : '';
+}
+async function applyPromo() {
+  const input = $('promoInput'), code = input.value.trim();
+  if (!code) {
+    $('promoMsg').textContent = t('kiosk.promo.empty');
+    return input.focus();
+  }
+  $('promoApply').disabled = true;
+  try {
+    setCart(await api(`/cart/${cart.token}/promo`, { code }));
+    input.value = '';
+    toast(t('kiosk.promo.applied', { code: cart.discounts.code.code }));
+  } catch (err) {
+    if (err.status === 404) return cartAction(() => Promise.reject(err));
+    $('promoMsg').textContent = err.message;
+    input.focus();
+  } finally {
+    $('promoApply').disabled = false;
+  }
+}
+$('promoApply').onclick = applyPromo;
+$('promoInput').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault(); // Enter here applies the code; it must not place the order
+  applyPromo();
+});
+$('promoRemove').onclick = () => cartAction(() => api(`/cart/${cart.token}/promo`, null, 'DELETE'));
+// Discount rows in the order the server applies them: bundle, then the promo code.
+const discountRows = (bundle, promo, code) => [
+  ...(bundle ? [sumRow(t('common.bundle_off'), `−${som(bundle)}`, 'off')] : []),
+  ...(promo ? [sumRow(t('common.promo_off', { code }), `−${som(promo)}`, 'off')] : []),
+];
+
 function renderSum() {
   const delivery = checkout.fulfillment.value === 'delivery';
-  const s = cart.totals[delivery ? 'delivery' : 'pickup'], d = cart.delivery;
+  const s = cart.totals[delivery ? 'delivery' : 'pickup'], d = cart.delivery, dc = cart.discounts;
   $('deliveryFields').hidden = !delivery;
   $('cartSum').replaceChildren(
     sumRow(t('kiosk.checkout.items'), som(s.subtotal)),
+    ...discountRows(dc.bundle, dc.promo, dc.code?.code),
     ...(delivery ? [sumRow(t('kiosk.checkout.delivery_in', { city: d.city }), s.delivery_fee ? som(s.delivery_fee) : t('common.free'))] : []),
     sumRow(t('common.total'), som(s.total), 'grand'),
     ...(delivery && s.delivery_fee && d.free_over !== null ? [el('p', { className: 'meta', style: 'margin:.35rem 0 0', textContent: t('kiosk.checkout.free_over', { sum: som(d.free_over) }) })] : []),
@@ -1114,6 +1159,7 @@ function showDone(o, pay = { method: 'cashier' }, notify = null, track = null) {
   $('doneBody').replaceChildren(
     el('div', { className: 'sum card' },
       ...o.items.map((i) => sumRow(`${productName(i)} · ${sizeName(i.size)}${i.quantity > 1 ? ` × ${i.quantity}` : ''}`, som(i.unit_price * i.quantity))),
+      ...discountRows(o.bundle_discount, o.promo_discount, o.promo_code),
       ...(o.fulfillment === 'delivery' ? [sumRow(t('kiosk.done.delivery'), o.delivery_fee ? som(o.delivery_fee) : t('common.free'))] : []),
       sumRow(t('common.total'), som(o.total), 'grand')),
     el('p', { className: 'notice', textContent: t('kiosk.done.pay_note', { what: online ? t('kiosk.done.pay_online', { method: t(PAY[pay.method]) }) : t('kiosk.done.pay_cashier'), time: fmt.time(o.expires_at) }) }),

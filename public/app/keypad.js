@@ -1,9 +1,10 @@
 // Kiosk on-screen keyboard (audit U4): a kiosk touch screen may have no OS keyboard. An input opts in with
-// data-keys="digits|phone|letters"; while it has focus the dock is shown and types into it. Keys never take the focus.
+// data-keys="digits|phone|letters|code" (code: Latin capitals and digits, for promo codes); while it has focus the dock is shown and types into it. Keys never take the focus.
 import { t, getLang } from '/shared/i18n.js';
 import { icon } from '/shared/ui.js';
 
 const DIGITS = ['123', '456', '789'];
+const CODE_ROWS = '1234567890 QWERTYUIOP ASDFGHJKL ZXCVBNM-'; // promo codes are Latin in both languages
 
 export function keypad() {
   const dock = Object.assign(document.createElement('div'), { className: 'keypad', hidden: true });
@@ -25,9 +26,9 @@ export function keypad() {
     dock.dataset.kind = kind;
     const back = key('back', icon('backspace', t('kiosk.keys.back')), 'fn');
     const done = key('done', t('kiosk.keys.done'), 'primary done');
-    if (kind === 'letters') {
+    if (kind === 'letters' || kind === 'code') {
       // The letter rows come from the dictionary, so the layout follows the language.
-      dock.replaceChildren(...t('kiosk.keys.rows').split(' ').map((r) => row(...[...r].map((c) => key(c)))), row(key(' ', t('kiosk.keys.space'), 'space'), back, done));
+      dock.replaceChildren(...(kind === 'code' ? CODE_ROWS : t('kiosk.keys.rows')).split(' ').map((r) => row(...[...r].map((c) => key(c)))), row(key(' ', t('kiosk.keys.space'), 'space'), back, done));
     } else {
       const pad = Object.assign(document.createElement('div'), { className: 'key-grid' });
       pad.append(...DIGITS.flatMap((r) => [...r].map((c) => key(c))), kind === 'phone' ? key('+') : key('', '', 'blank'), key('0'), back);

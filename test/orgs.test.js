@@ -75,7 +75,8 @@ async function orgBRecords() {
   await db('products').where({ id: product.id }).update({ sku: 'ORGB-ONLY-1' });
   await db('missed_demand').insert({ store_id: b1, product_id: product.id, size: 'L', session: 'b'.repeat(32), source: 'recommend' });
   await db('funnel_events').insert({ store_id: b1, visit: 'c'.repeat(32), step: 'order' });
-  return { product, order, fitting, invite, key, member };
+  const promo = (await admin('POST', '/promos', { code: 'ORGBPROMO', kind: 'percent', value: 10, store_id: b1 }, ownerB)).body; // task 26
+  return { product, order, fitting, invite, key, member, promo };
 }
 
 // The isolation walk: every admin route, called by org A's owner against org B's records. A route not listed here
@@ -177,6 +178,26 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       noB(await admin('GET', '/audit?limit=100', undefined, ownerA));
       assert.equal((await admin('GET', `/audit?store_id=${b1}`, undefined, ownerA)).body.total, 0);
     },
+    'GET /promos': async () => {
+      for (const q of ['', `?organization_id=${orgB}`]) {
+        const r = await admin('GET', `/promos${q}`, undefined, ownerA);
+        assert.equal(r.status, 200);
+        assert.ok(r.body.every((p) => p.organization_id === orgA) && !r.body.some((p) => p.code === 'ORGBPROMO'), 'no org B code');
+      }
+    },
+    'POST /promos': async () => {
+      refused(await admin('POST', '/promos', { code: 'AINB1', kind: 'percent', value: 50, store_id: b1 }, ownerA));
+      const r = await admin('POST', '/promos', { code: 'ORGBPROMO', kind: 'percent', value: 50, organization_id: orgB }, ownerA);
+      assert.equal(r.status, 201, 'the same code text is free in another organisation');
+      assert.equal(r.body.organization_id, orgA, 'an owner always creates in their own organisation');
+      await db('promo_codes').where({ id: r.body.id }).del();
+    },
+    'PATCH /promos/:id': async () => {
+      refused(await admin('PATCH', `/promos/${B.promo.id}`, { value: 99 }, ownerA));
+      const mine = (await admin('POST', '/promos', { code: 'AMOVE1', kind: 'percent', value: 5 }, ownerA)).body;
+      refused(await admin('PATCH', `/promos/${mine.id}`, { store_id: b1 }, ownerA)); // can't move a code into org B's store
+      await db('promo_codes').where({ id: mine.id }).del();
+    },
     'GET /orgs': async () => refused(await admin('GET', '/orgs', undefined, ownerA)),
     'POST /orgs': async () => refused(await admin('POST', '/orgs', { name: 'X', owner_email: 'x2@smartfit.uz' }, ownerA)),
     'GET /demo-requests': async () => refused(await admin('GET', '/demo-requests', undefined, ownerA)),
@@ -198,6 +219,7 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
   assert.equal((await db('orders').where({ id: B.order.id }).first()).status, 'new');
   assert.equal((await db('admins').where({ id: B.member.id }).first()).disabled_at, null);
   assert.equal((await db('sync_keys').where({ id: B.key.id }).first()).revoked_at, null);
+  assert.equal((await db('promo_codes').where({ id: B.promo.id }).first()).value, 10);
 });
 
 test('an owner works across every store of their organisation; a manager stays in one store', async () => {

@@ -4,6 +4,7 @@ import { sizesFor } from '../db/seed.js';
 import { fail, langOf } from '../admin/routes.js';
 import { filterCandidates, ruleOutfits, missedItems, swapOptions, SPREADS } from './engine.js';
 import { logMissed } from '../demand.js';
+import { parseJson } from '../cart/promo.js';
 import { parsePhoto, applyStylist, withDeadline, TIMEOUT_MS } from './stylist.js';
 
 const pick = (v, allowed, label, required) => {
@@ -34,7 +35,8 @@ function parseRequest(b) {
 const AI_PER_MINUTE = 30;
 export const REC = /^[a-f0-9]{32}$/;
 const MAX_CABIN = 99;
-const MAX_OPEN_FITTING = 3; // per results screen, so one customer can't flood the staff chat
+const MAX_OPEN_FITTING = 3;
+const MAX_SHOWN = 60; // outfit sets kept per results screen (shortcut: a concurrent swap on one screen can drop one set; one customer per kiosk) // per results screen, so one customer can't flood the staff chat
 const REC_TTL_MS = 2 * 60 * 60 * 1000; // a re-query after this starts a new log row (a new customer at the kiosk)
 // Compares right against DB-default created_at: SQLite stores 'YYYY-MM-DD HH:MM:SS' (UTC) text, Postgres timestamptz.
 export const dbTime = (ms) => `${new Date(ms).toISOString().replace('T', ' ').slice(0, 19)}+00:00`;
@@ -59,7 +61,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     const { sizes, budget } = parseRequest(b);
     const photo = parsePhoto(b.photo); // memory only: goes to Claude for this request, never stored or logged
 
-    const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon');
+    const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon', 'bundle_percent');
     if (!store) throw fail(404, 'err.store_not_found');
     const w = await weather(store);
     const ctx = { temperature: w.temperature, raining: w.raining, budget };
@@ -89,6 +91,8 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       budget,
       product_ids: JSON.stringify([...new Set([...outfits, ...(partial ? [partial] : [])].flatMap((o) => o.items.map((i) => i.id)))]),
       source,
+      // Task 26: the whole outfits shown (and their cheaper variants), so the cart can trust an "outfit" for the bundle discount.
+      outfits: JSON.stringify(outfits.flatMap((o) => [o, ...(o.alternative ? [o.alternative] : [])]).map((o) => o.items.map((i) => i.id))),
     };
     // A −/+ re-query sends back its `rec` and updates the same row, so one customer counts once in the pilot report.
     let rec = typeof b.rec === 'string' && REC.test(b.rec) ? b.rec : null;
@@ -100,12 +104,12 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     await missedItems(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature })
       .then((items) => logMissed(db, { storeId: store.id, session: rec, items, source: 'recommend' }))
       .catch((err) => console.error('missed demand not logged:', err.message));
-    res.json({ weather: w, budget, over_budget, partial, relaxed, notice, source, style_guess, outfits, rec });
+    res.json({ weather: w, budget, over_budget, partial, relaxed, notice, source, style_guess, outfits, rec, bundle_percent: store.bundle_percent });
   });
 
   // Task 25: swap one item of a shown outfit. The / body (no photo) plus { items: [this outfit's ids], replace,
   // exclude: [ids in the other outfits shown], relaxed } → { options: [{ swap, items, total }] }, priced here from the
-  // same in-stock candidates (customer's sizes, the answer's temperature window). Nothing is logged.
+  // same in-stock candidates (customer's sizes, the answer's temperature window). With `rec`, the options are kept for the bundle rule.
   r.post('/swap', async (req, res) => {
     const b = req.body ?? {};
     const { sizes, budget } = parseRequest(b);
@@ -127,6 +131,12 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       if (items.some((p) => !p)) throw fail(409, 'err.outfit_stale'); // sold out or resized since the outfit was shown
       options = swapOptions(candidates, { items, replace: b.replace, exclude, budget, temperature: w.temperature, raining: w.raining });
       if (options.length) break;
+    }
+    // Task 26: a swapped outfit is a recommended outfit too (bundle discount). Kept on its results screen's log row, newest 60.
+    const rec = typeof b.rec === 'string' && REC.test(b.rec) ? await db('recommendation_logs').where({ token: b.rec, store_id: store.id }).first('id', 'outfits') : null;
+    if (rec && options.length) {
+      const shown = [...parseJson(rec.outfits, []), ...options.map((o) => o.items.map((i) => i.id))].slice(-MAX_SHOWN);
+      await db('recommendation_logs').where({ id: rec.id }).update({ outfits: JSON.stringify(shown) });
     }
     res.json({ options });
   });
