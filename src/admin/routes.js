@@ -9,6 +9,8 @@ import { hashPassword, verifyPassword, DUMMY_HASH, tokenSecret, signToken, verif
 import { releaseExpired, markPaid, orderView, nextStatuses, changeStatus, stamp } from '../cart/cart.js';
 import { LANGS, errorText, t } from '../../public/shared/i18n.js';
 import { dbTime } from '../recommend/routes.js';
+import { audit, diff } from './audit.js';
+import { publicTeamRoutes, settingsRoutes, ROLES } from './settings.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -21,9 +23,9 @@ export const fail = (status, key, vars = {}) => Object.assign(new Error(key), { 
 export const langOf = (req) => (LANGS.includes(req.query?.lang) ? req.query.lang : req.acceptsLanguages(...LANGS) || 'uz');
 export const errorBody = (lang, err) => ({ code: err.publicKey.slice(4), error: errorText(lang, err.publicKey, err.vars) });
 
-const publicAdmin = ({ id, email, role, store_id }) => ({ id, email, role, store_id });
+export const publicAdmin = ({ id, email, role, store_id }) => ({ id, email, role, store_id });
 
-const text = (v, max, label, required) => {
+export const text = (v, max, label, required) => {
   if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) {
     if (required) throw fail(400, 'err.required', { field: label });
     return null;
@@ -31,7 +33,7 @@ const text = (v, max, label, required) => {
   if (typeof v !== 'string' || v.trim().length > max) throw fail(400, 'err.invalid', { field: label });
   return v.trim();
 };
-const int = (v, min, max, label) => {
+export const int = (v, min, max, label) => {
   if (!Number.isInteger(v) || v < min || v > max) throw fail(400, 'err.invalid', { field: label });
   return v;
 };
@@ -82,6 +84,17 @@ async function applyStock(trx, productId, entries) {
   }
 }
 
+// What the audit log keeps of a product: its editable fields, image and stock per size ({ M: 3 }).
+async function snapProduct(q, id) {
+  const p = await q('products').where({ id }).first();
+  const stock = await q('product_stock').where({ product_id: id }).orderBy('id');
+  return {
+    ...Object.fromEntries(PRODUCT_COLS.map((c) => [c, c === 'waterproof' ? Boolean(p[c]) : p[c] ?? null])),
+    image_url: p.image_url ?? null,
+    stock: Object.fromEntries(stock.map((s) => [s.size, s.quantity])),
+  };
+}
+
 // CSV import: one row = one product, stock in one column per size. A filled `id` cell updates that product.
 const PRODUCT_COLS = ['name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'shelf_location'];
 const SIZE_COLS = [...sizesFor('top'), ...sizesFor('shoes'), ...sizesFor('accessory')];
@@ -116,6 +129,17 @@ const iso = (ms) => new Date(ms).toISOString(); // paid_at / expires_at are writ
 // SQLite gives 'YYYY-MM-DD HH:MM:SS' (UTC) strings, Postgres gives Date objects.
 const msOf = (v) => (v instanceof Date ? v.getTime() : Date.parse(`${String(v).replace(' ', 'T')}${String(v).includes('Z') || String(v).includes('+') ? '' : 'Z'}`));
 
+// ?from&to = Tashkent days (YYYY-MM-DD, inclusive) on a created_at column.
+export function dateRange(q, col, { from, to }) {
+  const day = (v) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(dayStart(v))) throw fail(400, 'err.invalid', { field: 'field.date' });
+    return dayStart(v);
+  };
+  if (from) q.where(col, '>=', dbTime(day(from)));
+  if (to) q.where(col, '<', dbTime(day(to) + DAY_MS));
+  return q;
+}
+
 // List paging: limit 1–100 (default 25), offset ≥ 0. Out-of-range values are clamped, not refused.
 export const PAGE_MAX = 100;
 export function paging(query) {
@@ -146,29 +170,43 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   const secret = tokenSecret();
   // shortcut: per-process, per-IP lockout map; move to a shared store if we run several instances.
   const fails = new Map();
+  // Wrong passwords (login and password change) count per IP: MAX_FAILS within LOCK_MS locks it out for the rest of the window.
+  const lock = {
+    check(ip) {
+      const f = fails.get(ip);
+      if (f && f.until > Date.now() && f.count >= MAX_FAILS) throw fail(429, 'err.too_many_attempts');
+    },
+    miss(ip) {
+      const f = fails.get(ip), now = Date.now();
+      fails.set(ip, f && f.until > now ? { count: f.count + 1, until: f.until } : { count: 1, until: now + LOCK_MS });
+    },
+  };
   const r = express.Router();
 
   r.post('/login', async (req, res) => {
-    const now = Date.now();
-    const f = fails.get(req.ip);
-    if (f && f.until > now && f.count >= MAX_FAILS) throw fail(429, 'err.too_many_attempts');
+    lock.check(req.ip);
     const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     const password = typeof req.body?.password === 'string' && req.body.password.length <= 200 ? req.body.password : '';
     const admin = email ? await db('admins').where({ email }).first() : undefined;
     const ok = (await verifyPassword(password, admin?.password_hash ?? DUMMY_HASH)) && admin && password;
     if (!ok) {
-      fails.set(req.ip, f && f.until > now ? { count: f.count + 1, until: f.until } : { count: 1, until: now + LOCK_MS });
+      lock.miss(req.ip);
       throw fail(401, 'err.bad_login');
     }
     fails.delete(req.ip);
-    res.json({ ...signToken(secret, admin.id), admin: publicAdmin(admin) });
+    // Said only after the right password, so it reveals nothing to a guesser.
+    if (admin.disabled_at) throw fail(403, 'err.account_disabled');
+    res.json({ ...signToken(secret, admin.id, Date.now(), admin.token_version), admin: publicAdmin(admin) });
   });
+
+  publicTeamRoutes(r, db, { secret });
 
   r.use(async (req, res, next) => {
     const auth = req.get('authorization') || '';
-    const id = auth.startsWith('Bearer ') ? verifyToken(secret, auth.slice(7)) : null;
-    const admin = id ? await db('admins').where({ id }).first() : undefined;
-    if (!admin) throw fail(401, 'err.login_again');
+    const tok = auth.startsWith('Bearer ') ? verifyToken(secret, auth.slice(7)) : null;
+    const admin = tok ? await db('admins').where({ id: tok.sub }).first() : undefined;
+    // A disabled admin, or a token from before the last password change / disable, is out at once.
+    if (!admin || admin.disabled_at || tok.ver !== admin.token_version) throw fail(401, 'err.login_again');
     req.admin = admin;
     next();
   });
@@ -259,18 +297,22 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const [{ id }] = await trx('products').insert({ ...product, store_id: storeId }).returning('id');
     await trx('product_stock').insert(sizesFor(product.category).map((size) => ({ product_id: id, size, quantity: 0 })));
     await applyStock(trx, id, stock);
+    await audit(trx, admin, { action: 'product.create', storeId, entityId: id, label: product.name, after: await snapProduct(trx, id) });
     return id;
   }
 
   // Partial edit: only the given fields change, plus optional `stock`. store_id cannot change.
-  async function updateProduct(trx, existing, body) {
+  async function updateProduct(trx, existing, body, admin) {
     if (body.store_id !== undefined && Number(body.store_id) !== existing.store_id) throw fail(400, 'err.store_locked');
     const product = validProduct({ ...existing, ...body });
     // Sizes depend on category group; switching group would orphan the stock rows.
     if (sizesFor(product.category) !== sizesFor(existing.category)) throw fail(400, 'err.category_locked');
     const stock = validStock(body.stock, product.category);
+    const before = await snapProduct(trx, existing.id);
     await trx('products').where({ id: existing.id }).update({ ...product, updated_at: trx.fn.now() });
     await applyStock(trx, existing.id, stock);
+    const d = diff(before, await snapProduct(trx, existing.id));
+    if (d) await audit(trx, admin, { action: 'product.update', storeId: existing.store_id, entityId: existing.id, label: product.name, ...d });
   }
 
   r.post('/products', async (req, res) => {
@@ -281,7 +323,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
 
   r.patch('/products/:id', async (req, res) => {
     const existing = await findProduct(req);
-    await db.transaction((trx) => updateProduct(trx, existing, req.body ?? {}));
+    await db.transaction((trx) => updateProduct(trx, existing, req.body ?? {}, req.admin));
     const [p] = await withStock([await db('products').where({ id: existing.id }).first()]);
     res.json(p);
   });
@@ -290,7 +332,10 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const p = await findProduct(req);
     if (await db('order_items').where({ product_id: p.id }).first()) throw fail(409, 'err.product_in_orders');
     if (await db('product_stock').where({ product_id: p.id }).andWhere('reserved', '>', 0).first()) throw fail(409, 'err.product_in_carts');
-    await db('products').where({ id: p.id }).del();
+    await db.transaction(async (trx) => {
+      await audit(trx, req.admin, { action: 'product.delete', storeId: p.store_id, entityId: p.id, label: p.name, before: await snapProduct(trx, p.id) });
+      await trx('products').where({ id: p.id }).del();
+    });
     await removeImage(p.image_url);
     res.status(204).end();
   });
@@ -345,7 +390,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
               if (seenIds.has(n)) throw fail(400, 'err.csv_id_dup', { id: n });
               seenIds.add(n);
               // Update rows: an empty cell keeps the current value, so a stock-only row needs just id + sizes.
-              await updateProduct(trx, existing, Object.fromEntries(Object.entries(body).filter(([, v]) => v !== null)));
+              await updateProduct(trx, existing, Object.fromEntries(Object.entries(body).filter(([, v]) => v !== null)), req.admin);
               updated++;
             }
           } catch (err) {
@@ -372,17 +417,24 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     await mkdir(imageDir, { recursive: true });
     await writeFile(path.join(imageDir, file), buf);
     const image_url = `/uploads/products/${file}`;
-    await db('products').where({ id: p.id }).update({ image_url, updated_at: db.fn.now() });
-    await removeImage(p.image_url);
+    await setImage(req, p, image_url);
     res.json({ image_url });
   });
 
   r.delete('/products/:id/image', async (req, res) => {
     const p = await findProduct(req);
-    await db('products').where({ id: p.id }).update({ image_url: null, updated_at: db.fn.now() });
-    await removeImage(p.image_url);
+    await setImage(req, p, null);
     res.status(204).end();
   });
+
+  async function setImage(req, p, image_url) {
+    await db.transaction(async (trx) => {
+      await trx('products').where({ id: p.id }).update({ image_url, updated_at: trx.fn.now() });
+      await audit(trx, req.admin, { action: image_url ? 'product.image' : 'product.image_delete', storeId: p.store_id, entityId: p.id, label: p.name,
+        before: { image_url: p.image_url }, after: { image_url } });
+    });
+    await removeImage(p.image_url);
+  }
 
   async function removeImage(url) {
     if (!url?.startsWith('/uploads/products/')) return;
@@ -407,13 +459,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
       if (digits.length <= 6) q.where('o.number', Number(digits));
       else q.where('o.phone', 'like', `%${digits.slice(-12)}%`);
     } else if (text) q.whereILike('o.customer_name', `%${text}%`);
-    const day = (v) => {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(dayStart(v))) throw fail(400, 'err.invalid', { field: 'field.date' });
-      return dayStart(v);
-    };
-    if (f.from) q.where('o.created_at', '>=', dbTime(day(f.from)));
-    if (f.to) q.where('o.created_at', '<', dbTime(day(f.to) + DAY_MS));
-    return q;
+    return dateRange(q, 'o.created_at', f);
   }
   const ORDER_COLS = ['o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.phone', 'o.fulfillment', 'o.address', 'o.status',
     'o.payment_status', 'o.payment_method', 'o.subtotal', 'o.delivery_fee', 'o.total', 'o.created_at', 'o.expires_at', 'o.telegram_chat_id'];
@@ -482,18 +528,26 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const o = await findOrder(req);
     const to = req.body?.status;
     if (!ORDER_STATUSES.includes(to)) throw fail(400, 'err.invalid', { field: 'field.status' });
-    if (!(await changeStatus(db, o.id, to))) {
+    if (!(await orderStep(req, o, 'order.status', (trx) => changeStatus(trx, o.id, to)))) {
       throw fail(409, o.payment_status === 'pending' && to !== 'cancelled' ? 'err.pay_first' : 'err.status_conflict');
     }
     res.json(await adminView(await db('orders').where({ id: o.id }).first()));
   });
   r.post('/orders/:id/pay', async (req, res) => {
     const o = await findOrder(req);
-    if (!(await markPaid(db, o.id))) {
+    if (!(await orderStep(req, o, 'order.pay', (trx) => markPaid(trx, o.id)))) {
       const now = await db('orders').where({ id: o.id }).first('payment_status');
       throw fail(409, now.payment_status === 'paid' ? 'err.already_paid' : 'err.order_expired');
     }
     res.json(await adminView(await db('orders').where({ id: o.id }).first()));
+  });
+  // Runs one order change (changeStatus / markPaid nest as a savepoint) and logs it in the same transaction.
+  const orderStep = (req, o, action, change) => db.transaction(async (trx) => {
+    if (!(await change(trx))) return false;
+    const now = await trx('orders').where({ id: o.id }).first('status', 'payment_status');
+    await audit(trx, req.admin, { action, storeId: o.store_id, entityId: o.id, label: o.number,
+      before: { status: o.status, payment_status: o.payment_status }, after: now });
+    return true;
   });
 
   // Fitting-room requests (task 17): open ones from the last 2 hours, oldest first, with what to bring from which shelf.
@@ -507,9 +561,16 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   r.post('/fitting/:id/done', async (req, res) => {
     const q = db('fitting_requests').where({ id: Number(req.params.id) || 0 });
     if (req.admin.role !== 'super') q.where('store_id', req.admin.store_id);
-    if (!(await q.update({ status: 'done' }))) throw fail(404, 'err.not_found');
+    const f = await q.first();
+    if (!f) throw fail(404, 'err.not_found');
+    await db.transaction(async (trx) => {
+      if (!(await trx('fitting_requests').where({ id: f.id, status: 'new' }).update({ status: 'done' }))) return; // already done: nothing changed
+      await audit(trx, req.admin, { action: 'fitting.done', storeId: f.store_id, entityId: f.id, label: f.cabin, before: { status: 'new' }, after: { status: 'done' } });
+    });
     res.status(204).end();
   });
+
+  settingsRoutes(r, db, { secret, lock, resolveStore });
 
   // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.
   const inScope = (req, q, col = 'store_id') => {
@@ -628,14 +689,14 @@ export async function fittingView(db, rows) {
   return parsed.map((r) => ({ ...r, items: r.items.map((i) => ({ ...products.find((p) => p.id === i.product_id), size: i.size })) }));
 }
 
-export async function createAdmin(db, { email, password, storeId = null }) {
+// No store = super-admin; with a store the role is 'owner' (default) or 'manager'.
+export async function createAdmin(db, { email, password, storeId = null, role = storeId ? 'owner' : 'super' }) {
   email = String(email ?? '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Invalid email');
   if (typeof password !== 'string' || password.length < 8 || password.length > 200) throw new Error('Password must be 8–200 characters');
   if (storeId !== null && !(Number.isInteger(storeId) && storeId > 0)) throw new Error('Invalid store_id');
-  const [{ id }] = await db('admins')
-    .insert({ email, password_hash: await hashPassword(password), role: storeId ? 'manager' : 'super', store_id: storeId || null })
-    .returning('id');
+  if (!ROLES.includes(role) || (role === 'super') !== (storeId === null)) throw new Error('Invalid role: super has no store; owner and manager need one');
+  const [{ id }] = await db('admins').insert({ email, password_hash: await hashPassword(password), role, store_id: storeId }).returning('id');
   return id;
 }
 

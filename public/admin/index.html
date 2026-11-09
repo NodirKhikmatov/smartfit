@@ -22,6 +22,20 @@
   <button class="primary" data-i18n="adm.login.submit"></button>
 </form>
 
+<form id="invite" class="card raised" hidden>
+  <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
+  <h1 data-i18n="adm.inv.title"></h1>
+  <p class="muted" id="inviteFor"></p>
+  <input name="username" type="email" autocomplete="username" hidden>
+  <div id="inviteFields">
+    <label class="field"><span data-i18n="adm.pw.new"></span> <input name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="200"><span class="hint" data-i18n="adm.pw.rule"></span></label>
+    <label class="field"><span data-i18n="adm.pw.repeat"></span> <input name="repeat" type="password" autocomplete="new-password" required minlength="8" maxlength="200"></label>
+  </div>
+  <p class="error" id="inviteError" role="alert"></p>
+  <button class="primary" id="inviteSubmit" data-i18n="adm.inv.submit"></button>
+  <a class="button ghost" href="/admin/" id="inviteLogin" hidden data-i18n="adm.inv.to_login"></a>
+</form>
+
 <div id="app" class="shell" hidden>
   <aside class="sidebar" id="sidebar">
     <div class="side-inner" id="sideInner">
@@ -194,21 +208,94 @@
         <div class="qr-grid" id="qrGrid"></div>
       </section>
 
-      <!-- Settings (task 19 fills this) -->
+      <!-- Settings: store profile, team, audit log, my account (#/settings?tab=…) -->
       <section data-page="settings" hidden>
-        <div class="settings">
-          <section class="card" aria-labelledby="accTitle">
-            <h2 id="accTitle" data-i18n="adm.set.account"></h2>
-            <dl class="facts" id="accFacts"></dl>
-            <h3 data-i18n="common.lang"></h3>
-            <div id="setLang"></div>
-          </section>
-          <section class="card empty" aria-labelledby="soonTitle">
-            <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#settings"></use></svg>
-            <h2 id="soonTitle" data-i18n="adm.set.soon_title"></h2>
-            <p data-i18n="adm.set.soon_text"></p>
-          </section>
-        </div>
+        <nav class="tabs-row" id="setTabs" data-i18n-aria-label="adm.set.sections"></nav>
+
+        <section data-tab="store" hidden>
+          <form class="card settings-card" id="storeForm" aria-labelledby="storeTitle">
+            <div class="panel-head">
+              <div><h2 id="storeTitle" data-i18n="adm.set.store"></h2><p class="panel-sub" data-i18n="adm.set.store_sub"></p></div>
+              <label id="storePickWrap"><span data-i18n="common.store"></span> <select id="storePick"></select></label>
+            </div>
+            <div id="storeLoadError"></div>
+            <p class="notice" id="storeReadOnly" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#info"></use></svg><span data-i18n="adm.set.read_only"></span></p>
+            <fieldset id="storeFields">
+              <legend class="visually-hidden" data-i18n="adm.set.store"></legend>
+              <div class="form-grid">
+                <label class="field"><span data-i18n="field.name"></span> <input name="name" required maxlength="120"></label>
+                <label class="field"><span data-i18n="field.city"></span> <input name="city" required maxlength="80"></label>
+                <label class="field span-all"><span data-i18n="field.address"></span> <input name="address" required maxlength="200"></label>
+                <label class="field"><span data-i18n="adm.set.lat"></span> <input name="lat" type="number" step="any" min="-90" max="90" required inputmode="decimal"></label>
+                <label class="field"><span data-i18n="adm.set.lon"></span> <input name="lon" type="number" step="any" min="-180" max="180" required inputmode="decimal"></label>
+                <p class="hint span-all map-hint"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#map-pin"></use></svg><span data-i18n="adm.set.pin_hint"></span> <a id="mapLink" target="_blank" rel="noopener noreferrer" data-i18n="adm.set.map_open"></a></p>
+                <label class="field"><span data-i18n="adm.set.opens"></span> <input name="opens_at" type="time"></label>
+                <label class="field"><span data-i18n="adm.set.closes"></span> <input name="closes_at" type="time"></label>
+                <label class="field"><span data-i18n="field.delivery_fee"></span> <input name="delivery_fee" type="number" min="0" step="1" required inputmode="numeric"></label>
+                <label class="field"><span data-i18n="field.free_threshold"></span> <input name="free_delivery_threshold" type="number" min="1" step="1" inputmode="numeric"><span class="hint" data-i18n="adm.set.free_hint"></span></label>
+                <label class="field span-all"><span data-i18n="field.telegram_chat"></span> <input name="telegram_chat_id" inputmode="numeric" pattern="-?[0-9]{1,15}" maxlength="16" autocomplete="off"><span class="hint" data-i18n="adm.set.chat_hint"></span></label>
+              </div>
+            </fieldset>
+            <p class="error" id="storeError" role="alert"></p>
+            <div class="actions"><button class="primary" id="storeSave" data-i18n="adm.set.save"></button></div>
+          </form>
+        </section>
+
+        <section data-tab="team" hidden>
+          <div class="page-head">
+            <p class="muted" data-i18n="adm.team.sub"></p>
+            <button type="button" class="primary" id="inviteBtn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="adm.team.invite"></span></button>
+          </div>
+          <div id="teamError"></div>
+          <div class="table-wrap">
+            <table class="table team-table">
+              <caption class="visually-hidden" data-i18n="adm.set.team"></caption>
+              <thead><tr><th data-i18n="field.email"></th><th class="hide-sm" data-i18n="field.role"></th><th class="hide-sm" id="teamStoreCol" data-i18n="common.store"></th><th data-i18n="adm.team.status"></th><th><span class="visually-hidden" data-i18n="adm.team.actions"></span></th></tr></thead>
+              <tbody id="teamRows"></tbody>
+            </table>
+          </div>
+          <h2 class="section-title" data-i18n="adm.team.invites"></h2>
+          <ul class="invite-list" id="inviteList"></ul>
+        </section>
+
+        <section data-tab="audit" hidden>
+          <form class="toolbar" id="auditFilters" role="search">
+            <label><span data-i18n="adm.audit.what"></span> <select name="entity"><option value="" data-i18n="common.all"></option></select></label>
+            <label class="grow"><span data-i18n="adm.audit.who"></span> <select name="admin"><option value="" data-i18n="adm.audit.everyone"></option></select></label>
+            <label><span data-i18n="adm.orders.from"></span> <input name="from" type="date"></label>
+            <label><span data-i18n="adm.orders.to"></span> <input name="to" type="date"></label>
+          </form>
+          <div id="auditError"></div>
+          <div class="table-wrap">
+            <table class="table audit-table">
+              <caption class="visually-hidden" data-i18n="adm.set.audit"></caption>
+              <thead><tr><th class="hide-sm" data-i18n="adm.orders.time"></th><th class="hide-sm" data-i18n="adm.audit.who"></th><th data-i18n="adm.audit.action"></th><th data-i18n="adm.audit.changes"></th></tr></thead>
+              <tbody id="auditRows"></tbody>
+            </table>
+          </div>
+          <nav class="pager" id="auditPager" data-i18n-aria-label="adm.pager"></nav>
+        </section>
+
+        <section data-tab="account" hidden>
+          <div class="settings">
+            <section class="card" aria-labelledby="accTitle">
+              <h2 id="accTitle" data-i18n="adm.set.account"></h2>
+              <dl class="facts" id="accFacts"></dl>
+              <h3 data-i18n="common.lang"></h3>
+              <div id="setLang"></div>
+            </section>
+            <form class="card" id="pwForm" aria-labelledby="pwTitle">
+              <h2 id="pwTitle" data-i18n="adm.pw.title"></h2>
+              <p class="muted" data-i18n="adm.pw.sub"></p>
+              <input name="username" type="email" autocomplete="username" hidden>
+              <label class="field"><span data-i18n="adm.pw.current"></span> <input name="current" type="password" autocomplete="current-password" required maxlength="200"></label>
+              <label class="field"><span data-i18n="adm.pw.new"></span> <input name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="200"><span class="hint" data-i18n="adm.pw.rule"></span></label>
+              <label class="field"><span data-i18n="adm.pw.repeat"></span> <input name="repeat" type="password" autocomplete="new-password" required minlength="8" maxlength="200"></label>
+              <p class="error" id="pwError" role="alert"></p>
+              <div class="actions"><button class="primary" data-i18n="adm.pw.submit"></button></div>
+            </form>
+          </div>
+        </section>
       </section>
     </main>
   </div>
@@ -237,6 +324,29 @@
     <div class="actions">
       <button type="button" id="importCancel" data-i18n="common.close"></button>
       <button class="primary" data-i18n="adm.import.submit"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="inviteDlg" class="narrow" aria-labelledby="inviteTitle">
+  <form id="inviteForm" method="dialog">
+    <h2 id="inviteTitle" data-i18n="adm.team.invite"></h2>
+    <div id="inviteAsk">
+      <p class="muted" data-i18n="adm.team.invite_text"></p>
+      <label class="field"><span data-i18n="field.email"></span> <input name="email" type="email" required maxlength="200" autocomplete="off"></label>
+      <label class="field" id="inviteRoleWrap"><span data-i18n="field.role"></span> <select name="role"><option value="manager" data-i18n="adm.role_manager"></option><option value="owner" data-i18n="adm.role_owner"></option></select></label>
+      <label class="field" id="inviteStoreWrap"><span data-i18n="common.store"></span> <select name="store_id"></select></label>
+    </div>
+    <div id="inviteDone" hidden>
+      <p data-i18n="adm.team.link_text"></p>
+      <label class="field"><span data-i18n="adm.team.link"></span> <input id="inviteUrl" readonly></label>
+      <p class="hint" id="inviteExpiry"></p>
+    </div>
+    <p class="error" id="inviteDlgError" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="inviteCancel" data-i18n="common.cancel"></button>
+      <button class="primary" id="inviteCreate" data-i18n="adm.team.create_link"></button>
+      <button type="button" class="primary" id="inviteCopy" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="adm.qr.copy"></span></button>
     </div>
   </form>
 </dialog>

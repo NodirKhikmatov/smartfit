@@ -32,13 +32,15 @@ export function tokenSecret() {
 
 const sign = (secret, data) => createHmac('sha256', secret).update(data).digest('base64url');
 
-// Token = base64url({sub, exp}) + "." + HMAC. Role and store are re-read from the DB on every request.
-export function signToken(secret, adminId, now = Date.now()) {
+// Token = base64url({sub, ver, exp}) + "." + HMAC. Role, store and token_version are re-read from the DB on every request,
+// so bumping admins.token_version (password change, disable) kills every older token. A token without ver counts as 0.
+export function signToken(secret, adminId, now = Date.now(), ver = 0) {
   const exp = now + TOKEN_TTL_MS;
-  const payload = Buffer.from(JSON.stringify({ sub: adminId, exp })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ sub: adminId, ver, exp })).toString('base64url');
   return { token: `${payload}.${sign(secret, payload)}`, expires_at: new Date(exp).toISOString() };
 }
 
+// → { sub, ver } or null.
 export function verifyToken(secret, token, now = Date.now()) {
   const [payload, mac] = String(token).split('.');
   if (!payload || !mac) return null;
@@ -46,8 +48,8 @@ export function verifyToken(secret, token, now = Date.now()) {
   const b = Buffer.from(sign(secret, payload));
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   try {
-    const { sub, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
-    return Number.isInteger(sub) && exp > now ? sub : null;
+    const { sub, ver = 0, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
+    return Number.isInteger(sub) && Number.isInteger(ver) && exp > now ? { sub, ver } : null;
   } catch {
     return null;
   }

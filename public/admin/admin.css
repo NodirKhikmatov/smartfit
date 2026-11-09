@@ -9,9 +9,12 @@ label.check { display: inline-flex; font-size: var(--text-md); color: var(--ink)
 .print-frame { position: fixed; right: 0; bottom: 0; width: 0; height: 0; border: 0; }
 
 /* ---------- Sign-in */
-#login { width: min(24rem, calc(100% - 2rem)); margin: 12vh auto; display: grid; gap: var(--s-4); padding: var(--s-6); }
-#login .wordmark { margin-bottom: var(--s-2); }
-#login h1 { font: var(--weight-strong) var(--text-lg)/var(--leading-snug) var(--font-ui); }
+#login, #invite { width: min(24rem, calc(100% - 2rem)); margin: 12vh auto; display: grid; gap: var(--s-4); padding: var(--s-6); }
+#login[hidden], #invite[hidden] { display: none; }
+#login .wordmark, #invite .wordmark { margin-bottom: var(--s-2); }
+#login h1, #invite h1 { font: var(--weight-strong) var(--text-lg)/var(--leading-snug) var(--font-ui); }
+#invite p { margin: 0; overflow-wrap: anywhere; }
+#invite .field { margin-bottom: var(--s-3); }
 
 /* ---------- Shell */
 .shell { display: grid; grid-template-columns: 15.5rem minmax(0, 1fr); min-height: 100dvh; }
@@ -260,6 +263,29 @@ a.kpi:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); col
 .settings { display: grid; gap: var(--s-4); max-width: 48rem; }
 .settings h2 { margin-bottom: var(--s-4); }
 .settings h3 { margin: var(--s-5) 0 var(--s-3); font-size: var(--text-md); }
+
+/* Settings tabs (links styled as chips; the current one is filled), store form, team, audit */
+.tabs-row a.chip { text-decoration: none; }
+.tabs-row a.chip[aria-current="page"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.settings-card { max-width: 48rem; }
+.settings-card fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-4); }
+.form-grid .field { margin: 0; }
+.form-grid .span-all { grid-column: 1 / -1; }
+@media (max-width: 47.99em) { .form-grid { grid-template-columns: minmax(0, 1fr); } }
+.map-hint { margin: calc(-1 * var(--s-2)) 0 0; }
+.map-hint .icon { margin-right: var(--s-1); }
+.map-hint a[hidden] { display: none; }
+.cell-email { overflow-wrap: anywhere; margin-right: var(--s-2); }
+.team-table .row-actions button { width: auto; padding: 0 var(--s-3); }
+.invite-list { display: grid; gap: var(--s-2); list-style: none; margin: 0; padding: 0; }
+.invite-row { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-3) var(--s-4); }
+.invite-row .grow { flex: 1; min-width: 0; }
+.changes { list-style: none; margin: 0; padding: 0; font-size: var(--text-sm); }
+.changes li { overflow-wrap: anywhere; }
+.audit-table details summary { cursor: pointer; font-size: var(--text-sm); color: var(--ink-2); }
+.audit-table td { vertical-align: top; }
+#inviteUrl { font-size: var(--text-sm); }
 
 /* Product form dialog */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: var(--s-3); }

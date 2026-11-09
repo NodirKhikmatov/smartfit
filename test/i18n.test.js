@@ -5,6 +5,7 @@ import { testDb } from './helpers/db.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 import { createAdmin, CATEGORIES } from '../src/admin/routes.js';
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from '../src/admin/audit.js';
 import { createStylist } from '../src/recommend/stylist.js';
 import { DICT, LANGS, t, fmt, errorText, productName, colorName } from '../public/shared/i18n.js';
 
@@ -70,6 +71,7 @@ test('every key used in code exists, and every dictionary key is used', () => {
     'adm.step': ['packing', 'shipping', 'delivered', 'cancelled'],
     'adm.pay': ['pending', 'paid', 'cancelled'],
     'kiosk.track.step': ['placed', 'paid', 'packing', 'shipping', 'delivered', 'handed'],
+    'adm.ent': AUDIT_ENTITIES, 'adm.act': AUDIT_ACTIONS,
   };
   const all = Object.values(sources).join('\n');
   for (const [prefix, members] of Object.entries(FAMILIES)) {

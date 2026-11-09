@@ -1,0 +1,31 @@
+// Audit log: one row per admin mutation, written in the same transaction as the change it describes.
+
+// Every action the admin API writes (the viewer translates them as adm.act.<action>).
+export const AUDIT_ACTIONS = [
+  'product.create', 'product.update', 'product.delete', 'product.image', 'product.image_delete',
+  'order.status', 'order.pay', 'fitting.done',
+  'store.update', 'team.invite', 'team.invite_revoke', 'team.join', 'team.disable', 'team.enable', 'account.password',
+];
+export const AUDIT_ENTITIES = ['product', 'order', 'fitting', 'store', 'team', 'account'];
+
+const json = (v) => (v == null ? null : JSON.stringify(v));
+
+// admin = the acting admin row; storeId = which store's log this belongs to (null for a super-admin's own account).
+export async function audit(q, admin, { action, storeId = null, entityId = null, label = null, before = null, after = null }) {
+  if (!AUDIT_ACTIONS.includes(action)) throw new Error(`unknown audit action ${action}`);
+  await q('audit_log').insert({
+    admin_id: admin.id, admin_email: admin.email, store_id: storeId, action, entity: action.split('.')[0],
+    entity_id: entityId, entity_label: label == null ? null : String(label).slice(0, 200), before: json(before), after: json(after),
+  });
+}
+
+// Only the keys whose value changed: { before: { price: 100 }, after: { price: 90 } }, or null when nothing changed.
+export function diff(before, after) {
+  const b = {}, a = {};
+  for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (JSON.stringify(before[k] ?? null) === JSON.stringify(after[k] ?? null)) continue;
+    b[k] = before[k] ?? null;
+    a[k] = after[k] ?? null;
+  }
+  return Object.keys(a).length ? { before: b, after: a } : null;
+}

@@ -97,8 +97,12 @@ migrates the database on start. Check it: `curl https://fit.example.uz/api/healt
    # name, city, lat, lon (for the weather), address, delivery fee in so'm, free delivery above (so'm, optional)
    ```
    (Without docker: `npm run store:create -- ...`.)
-2. Create the store manager, who sees and changes only this store: `npm run admin:create -- manager@example.uz <store_id>`.
-   No store id → super-admin (sees all stores). The password is asked on stdin, or taken from `ADMIN_PASSWORD`.
+2. Create the store owner: `npm run admin:create -- owner@example.uz <store_id>` (add `manager` as a third argument for a
+   manager instead). No store id → super-admin (sees all stores). The password is asked on stdin, or taken from `ADMIN_PASSWORD`.
+   Roles: **super** = every store; **owner** = one store, plus its settings (address, map pin, hours, delivery fee, staff
+   Telegram chat), its team and its audit log; **manager** = products, orders and the cashier of one store. After that the
+   owner adds staff in `/admin` → Sozlamalar → Jamoa: "Taklif qilish" makes a one-time link (valid 48 hours) to send to the
+   new manager, who sets their own password with it.
 3. Add products in `/admin` → "Kiyimlar" (form, or "CSV yuklash" for a whole catalogue), set stock per size, upload photos.
    CSV columns (`,` or `;`, UTF-8, header row): `id, store_id, name, name_ru, category, gender, color, style, price,
    discount_price, temp_min, temp_max, waterproof, shelf_location` plus one stock column per size (`XS…XXL`, `36…45`, `ONE`). Empty `id`

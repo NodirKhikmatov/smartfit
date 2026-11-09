@@ -27,7 +27,7 @@ before(async () => {
   await seed(db);
   [tashkent, samarkand] = (await db('stores').orderBy('id')).map((s) => s.id);
   await createAdmin(db, { email: 'Boss@SmartFit.uz', password: 'super-pass-1' });
-  await createAdmin(db, { email: 'tash@smartfit.uz', password: 'tash-pass-1', storeId: tashkent });
+  await createAdmin(db, { email: 'tash@smartfit.uz', password: 'tash-pass-1', storeId: tashkent, role: 'manager' });
   server = createApp(db).listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -50,8 +50,9 @@ test('scrypt hash verifies only the right password', async () => {
 test('token lasts 12 hours and rejects tampering', () => {
   const now = Date.now();
   const { token } = signToken('k', 7, now);
-  assert.equal(verifyToken('k', token, now), 7);
-  assert.equal(verifyToken('k', token, now + TOKEN_TTL_MS - 1), 7);
+  assert.deepEqual(verifyToken('k', token, now), { sub: 7, ver: 0 });
+  assert.deepEqual(verifyToken('k', token, now + TOKEN_TTL_MS - 1), { sub: 7, ver: 0 });
+  assert.deepEqual(verifyToken('k', signToken('k', 7, now, 3).token, now), { sub: 7, ver: 3 });
   assert.equal(verifyToken('k', token, now + TOKEN_TTL_MS), null, 'expired after 12h');
   assert.equal(verifyToken('other', token, now), null, 'wrong secret');
   const forged = Buffer.from(JSON.stringify({ sub: 1, exp: now + 1e9 })).toString('base64url') + '.' + token.split('.')[1];
@@ -189,6 +190,9 @@ test('createAdmin validates input', async () => {
   await assert.rejects(createAdmin(db, { email: 'bad', password: 'long-enough' }));
   await assert.rejects(createAdmin(db, { email: 'a@b.uz', password: 'short' }));
   await assert.rejects(createAdmin(db, { email: 'a@b.uz', password: 'long-enough', storeId: NaN }), /store_id/);
+  await assert.rejects(createAdmin(db, { email: 'a@b.uz', password: 'long-enough', role: 'owner' }), /role/, 'an owner needs a store');
+  await assert.rejects(createAdmin(db, { email: 'a@b.uz', password: 'long-enough', storeId: tashkent, role: 'super' }), /role/, 'a super has none');
+  await assert.rejects(createAdmin(db, { email: 'a@b.uz', password: 'long-enough', storeId: tashkent, role: 'boss' }), /role/);
 });
 
 test('login locks an IP after 10 failures', async () => {

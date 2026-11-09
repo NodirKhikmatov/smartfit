@@ -157,9 +157,12 @@ for (const v of CATEGORIES) {
   $('form').category.append(el('option', { value: v, textContent: cat(v) }));
 }
 
+const roleName = (r) => t({ super: 'adm.role_super', owner: 'adm.role_owner', manager: 'adm.role_manager' }[r]);
+
 async function show() {
   me = null;
   if (token()) { try { me = await call('/me'); } catch {} }
+  $('invite').hidden = true;
   $('login').hidden = !!me;
   $('app').hidden = !me;
   if (!me) return;
@@ -172,7 +175,7 @@ async function show() {
   $('scopeName').hidden = sup;
   $('scopeName').querySelector('span').textContent = stores[0]?.name || '';
   $('userEmail').textContent = me.email;
-  $('userRole').textContent = sup ? t('adm.super') : t('adm.manager');
+  $('userRole').textContent = roleName(me.role);
   $('avatar').textContent = me.email[0].toUpperCase();
   $('storeWrap').hidden = !sup;
   $('form').store_id.replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
@@ -194,6 +197,7 @@ $('login').addEventListener('submit', async (e) => {
 $('logout').onclick = () => { $('userMenu').hidePopover?.(); store.set('sfToken', null); show(); };
 $('scope').onchange = (e) => {
   scope = e.target.value;
+  team = null;
   store.set('sfAdminStore', scope || null);
   if (route.params.page) delete route.params.page;
   setParams(route.params);
@@ -255,7 +259,7 @@ document.querySelector('.skip').onclick = (e) => {
   $('main').focus();
 };
 window.addEventListener('hashchange', () => {
-  if (!me) return;
+  if (inviteFromHash() || !me) return;
   render();
   $('main').focus({ preventScroll: true });
   scrollTo(0, 0);
@@ -880,12 +884,317 @@ function printQr(q) {
   });
 }
 
-// ---------- Settings (task 19 adds store profile, team and audit log here).
+// ---------- Settings: store profile, team, audit log, my account (#/settings?tab=…).
+// The server decides who may do what; the tabs only hide what a role can't open.
 
+const SET_TABS = [['store', 'adm.set.store'], ['team', 'adm.set.team'], ['audit', 'adm.set.audit'], ['account', 'adm.set.account']];
 function loadSettings() {
-  const fact = (k, v) => [el('dt', { textContent: t(k) }), el('dd', { textContent: v })];
-  $('accFacts').replaceChildren(...fact('adm.login.email', me.email), ...fact('adm.set.role', me.role === 'super' ? t('adm.super') : t('adm.manager')),
-    ...fact('common.store', me.role === 'super' ? t('adm.all_stores') : stores[0]?.name || ''));
+  const tabs = SET_TABS.filter(([k]) => me.role !== 'manager' || k === 'store' || k === 'account');
+  const tab = tabs.some(([k]) => k === route.params.tab) ? route.params.tab : 'store';
+  $('setTabs').replaceChildren(...tabs.map(([k, label]) => {
+    const a = el('a', { className: 'chip', href: buildHash('settings', k === 'store' ? {} : { tab: k }), textContent: t(label) });
+    if (k === tab) a.setAttribute('aria-current', 'page');
+    return a;
+  }));
+  for (const s of document.querySelectorAll('[data-tab]')) s.hidden = s.dataset.tab !== tab;
+  ({ store: loadStore, team: loadTeam, audit: loadAudit, account: loadAccount })[tab]();
 }
 
-show();
+// Store profile. A super-admin picks the store here (defaults to the sidebar's); everyone else has one.
+const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id'];
+const sf = $('storeForm');
+const storeId = () => (me.role === 'super' ? $('storePick').value : String(me.store_id));
+function mapLink() {
+  const [lat, lon] = [sf.lat.value, sf.lon.value];
+  $('mapLink').hidden = !(lat && lon);
+  $('mapLink').href = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(lat)}&mlon=${encodeURIComponent(lon)}#map=17/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}`;
+}
+sf.lat.oninput = sf.lon.oninput = mapLink;
+async function loadStore() {
+  const sup = me.role === 'super';
+  $('storePickWrap').hidden = !sup;
+  if (sup && $('storePick').options.length !== stores.length) {
+    $('storePick').replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
+    $('storePick').value = scope || stores[0]?.id || '';
+  }
+  const seq = (loads.store = (loads.store || 0) + 1);
+  $('storeError').textContent = '';
+  $('storeFields').disabled = true;
+  try {
+    const s = await call(`/stores/${storeId()}`);
+    if (seq !== loads.store) return;
+    stateBox($('storeLoadError'));
+    for (const k of STORE_FIELDS) sf[k].value = s[k] ?? '';
+    $('storeFields').disabled = !s.can_edit;
+    $('storeReadOnly').hidden = s.can_edit;
+    $('storeSave').hidden = !s.can_edit;
+    mapLink();
+  } catch (err) {
+    if (seq === loads.store) stateBox($('storeLoadError'), err, () => loadStore());
+  }
+}
+$('storePick').onchange = () => loadStore();
+sf.onsubmit = async (e) => {
+  e.preventDefault();
+  $('storeError').textContent = '';
+  if (!sf.reportValidity()) return;
+  const v = (k) => sf[k].value.trim();
+  const body = {
+    name: v('name'), city: v('city'), address: v('address'), lat: Number(v('lat')), lon: Number(v('lon')),
+    opens_at: v('opens_at') || null, closes_at: v('closes_at') || null,
+    delivery_fee: Number(v('delivery_fee')), free_delivery_threshold: v('free_delivery_threshold') ? Number(v('free_delivery_threshold')) : null,
+    telegram_chat_id: v('telegram_chat_id') || null,
+  };
+  try {
+    const s = await call(`/stores/${storeId()}`, { method: 'PATCH', body });
+    const known = stores.find((x) => x.id === s.id);
+    if (known && known.name !== s.name) {
+      known.name = s.name; // sidebar picker and store names elsewhere
+      show();
+    }
+    toast(t('adm.set.saved'), { tone: 'ok' });
+  } catch (err) { $('storeError').textContent = err.message; }
+};
+
+// Team: members with disable/enable, open invite links with revoke, and the invite dialog.
+let team = null; // last /team answer, also feeds the audit "who" filter
+async function loadTeam() {
+  const seq = (loads.team = (loads.team || 0) + 1);
+  const sup = me.role === 'super';
+  const stop = skeletonRows($('teamRows'), sup ? 5 : 4, 3);
+  $('teamStoreCol').hidden = !sup;
+  try {
+    const r = (team = await call('/team?' + qs(scoped({}))));
+    stop();
+    if (seq !== loads.team) return;
+    stateBox($('teamError'));
+    $('teamRows').replaceChildren(...r.members.map((m) => el('tr', {},
+      el('td', {}, el('span', { className: 'cell-email', textContent: m.email }), m.id === me.id && el('span', { className: 'badge', textContent: t('adm.team.you') }),
+        el('div', { className: 'sizes show-sm', textContent: [roleName(m.role), sup && m.store_name].filter(Boolean).join(' · ') })),
+      el('td', { className: 'hide-sm', textContent: roleName(m.role) }),
+      sup ? el('td', { className: 'hide-sm', textContent: m.store_name || t('adm.all_stores') }) : null,
+      el('td', {}, el('span', { className: `badge ${m.disabled ? 'off' : 'ok'}`, textContent: t(m.disabled ? 'adm.team.disabled' : 'adm.team.active') })),
+      el('td', { className: 'row-actions' }, m.can_manage && el('button', { type: 'button', className: m.disabled ? '' : 'danger ghost', onclick: (e) => setDisabled(m, !m.disabled, e.currentTarget) },
+        t(m.disabled ? 'adm.team.enable' : 'adm.team.disable'))))));
+    $('inviteList').replaceChildren(...(r.invites.length ? r.invites.map((i) => el('li', { className: 'card invite-row' },
+      el('div', { className: 'grow' }, el('strong', { className: 'cell-email', textContent: i.email }),
+        el('div', { className: 'sizes', textContent: [roleName(i.role), sup && i.store_name, t('adm.team.expires', { at: fmt.dateTime(i.expires_at) })].filter(Boolean).join(' · ') })),
+      i.can_revoke && el('button', { type: 'button', className: 'icon-btn ghost', title: t('adm.team.revoke'), ariaLabel: t('adm.team.revoke'), onclick: () => revokeInvite(i) }, icon('trash'))))
+      : [el('li', { className: 'li-empty' }, emptyState({ ic: 'user', title: t('adm.team.no_invites'), text: t('adm.team.no_invites_text') }))]));
+  } catch (err) {
+    stop();
+    if (seq === loads.team) { $('teamRows').replaceChildren(); stateBox($('teamError'), err, () => loadTeam()); }
+  }
+}
+async function setDisabled(m, disabled, btn) {
+  if (disabled && !(await confirmDialog({ title: t('adm.team.disable_q', { email: m.email }), text: t('adm.team.disable_text'), ok: t('adm.team.disable'), danger: true }))) return btn.focus();
+  btn.disabled = true;
+  try {
+    await call(`/team/${m.id}`, { method: 'PATCH', body: { disabled } });
+    toast(t(disabled ? 'adm.team.disabled_done' : 'adm.team.enabled_done', { email: m.email }), { tone: 'ok' });
+    await loadTeam();
+  } catch (err) { toast(err.message, { tone: 'danger' }); btn.disabled = false; }
+}
+async function revokeInvite(i) {
+  if (!(await confirmDialog({ title: t('adm.team.revoke_q', { email: i.email }), text: t('adm.team.revoke_text'), ok: t('adm.team.revoke'), danger: true }))) return;
+  try {
+    await call(`/team/invites/${i.id}`, { method: 'DELETE' });
+    loadTeam();
+  } catch (err) { toast(err.message, { tone: 'danger' }); }
+}
+
+const inv = $('inviteForm');
+function inviteStep(done) {
+  $('inviteAsk').hidden = done;
+  $('inviteDone').hidden = !done;
+  $('inviteCreate').hidden = done;
+  $('inviteCopy').hidden = !done;
+  $('inviteCancel').textContent = t(done ? 'common.close' : 'common.cancel');
+}
+$('inviteBtn').onclick = () => {
+  const sup = me.role === 'super';
+  inv.reset();
+  inviteStep(false);
+  $('inviteDlgError').textContent = '';
+  $('inviteRoleWrap').hidden = !sup; // an owner invites managers only
+  $('inviteStoreWrap').hidden = !sup;
+  inv.store_id.replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
+  inv.store_id.value = scope || stores[0]?.id || '';
+  $('inviteDlg').showModal();
+};
+$('inviteCancel').onclick = () => $('inviteDlg').close();
+$('inviteDlg').addEventListener('close', () => {
+  $('inviteUrl').value = ''; // the link is shown once; don't leave it in the DOM
+  if (!$('inviteDone').hidden) loadTeam();
+  $('inviteBtn').focus();
+});
+inv.onsubmit = async (e) => {
+  e.preventDefault();
+  $('inviteDlgError').textContent = '';
+  const body = { email: inv.email.value.trim(), ...(me.role === 'super' && { role: inv.role.value, store_id: Number(inv.store_id.value) }) };
+  try {
+    const r = await call('/team/invites', { method: 'POST', body });
+    $('inviteUrl').value = r.url;
+    $('inviteExpiry').textContent = t('adm.team.link_expiry', { at: fmt.dateTime(r.expires_at) });
+    inviteStep(true);
+    $('inviteUrl').focus();
+    $('inviteUrl').select();
+  } catch (err) { $('inviteDlgError').textContent = err.message; }
+};
+$('inviteCopy').onclick = () => navigator.clipboard?.writeText($('inviteUrl').value)
+  .then(() => toast(t('adm.qr.copied'), { tone: 'ok' }), () => toast(t('common.error'), { tone: 'danger' }));
+
+// Audit log: newest first, filtered by what / who / dates (all in the hash), paged.
+const AUDIT_FIELDS = {
+  name: 'field.name', name_ru: 'field.name_ru', category: 'field.category', gender: 'field.gender', color: 'field.color', style: 'field.style',
+  price: 'field.price', discount_price: 'field.discount_price', temp_min: 'field.temp_min', temp_max: 'field.temp_max', waterproof: 'field.waterproof',
+  shelf_location: 'field.shelf_location', image_url: 'field.photo', stock: 'field.stock', status: 'field.status', payment_status: 'adm.orders.payment',
+  city: 'field.city', address: 'field.address', lat: 'adm.set.lat', lon: 'adm.set.lon', opens_at: 'adm.set.opens', closes_at: 'adm.set.closes',
+  delivery_fee: 'field.delivery_fee', free_delivery_threshold: 'field.free_threshold', telegram_chat_id: 'field.telegram_chat',
+  email: 'field.email', role: 'field.role', disabled: 'adm.team.status',
+};
+const MONEY = ['price', 'discount_price', 'delivery_fee', 'free_delivery_threshold'];
+function auditValue(k, v) {
+  if (v == null || v === '') return '—';
+  if (k === 'image_url') return t('adm.audit.photo');
+  if (k === 'disabled') return t(v ? 'adm.team.disabled' : 'adm.team.active');
+  if (typeof v === 'boolean') return t(v ? 'adm.audit.yes' : 'adm.audit.no');
+  if (MONEY.includes(k)) return money(v);
+  if (k === 'status') return t(`adm.status.${v}`);
+  if (k === 'payment_status') return t(`adm.pay.${v}`);
+  if (k === 'role') return roleName(v);
+  if (k === 'category') return cat(v);
+  return String(v);
+}
+// One line per changed field: "Narxi: 200 000 so'm → 180 000 so'm"; stock lists only the sizes that moved.
+function auditLines(l) {
+  const b = l.before || {}, a = l.after || {};
+  const keys = [...new Set([...Object.keys(b), ...Object.keys(a)])];
+  const one = !l.before || !l.after; // created or deleted: show the values, no arrows
+  return keys.flatMap((k) => {
+    const label = AUDIT_FIELDS[k] ? t(AUDIT_FIELDS[k]) : k;
+    if (k === 'stock') {
+      const sb = b.stock || {}, sa = a.stock || {};
+      const sizes = [...new Set([...Object.keys(sb), ...Object.keys(sa)])].filter((s) => one ? (sa[s] ?? sb[s]) > 0 : sb[s] !== sa[s]);
+      if (!sizes.length) return [];
+      const name = (s) => (s === 'ONE' ? t('common.size_one') : s);
+      return [`${label}: ${sizes.map((s) => (one ? `${name(s)} ${sa[s] ?? sb[s]}` : `${name(s)} ${sb[s] ?? 0} → ${sa[s] ?? 0}`)).join(', ')}`];
+    }
+    if (one && (a[k] ?? b[k]) == null) return [];
+    return [one ? `${label}: ${auditValue(k, a[k] ?? b[k])}` : `${label}: ${auditValue(k, b[k])} → ${auditValue(k, a[k])}`];
+  });
+}
+const auditSubject = (l) => (l.entity === 'order' ? t('adm.order.title', { id: l.entity_label }) : l.entity === 'fitting' ? t('adm.fit.cabin', { cabin: l.entity_label }) : l.entity_label || '');
+const af = $('auditFilters');
+for (const e of ['product', 'order', 'fitting', 'store', 'team', 'account']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
+af.entity.onchange = af.admin.onchange = af.from.onchange = af.to.onchange = () =>
+  setParams({ tab: 'audit', entity: af.entity.value, admin: af.admin.value, from: af.from.value, to: af.to.value });
+af.onsubmit = (e) => e.preventDefault();
+async function loadAudit() {
+  const seq = (loads.audit = (loads.audit || 0) + 1);
+  const p = route.params;
+  if (!team) { try { team = await call('/team?' + qs(scoped({}))); } catch {} }
+  af.admin.replaceChildren(af.admin.options[0], ...(team?.members || []).map((m) => el('option', { value: m.id, textContent: m.email })));
+  for (const k of ['entity', 'admin', 'from', 'to']) af[k].value = p[k] || '';
+  const stop = skeletonRows($('auditRows'), 4);
+  try {
+    const r = await call('/audit?' + qs(scoped({ entity: p.entity, admin_id: p.admin, from: p.from, to: p.to, limit: LIMIT, offset: offsetOf(p.page, LIMIT) })));
+    stop();
+    if (seq !== loads.audit) return;
+    stateBox($('auditError'));
+    const filtered = ['entity', 'admin', 'from', 'to'].some((k) => p[k]);
+    if (!r.items.length) {
+      emptyRow($('auditRows'), 4, filtered
+        ? { ic: 'search', title: t('adm.audit.none'), text: t('adm.orders.none_text'), action: el('button', { type: 'button', onclick: () => setParams({ tab: 'audit' }) }, t('adm.clear')) }
+        : { ic: 'clock', title: t('adm.audit.empty'), text: t('adm.audit.empty_text') });
+    } else {
+      $('auditRows').replaceChildren(...r.items.map((l) => {
+        const lines = auditLines(l);
+        const list = (xs) => el('ul', { className: 'changes' }, ...xs.map((x) => el('li', { textContent: x })));
+        return el('tr', {},
+          el('td', { className: 'num nowrap hide-sm', textContent: fmt.dateTime(l.created_at) }),
+          el('td', { className: 'hide-sm' }, el('span', { className: 'cell-email', textContent: l.admin_email }), showStore() && l.store_name && el('div', { className: 'sizes', textContent: l.store_name })),
+          el('td', {}, el('strong', { textContent: t(`adm.act.${l.action}`) }), el('div', { className: 'sizes', textContent: auditSubject(l) }),
+            el('div', { className: 'sizes show-sm cell-email', textContent: `${fmt.dateTime(l.created_at)} · ${l.admin_email}` })),
+          el('td', {}, lines.length > 4
+            ? el('details', {}, el('summary', { textContent: t('adm.audit.n_changes', { n: lines.length }) }), list(lines))
+            : list(lines)));
+      }));
+    }
+    pager($('auditPager'), r, (page) => { setParams({ ...p, page: page > 1 ? page : '' }); scrollTo(0, 0); });
+  } catch (err) {
+    stop();
+    if (seq !== loads.audit) return;
+    stateBox($('auditError'), err, () => loadAudit());
+    $('auditRows').replaceChildren();
+    $('auditPager').hidden = true;
+  }
+}
+
+// My account: facts, language, password change (every other session ends; this one gets a fresh token).
+function loadAccount() {
+  const fact = (k, v) => [el('dt', { textContent: t(k) }), el('dd', { textContent: v })];
+  $('accFacts').replaceChildren(...fact('adm.login.email', me.email), ...fact('adm.set.role', roleName(me.role)),
+    ...fact('common.store', me.role === 'super' ? t('adm.all_stores') : stores[0]?.name || ''));
+  $('pwForm').username.value = me.email;
+}
+$('pwForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  $('pwError').textContent = '';
+  if (f.password.value !== f.repeat.value) { $('pwError').textContent = t('adm.pw.mismatch'); return f.repeat.focus(); }
+  try {
+    const r = await call('/me/password', { method: 'POST', body: { current: f.current.value, password: f.password.value } });
+    store.set('sfToken', r.token);
+    f.reset();
+    f.username.value = me.email;
+    toast(t('adm.pw.done'), { tone: 'ok' });
+  } catch (err) { $('pwError').textContent = err.message; }
+};
+
+// ---------- Invite link (/admin/#/invite?token=…): set a password and join, no session needed.
+
+// On load or on a hash change (a signed-in admin pasting the link). The token leaves the address bar at once,
+// so it isn't kept in history or shown over a shoulder.
+function inviteFromHash() {
+  if (!location.hash.startsWith('#/invite')) return false;
+  const tok = new URLSearchParams(location.hash.split('?')[1]).get('token');
+  history.replaceState(null, '', location.pathname);
+  showInvite(tok);
+  return true;
+}
+async function showInvite(tok) {
+  const f = $('invite');
+  me = null; // stops the background polls while this screen is up
+  document.title = `${t('adm.inv.title')} · Smart Fit`;
+  for (const d of document.querySelectorAll('dialog[open]')) d.close();
+  $('inviteFields').hidden = $('inviteSubmit').hidden = false;
+  $('inviteLogin').hidden = true;
+  $('inviteError').textContent = $('inviteFor').textContent = '';
+  $('login').hidden = true;
+  $('app').hidden = true;
+  f.hidden = false;
+  try {
+    const r = await call('/invite/check', { method: 'POST', body: { token: tok } });
+    $('inviteFor').textContent = t('adm.inv.for', { email: r.email, role: roleName(r.role), store: r.store_name });
+    f.username.value = r.email;
+    f.password.focus();
+  } catch (err) {
+    $('inviteFields').hidden = $('inviteSubmit').hidden = true;
+    $('inviteLogin').hidden = false;
+    $('inviteError').textContent = err.message;
+  }
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    $('inviteError').textContent = '';
+    if (f.password.value !== f.repeat.value) { $('inviteError').textContent = t('adm.pw.mismatch'); return f.repeat.focus(); }
+    try {
+      const r = await call('/invite/accept', { method: 'POST', body: { token: tok, password: f.password.value } });
+      store.set('sfToken', r.token);
+      f.reset();
+      show();
+    } catch (err) { $('inviteError').textContent = err.message; }
+  };
+}
+
+if (!inviteFromHash()) show();
