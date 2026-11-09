@@ -275,6 +275,10 @@ test('every mutating admin route writes an audit row', async () => {
       const [{ id }] = await db('fitting_requests').insert({ store_id: tashkent, cabin: 2, items: JSON.stringify([]) }).returning('id');
       return admin('POST', `/fitting/${id}/done`, {}, managerToken);
     }],
+    'POST /fitting/:id/accept': ['fitting.accept', async () => {
+      const [{ id }] = await db('fitting_requests').insert({ store_id: tashkent, cabin: 3, items: JSON.stringify([]) }).returning('id');
+      return admin('POST', `/fitting/${id}/accept`, {}, managerToken);
+    }],
     'PATCH /stores/:id': ['store.update', () => admin('PATCH', `/stores/${tashkent}`, { delivery_fee: Math.floor(Math.random() * 1e6) + 1 }, ownerToken)],
     'POST /team/invites': ['team.invite', () => admin('POST', '/team/invites', { email: `inv${Date.now()}@smartfit.uz` }, ownerToken)],
     'DELETE /team/invites/:id': ['team.invite_revoke', async () => {

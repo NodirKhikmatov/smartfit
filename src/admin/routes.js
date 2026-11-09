@@ -36,7 +36,7 @@ export const canSee = (admin, storeId) => admin.stores === null || admin.stores.
 export const inStores = (admin, q, col) => (admin.stores === null ? q : q.whereIn(col, admin.stores));
 export async function storesOf(db, admin) {
   if (admin.role === 'super') return null;
-  if (admin.role === 'manager') return [admin.store_id];
+  if (admin.role === 'manager' || admin.role === 'staff') return [admin.store_id];
   return (await db('stores').where({ organization_id: admin.organization_id }).orderBy('id').select('id')).map((s) => s.id);
 }
 
@@ -147,6 +147,8 @@ const IMAGE_TYPES = [
   ['png', (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))],
   ['webp', (b) => b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP'],
 ];
+// What the staff role may call (task 28): its own account, the floor queue, fitting accept/done and order steps.
+export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/staff$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/orders\/\d+\/status$/];
 const STATS_TZ = 'Asia/Tashkent'; // every store is in Uzbekistan (UTC+5, no DST)
 export const DAY_MS = 86400000;
 export const dayKey = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: STATS_TZ });
@@ -234,6 +236,8 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     // A disabled admin, or a token from before the last password change / disable, is out at once.
     if (!admin || admin.disabled_at || tok.ver !== admin.token_version) throw fail(401, 'err.login_again');
     admin.stores = await storesOf(db, admin);
+    // Task 28: the staff role reaches only the shop-floor routes; every other admin route is 403 for it, whatever it is.
+    if (admin.role === 'staff' && !STAFF_ROUTES.some((re) => re.test(`${req.method} ${req.path}`))) throw fail(403, 'err.forbidden');
     req.admin = admin;
     next();
   });
@@ -594,10 +598,13 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const o = await findOrder(req);
     const to = req.body?.status;
     if (!ORDER_STATUSES.includes(to)) throw fail(400, 'err.invalid', { field: 'field.status' });
+    // Staff move orders forward only: a cancel means a refund, which stays with a manager.
+    if (req.admin.role === 'staff' && to === 'cancelled') throw fail(403, 'err.forbidden');
     if (!(await orderStep(req, o, 'order.status', (trx) => changeStatus(trx, o.id, to)))) {
       throw fail(409, o.payment_status === 'pending' && to !== 'cancelled' ? 'err.pay_first' : 'err.status_conflict');
     }
-    res.json(await adminView(await db('orders').where({ id: o.id }).first()));
+    const now = await db('orders').where({ id: o.id }).first();
+    res.json(req.admin.role === 'staff' ? { id: now.id, status: now.status } : await adminView(now)); // staff never get the phone or address
   });
   r.post('/orders/:id/pay', async (req, res) => {
     const o = await findOrder(req);
@@ -664,23 +671,63 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   });
 
   // Fitting-room requests (task 17): open ones from the last 2 hours, oldest first, with what to bring from which shelf.
-  r.get('/fitting', async (req, res) => {
-    const q = db('fitting_requests as f').join('stores as s', 's.id', 'f.store_id').where('f.status', 'new')
-      .where('f.created_at', '>', dbTime(Date.now() - FITTING_TTL_MS)).orderBy('f.id').limit(50)
-      .select('f.id', 'f.store_id', 's.name as store_name', 'f.cabin', 'f.items', 'f.created_at');
-    inStores(req.admin, q, 'f.store_id');
-    res.json(await fittingView(db, await q));
+  // Open ones (new or accepted) from the last 2 hours, with who accepted them.
+  const openFitting = (admin) => inStores(admin, db('fitting_requests as f').join('stores as s', 's.id', 'f.store_id').leftJoin('admins as a', 'a.id', 'f.accepted_by')
+    .where('f.status', 'new').where('f.created_at', '>', dbTime(Date.now() - FITTING_TTL_MS)).orderBy('f.id').limit(50)
+    .select('f.id', 'f.store_id', 's.name as store_name', 'f.cabin', 'f.items', 'f.created_at', 'f.accepted_at', 'f.accepted_by', 'a.email as accepted_email'), 'f.store_id');
+  r.get('/fitting', async (req, res) => res.json(await fittingView(db, await openFitting(req.admin))));
+  const findFitting = async (req) => {
+    const f = await inStores(req.admin, db('fitting_requests').where({ id: Number(req.params.id) || 0 }), 'store_id').first();
+    if (!f) throw fail(404, 'err.not_found');
+    return f;
+  };
+  // Task 28: "I'm on it". One person per request: a second accept by someone else is a 409; the same person again is a no-op.
+  r.post('/fitting/:id/accept', async (req, res) => {
+    const f = await findFitting(req);
+    await db.transaction(async (trx) => {
+      if (await trx('fitting_requests').where({ id: f.id, status: 'new' }).whereNull('accepted_at').update({ accepted_at: iso(Date.now()), accepted_by: req.admin.id })) {
+        return audit(trx, req.admin, { action: 'fitting.accept', storeId: f.store_id, entityId: f.id, label: f.cabin });
+      }
+      const now = await trx('fitting_requests').where({ id: f.id }).first('status', 'accepted_by');
+      if (now.status !== 'new' || now.accepted_by !== req.admin.id) throw fail(409, 'err.fitting_taken');
+    });
+    res.status(204).end();
   });
   r.post('/fitting/:id/done', async (req, res) => {
-    const q = db('fitting_requests').where({ id: Number(req.params.id) || 0 });
-    inStores(req.admin, q, 'store_id');
-    const f = await q.first();
-    if (!f) throw fail(404, 'err.not_found');
+    const f = await findFitting(req);
     await db.transaction(async (trx) => {
-      if (!(await trx('fitting_requests').where({ id: f.id, status: 'new' }).update({ status: 'done' }))) return; // already done: nothing changed
+      if (!(await trx('fitting_requests').where({ id: f.id, status: 'new' }).update({ status: 'done', done_at: iso(Date.now()), done_by: req.admin.id }))) return; // already done: nothing changed
       await audit(trx, req.admin, { action: 'fitting.done', storeId: f.store_id, entityId: f.id, label: f.cabin, before: { status: 'new' }, after: { status: 'done' } });
     });
     res.status(204).end();
+  });
+
+  // Task 28: the staff app's one poll. Open fitting requests, paid orders to collect (pick list by shelf, forward steps
+  // only), sizes running low, kiosks gone quiet, and today's fitting response times (who, how fast).
+  r.get('/staff', async (req, res) => {
+    const now = Date.now();
+    const orders = await inStores(req.admin, db('orders as o').join('stores as s', 's.id', 'o.store_id').where('o.payment_status', 'paid')
+      .whereIn('o.status', ['new', 'packing', 'shipping']).orderBy('o.paid_at').limit(50)
+      .select('o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.fulfillment', 'o.status', 'o.payment_status', 'o.paid_at'), 'o.store_id');
+    const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').whereIn('i.order_id', orders.map((o) => o.id))
+      .select('i.order_id', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity')
+      .orderByRaw('p.shelf_location is null, p.shelf_location, p.category, p.name');
+    const low = inStores(req.admin, db('product_stock as ps').join('products as p', 'p.id', 'ps.product_id').join('stores as st', 'st.id', 'p.store_id')
+      .whereRaw('ps.quantity - ps.reserved <= st.low_stock_threshold'), 'p.store_id');
+    const [{ n: lowTotal }] = await low.clone().count({ n: '*' });
+    const today = await inStores(req.admin, db('fitting_requests as f').leftJoin('admins as a', 'a.id', db.raw('coalesce(f.accepted_by, f.done_by)'))
+      .where('f.created_at', '>=', dbTime(dayStart(dayKey(now)))).select('f.cabin', 'f.created_at', 'f.accepted_at', 'f.done_at', 'a.email'), 'f.store_id');
+    res.json({
+      stores: await inStores(req.admin, db('stores').select('id', 'name').orderBy('id'), 'id'),
+      fitting: (await fittingView(db, await openFitting(req.admin))).map(({ accepted_by, ...f }) => ({ ...f, accepted_at: stamp(f.accepted_at), mine: accepted_by === req.admin.id })),
+      orders: orders.map((o) => ({ ...o, paid_at: stamp(o.paid_at), next: nextStatuses(o).filter((s) => s !== 'cancelled'),
+        items: items.filter((i) => i.order_id === o.id).map(({ order_id, ...i }) => i) })),
+      low: { total: Number(lowTotal), items: await low.select('p.id as product_id', 'p.store_id', 'p.name', 'p.name_ru', 'p.category', 'p.sku', 'p.shelf_location', 'ps.size',
+        db.raw('ps.quantity - ps.reserved as free')).orderByRaw('ps.quantity - ps.reserved, p.name, p.id').limit(50) },
+      // Quiet kiosks seen in the last day: a tablet retired for good stops alerting after 24 h.
+      kiosks: (await kioskStatus(inStores(req.admin, db('kiosks').where('last_seen_at', '>', iso(now - DAY_MS)), 'store_id'), now)).filter((k) => !k.online),
+      stats: responseStats(today),
+    });
   });
 
   settingsRoutes(r, db, { secret, lock, resolveStore });
@@ -828,6 +875,24 @@ function funnel(logs, orders) {
   };
 }
 
+// Today's fitting requests → how many, how many done, average seconds to accept and to bring, per person, and the last few.
+export function responseStats(rows) {
+  const secs = (from, to) => (to == null ? null : Math.max(0, Math.round((msOf(to) - msOf(from)) / 1000)));
+  const avg = (xs) => (xs.length ? Math.round(xs.reduce((a, x) => a + x, 0) / xs.length) : null);
+  const done = rows.filter((f) => f.done_at != null).map((f) => ({ cabin: f.cabin, email: f.email ?? null, accept_s: secs(f.created_at, f.accepted_at), done_s: secs(f.created_at, f.done_at), done_at: stamp(f.done_at) }));
+  const people = [...new Set(done.map((d) => d.email).filter(Boolean))];
+  return {
+    total: rows.length, done: done.length,
+    accept_s: avg(rows.map((f) => secs(f.created_at, f.accepted_at)).filter((x) => x !== null)),
+    done_s: avg(done.map((d) => d.done_s)),
+    by: people.map((email) => {
+      const mine = done.filter((d) => d.email === email);
+      return { email, n: mine.length, done_s: avg(mine.map((d) => d.done_s)) };
+    }).sort((a, b) => b.n - a.n || a.email.localeCompare(b.email)),
+    recent: done.sort((a, b) => msOf(b.done_at) - msOf(a.done_at)).slice(0, 5),
+  };
+}
+
 const FITTING_TTL_MS = 2 * 60 * 60 * 1000; // an unanswered request older than this is stale (the customer has left)
 // Rows → items with name, category and shelf, for the admin list and the staff Telegram message.
 export async function fittingView(db, rows) {
@@ -848,7 +913,7 @@ export async function createAdmin(db, { email, password, storeId = null, orgId =
     if (!s?.organization_id || (orgId !== null && orgId !== s.organization_id)) throw new Error('Invalid store_id');
     orgId = s.organization_id;
   } else if (orgId !== null && !(Number.isInteger(orgId) && (await db('organizations').where({ id: orgId }).first()))) throw new Error('Invalid organization');
-  const ok = role === 'super' ? orgId === null : role === 'owner' ? orgId !== null : role === 'manager' && storeId !== null;
+  const ok = role === 'super' ? orgId === null : role === 'owner' ? orgId !== null : ['manager', 'staff'].includes(role) && storeId !== null;
   if (!ok) throw new Error('Invalid role: super has no store; an owner needs an organisation, a manager a store');
   const [{ id }] = await db('admins').insert({ email, password_hash: await hashPassword(password), role, store_id: storeId, organization_id: orgId }).returning('id');
   return id;

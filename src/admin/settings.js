@@ -1,6 +1,6 @@
 // Settings API (task 19): store profile, team (one-time invites, disable), my account (password change) and the audit log.
 // Roles: super = every organisation; owner = every store of one organisation (task 22), their settings and managers;
-// manager = products and orders of one store.
+// manager = products and orders of one store; staff (task 28) = the shop-floor app of one store, nothing else.
 import { randomBytes, createHash } from 'node:crypto';
 import { fail, text, int, paging, dateRange, createAdmin, publicAdmin, canSee, inStores } from './routes.js';
 import { hashPassword, verifyPassword, signToken } from './auth.js';
@@ -8,7 +8,8 @@ import { audit, diff, AUDIT_ENTITIES } from './audit.js';
 import { publicBase } from '../qr.js';
 import { stamp } from '../cart/cart.js';
 
-export const ROLES = ['super', 'owner', 'manager'];
+export const ROLES = ['super', 'owner', 'manager', 'staff'];
+const STORE_ROLES = ['manager', 'staff']; // bound to one store; an owner invites and manages these
 export const INVITE_TTL_MS = 48 * 60 * 60 * 1000;
 const SYNC_KEYS_MAX = 10; // live keys per store
 const STORES_MAX = 50; // per organisation: a typo loop can't fill the table
@@ -19,11 +20,11 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const canEditStore = (admin, storeId) => admin.role === 'super' || (admin.role === 'owner' && canSee(admin, storeId));
 const ownerOrSuper = (admin) => {
-  if (admin.role === 'manager') throw fail(403, 'err.forbidden');
+  if (admin.role !== 'super' && admin.role !== 'owner') throw fail(403, 'err.forbidden');
 };
-// Who an admin may disable: super → any owner or manager; owner → managers of their organisation. Never yourself or a super.
+// Who an admin may disable: super → any owner, manager or staff; owner → managers and staff of their organisation. Never yourself or a super.
 const manages = (admin, target) => target.id !== admin.id && target.role !== 'super'
-  && (admin.role === 'super' || (admin.role === 'owner' && target.role === 'manager' && target.organization_id === admin.organization_id));
+  && (admin.role === 'super' || (admin.role === 'owner' && STORE_ROLES.includes(target.role) && target.organization_id === admin.organization_id));
 
 // Invite links work without a session: check shows who it is for, accept sets the password and signs in.
 export function publicTeamRoutes(r, db, { secret }) {
@@ -187,11 +188,11 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
       .select('i.id', 'i.email', 'i.role', 'i.store_id', 's.name as store_name', 'g.name as org_name', 'i.expires_at', 'i.created_at'), 'i');
     res.json({
       members: members.map(({ disabled_at, created_at, ...m }) => ({ ...m, disabled: disabled_at != null, created_at: stamp(created_at), can_manage: manages(req.admin, m) })),
-      invites: invites.map((i) => ({ ...i, expires_at: stamp(i.expires_at), created_at: stamp(i.created_at), can_revoke: req.admin.role === 'super' || i.role === 'manager' })),
+      invites: invites.map((i) => ({ ...i, expires_at: stamp(i.expires_at), created_at: stamp(i.created_at), can_revoke: req.admin.role === 'super' || STORE_ROLES.includes(i.role) })),
     });
   });
 
-  // { email, role, store_id, organization_id } → a one-time link, shown once. Owners invite managers to a store of their
+  // { email, role, store_id, organization_id } → a one-time link, shown once. Owners invite managers and staff to a store of their
   // organisation; super also invites owners, to an organisation (store_id optional: without it they make one in the wizard).
   r.post('/team/invites', async (req, res) => {
     ownerOrSuper(req.admin);
@@ -199,7 +200,7 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
     const email = typeof b.email === 'string' ? b.email.trim().toLowerCase() : '';
     if (!EMAIL.test(email) || email.length > 200) throw fail(400, 'err.invalid', { field: 'field.email' });
     const role = b.role ?? 'manager';
-    if (!['owner', 'manager'].includes(role)) throw fail(400, 'err.invalid', { field: 'field.role' });
+    if (!['owner', ...STORE_ROLES].includes(role)) throw fail(400, 'err.invalid', { field: 'field.role' });
     if (role === 'owner' && req.admin.role !== 'super') throw fail(403, 'err.forbidden');
     const ownerOrg = role === 'owner' && b.store_id == null;
     const storeId = ownerOrg ? null : await resolveStore(db, req.admin, b.store_id);
@@ -212,7 +213,7 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
   r.delete('/team/invites/:id', async (req, res) => {
     ownerOrSuper(req.admin);
     const q = db('admin_invites').where({ id: Number(req.params.id) || 0 }).whereNull('used_at');
-    if (req.admin.role !== 'super') q.where({ organization_id: req.admin.organization_id, role: 'manager' });
+    if (req.admin.role !== 'super') q.where({ organization_id: req.admin.organization_id }).whereIn('role', STORE_ROLES);
     const inv = await q.first();
     if (!inv) throw fail(404, 'err.not_found');
     await db.transaction(async (trx) => {

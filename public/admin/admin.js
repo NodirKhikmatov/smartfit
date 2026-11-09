@@ -161,7 +161,7 @@ for (const v of CATEGORIES) {
   $('form').category.append(el('option', { value: v, textContent: cat(v) }));
 }
 
-const roleName = (r) => t({ super: 'adm.role_super', owner: 'adm.role_owner', manager: 'adm.role_manager' }[r]);
+const roleName = (r) => t({ super: 'adm.role_super', owner: 'adm.role_owner', manager: 'adm.role_manager', staff: 'adm.role_staff' }[r]);
 
 async function show() {
   me = null;
@@ -170,6 +170,7 @@ async function show() {
   $('login').hidden = !!me;
   $('app').hidden = !me;
   if (!me) return;
+  if (me.role === 'staff') return location.replace('/staff/'); // task 28: the shop-floor role has only the staff app
   stores = await call('/stores');
   const sup = many();
   scope = sup && stores.some((s) => String(s.id) === store.get('sfAdminStore')) ? store.get('sfAdminStore') : '';
@@ -1187,7 +1188,7 @@ $('inviteBtn').onclick = () => {
   inv.reset();
   inviteStep(false);
   $('inviteDlgError').textContent = '';
-  $('inviteRoleWrap').hidden = me.role !== 'super'; // an owner invites managers only
+  inv.role.querySelector('[value=owner]').hidden = inv.role.querySelector('[value=owner]').disabled = me.role !== 'super'; // owners invite managers and staff
   $('inviteStoreWrap').hidden = !many();
   inv.store_id.replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
   inv.store_id.value = scope || stores[0]?.id || '';
@@ -1202,7 +1203,7 @@ $('inviteDlg').addEventListener('close', () => {
 inv.onsubmit = async (e) => {
   e.preventDefault();
   $('inviteDlgError').textContent = '';
-  const body = { email: inv.email.value.trim(), ...(me.role === 'super' && { role: inv.role.value }), ...(many() && { store_id: Number(inv.store_id.value) }) };
+  const body = { email: inv.email.value.trim(), role: inv.role.value, ...(many() && { store_id: Number(inv.store_id.value) }) };
   try {
     const r = await call('/team/invites', { method: 'POST', body });
     $('inviteUrl').value = r.url;

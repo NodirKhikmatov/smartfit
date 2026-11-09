@@ -135,6 +135,12 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
     'POST /orders/:id/returns': async () => refused(await admin('POST', `/orders/${B.order.id}/returns`, { key: 'b'.repeat(32), item_id: B.order.items[0].id, kind: 'return', reason: 'too_small', quantity: 1, restock: true }, ownerA)),
     'GET /fitting': async () => noB(await admin('GET', '/fitting', undefined, ownerA)),
     'POST /fitting/:id/done': async () => refused(await admin('POST', `/fitting/${B.fitting}/done`, {}, ownerA)),
+    'POST /fitting/:id/accept': async () => refused(await admin('POST', `/fitting/${B.fitting}/accept`, {}, ownerA)),
+    'GET /staff': async () => {
+      const r = await admin('GET', '/staff', undefined, ownerA);
+      noB(r);
+      assert.ok(!r.body.stores.some((s) => s.id === b1) && !JSON.stringify(r.body).includes('ORGB-ONLY-1'), 'no org B store or stock');
+    },
     'GET /stats': async () => {
       const r = await admin('GET', `/stats?store_id=${b1}`, undefined, ownerA);
       assert.equal(r.status, 200);

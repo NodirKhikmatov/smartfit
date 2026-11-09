@@ -51,6 +51,7 @@
           <li><a href="#/stats" data-route="stats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.route.stats"></span></a></li>
           <li><a href="#/demand" data-route="demand"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trend-up"></use></svg><span data-i18n="adm.route.demand"></span></a></li>
           <li><a href="#/qr" data-route="qr"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg><span data-i18n="adm.route.qr"></span></a></li>
+          <li><a href="/staff/" data-route="staff"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#user"></use></svg><span data-i18n="adm.route.staff"></span></a></li>
           <li id="navOrgs" hidden><a href="#/orgs" data-route="orgs"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#store"></use></svg><span data-i18n="adm.route.orgs"></span></a></li>
           <li class="nav-sep"><a href="#/settings" data-route="settings"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#settings"></use></svg><span data-i18n="adm.route.settings"></span></a></li>
         </ul>
@@ -525,7 +526,7 @@
     <div id="inviteAsk">
       <p class="muted" data-i18n="adm.team.invite_text"></p>
       <label class="field"><span data-i18n="field.email"></span> <input name="email" type="email" required maxlength="200" autocomplete="off"></label>
-      <label class="field" id="inviteRoleWrap"><span data-i18n="field.role"></span> <select name="role"><option value="manager" data-i18n="adm.role_manager"></option><option value="owner" data-i18n="adm.role_owner"></option></select></label>
+      <label class="field" id="inviteRoleWrap"><span data-i18n="field.role"></span> <select name="role"><option value="manager" data-i18n="adm.role_manager"></option><option value="staff" data-i18n="adm.role_staff"></option><option value="owner" data-i18n="adm.role_owner"></option></select><span class="hint" data-i18n="adm.team.staff_hint"></span></label>
       <label class="field" id="inviteStoreWrap"><span data-i18n="common.store"></span> <select name="store_id"></select></label>
     </div>
     <div id="inviteDone" hidden>

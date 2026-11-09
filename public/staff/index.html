@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f5a46">
+<title>Smart Fit</title>
+<link rel="manifest" href="/staff/manifest.webmanifest">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/shared/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/shared/apple-touch-icon.png">
+<link rel="preload" href="/shared/fonts/onest-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/shared/ui.css">
+<link rel="stylesheet" href="/staff/staff.css">
+<script type="module" src="/staff/staff.js"></script>
+</head>
+<body class="ui-compact">
+<form id="login" class="card raised" hidden>
+  <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
+  <h1 data-i18n="staff.login.title"></h1>
+  <div id="loginLang"></div>
+  <label><span data-i18n="adm.login.email"></span> <input name="email" type="email" autocomplete="username" required></label>
+  <label><span data-i18n="adm.login.password"></span> <input name="password" type="password" autocomplete="current-password" required></label>
+  <p class="error" id="loginError" role="alert"></p>
+  <button class="primary" data-i18n="adm.login.submit"></button>
+</form>
+
+<div id="app" hidden>
+  <header class="bar">
+    <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
+    <div id="lang"></div>
+    <button type="button" class="icon-btn ghost" id="logout" data-i18n-aria-label="adm.logout" data-i18n-title="adm.logout"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logout"></use></svg></button>
+  </header>
+  <div class="tabs" role="group" data-i18n-aria-label="staff.sections" id="tabs">
+    <button type="button" class="chip" data-tab="fitting"><span data-i18n="staff.tab.fitting"></span> <span class="count-pill" id="nFitting" hidden></span></button>
+    <button type="button" class="chip" data-tab="orders"><span data-i18n="staff.tab.orders"></span> <span class="count-pill" id="nOrders" hidden></span></button>
+    <button type="button" class="chip" data-tab="low"><span data-i18n="staff.tab.low"></span> <span class="count-pill" id="nLow" hidden></span></button>
+  </div>
+  <main id="main">
+    <p class="notice" id="sound"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#info"></use></svg><span><span data-i18n="staff.sound_text"></span> <button type="button" id="soundOn" data-i18n="staff.sound_on"></button></span></p>
+    <p class="notice danger" id="offline" role="alert" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#alert"></use></svg><span data-i18n="adm.offline"></span></p>
+    <div id="kiosks" role="status"></div>
+    <section id="fitting" data-section>
+      <h2 class="visually-hidden" data-i18n="staff.tab.fitting"></h2>
+      <div class="list" id="fitList"></div>
+      <section class="card stats" id="stats" aria-labelledby="statsTitle"><h3 id="statsTitle" data-i18n="staff.stats.title"></h3><div id="statsBody"></div></section>
+    </section>
+    <section id="orders" data-section hidden>
+      <h2 class="visually-hidden" data-i18n="staff.tab.orders"></h2>
+      <div class="list" id="orderList"></div>
+    </section>
+    <section id="low" data-section hidden>
+      <h2 class="visually-hidden" data-i18n="staff.tab.low"></h2>
+      <div id="lowList"></div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

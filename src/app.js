@@ -98,6 +98,8 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   for (const v of Object.values(VENDOR)) app.use(v.path, express.static(v.dir, IMMUTABLE));
   app.get(MODEL.path, (req, res, next) => (existsSync(MODEL.file) ? res.sendFile(MODEL.file, { ...IMMUTABLE, headers: { 'Content-Type': 'application/octet-stream' } }) : next()));
   app.use('/admin', express.static(fileURLToPath(new URL('../public/admin', import.meta.url))));
+  // Task 28: the staff PWA. /staff redirects to /staff/, so the service worker at /staff/sw.js covers the whole app.
+  app.use('/staff', express.static(fileURLToPath(new URL('../public/staff', import.meta.url))));
   app.use(createLandingRouter()); // / and /landing/*
   // Customer app: one page for the kiosk and the phone; app.js picks the mode from the path.
   const customer = fileURLToPath(new URL('../public/app', import.meta.url));

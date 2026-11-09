@@ -14,8 +14,8 @@ const srcFiles = (dir = 'src') => readdirSync(new URL(`../${dir}`, import.meta.u
   .flatMap((e) => (e.isDirectory() ? srcFiles(`${dir}/${e.name}`) : e.name.endsWith('.js') ? [`${dir}/${e.name}`] : []));
 
 // Every file with user-facing text. i18n.js counts only below the dictionary (its helpers use keys too).
-const PAGES = ['public/app/index.html', 'public/app/order.html', 'public/app/profile.html', 'public/admin/index.html', 'public/landing/index.html'];
-const SCRIPTS = ['public/app/app.js', 'public/app/idle.js', 'public/app/pose.js', 'public/app/flow.js', 'public/app/keypad.js', 'public/app/kiosk.js', 'public/app/order.js', 'public/app/profile.js', 'public/admin/admin.js', 'public/admin/util.js', 'public/admin/charts.js', 'public/shared/ui.js', 'public/landing/landing.js', ...srcFiles()];
+const PAGES = ['public/app/index.html', 'public/app/order.html', 'public/app/profile.html', 'public/admin/index.html', 'public/landing/index.html', 'public/staff/index.html'];
+const SCRIPTS = ['public/app/app.js', 'public/app/idle.js', 'public/app/pose.js', 'public/app/flow.js', 'public/app/keypad.js', 'public/app/kiosk.js', 'public/app/order.js', 'public/app/profile.js', 'public/admin/admin.js', 'public/admin/util.js', 'public/admin/charts.js', 'public/shared/ui.js', 'public/landing/landing.js', 'public/staff/staff.js', ...srcFiles()];
 const i18nSrc = read('public/shared/i18n.js');
 const sources = Object.fromEntries([...PAGES, ...SCRIPTS].map((f) => [f, read(f)]));
 sources['public/shared/i18n.js#helpers'] = i18nSrc.slice(i18nSrc.indexOf('export const DICT'));
@@ -63,7 +63,7 @@ test('no key is written twice in one language (a later copy would silently win)'
 });
 
 test('every key used in code exists, and every dictionary key is used', () => {
-  const NS = /^(err|field|cat|gender|lang|common|kiosk|adm|land)\.[a-z0-9_.]+$/;
+  const NS = /^(err|field|cat|gender|lang|common|kiosk|adm|land|staff)\.[a-z0-9_.]+$/;
   const used = new Set();
   for (const [f, text] of Object.entries(sources)) {
     // Quoted keys anywhere, including inside ${…} of a template literal.

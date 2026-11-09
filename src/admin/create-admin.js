@@ -1,5 +1,5 @@
-// Usage: npm run admin:create -- <email> [store_id] [owner|manager]
-// No store_id → super-admin; with store_id → that store's owner (default) or a manager.
+// Usage: npm run admin:create -- <email> [store_id] [owner|manager|staff]
+// No store_id → super-admin; with store_id → that store's owner (default), a manager or staff (shop-floor app only).
 // Password comes from ADMIN_PASSWORD or is asked on stdin (kept out of argv/shell history).
 import { createInterface } from 'node:readline/promises';
 import '../config.js';
@@ -8,7 +8,7 @@ import { createAdmin } from './routes.js';
 
 const [email, store, role] = process.argv.slice(2);
 if (!email) {
-  console.error('Usage: npm run admin:create -- <email> [store_id] [owner|manager]');
+  console.error('Usage: npm run admin:create -- <email> [store_id] [owner|manager|staff]');
   process.exit(1);
 }
 let password = process.env.ADMIN_PASSWORD;
@@ -21,7 +21,7 @@ const db = createDb();
 try {
   await db.migrate.latest();
   const id = await createAdmin(db, { email, password, storeId: store ? Number(store) : null, ...(role && { role }) });
-  console.log(`Admin #${id} yaratildi: ${email} (${store ? `do'kon ${store} ${role === 'manager' ? 'menejeri' : 'egasi'}` : 'bosh admin'})`);
+  console.log(`Admin #${id} yaratildi: ${email} (${store ? `do'kon ${store} ${{ manager: 'menejeri', staff: 'sotuvchisi' }[role] ?? 'egasi'}` : 'bosh admin'})`);
 } catch (err) {
   console.error(err.message);
   process.exitCode = 1;

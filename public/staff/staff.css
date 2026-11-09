@@ -1,0 +1,46 @@
+/* Staff app (task 28): phone first. Tokens and components come from /shared/ui.css; this file only places them. */
+#login { width: min(24rem, calc(100% - 2rem)); margin: 12vh auto; display: grid; gap: var(--s-4); padding: var(--s-6); }
+#login[hidden], #app[hidden] { display: none; }
+#login h1 { font: var(--weight-strong) var(--text-lg)/var(--leading-snug) var(--font-ui); }
+
+.bar {
+  position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: var(--s-2);
+  padding: max(var(--s-2), env(safe-area-inset-top)) var(--s-4) var(--s-2); background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.bar .wordmark { margin-right: auto; font-size: var(--text-lg); }
+.tabs { display: flex; gap: var(--s-2); padding: var(--s-3) var(--s-4) 0; max-width: 40rem; margin: 0 auto; }
+.tabs .chip { flex: 1; white-space: nowrap; justify-content: center; align-items: center; gap: var(--s-1); padding-inline: var(--s-2); }
+.tabs .chip[aria-pressed="true"] .count-pill { background: var(--accent-ink); color: var(--accent); }
+
+main { display: grid; gap: var(--s-4); max-width: 40rem; margin: 0 auto; padding: var(--s-4) var(--s-4) max(var(--s-6), env(safe-area-inset-bottom)); }
+main > .notice { margin: 0; }
+main section { display: grid; gap: var(--s-4); }
+main section[hidden] { display: none; }
+#kiosks { display: grid; gap: var(--s-2); }
+#kiosks:empty { display: none; }
+#kiosks .notice { margin: 0; }
+#soundOn { display: flex; min-height: 2.25rem; margin-top: var(--s-2); }
+
+.list { display: grid; gap: var(--s-3); }
+.req { display: grid; gap: var(--s-3); padding: var(--s-4); }
+.req.mine { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent), var(--shadow-1); }
+.req header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); }
+.req p { margin: 0; }
+.req .actions { margin-top: 0; }
+.req .actions button { flex: 1 1 10rem; }
+
+/* Pick list: shelf first (that is where you walk), then what, then size. */
+.picks { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+.picks li { display: grid; grid-template-columns: minmax(3.5rem, auto) 1fr auto; gap: var(--s-3); align-items: baseline; }
+.picks .shelf { font-weight: var(--weight-strong); font-variant-numeric: tabular-nums; color: var(--accent); }
+.picks .what { min-width: 0; overflow-wrap: anywhere; }
+.picks .size { font-weight: var(--weight-strong); white-space: nowrap; text-align: right; }
+.picks.low li { padding-bottom: var(--s-2); border-bottom: 1px solid var(--line); }
+.picks.low li:last-child { padding-bottom: 0; border-bottom: 0; }
+#lowList .card { padding: var(--s-4); display: grid; gap: var(--s-3); }
+#lowList .card p { margin: 0; }
+
+.stats { display: grid; gap: var(--s-2); padding: var(--s-4); }
+.stats p, .stats h4 { margin: 0; }
+.stats h4 { font-size: var(--text-sm); color: var(--ink-2); margin-top: var(--s-2); }
+.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); }

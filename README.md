@@ -8,8 +8,11 @@ outfit in the cart, pick it up and pay at the cashier, or order delivery and pay
 - Landing page: `/` (uz/ru): what it does, a live outfit card, the kiosk and phone demo links (`/kiosk?store=1`,
   `/m?store=1`) and a "Demo so'rash" form (stored, shown to the super-admin, sent to the product owner's Telegram)
 - Customer app: `/kiosk?store=<id>` (kiosk, big buttons, resets after 90 s idle) and `/m?store=<id>` (phone)
-- Admin: `/admin` (dashboard, products, stock, CSV import, orders, cashier, QR codes, stats and the pilot report,
-  settings, team, audit log; super-admin: organisations and demo requests)
+- Admin: `/admin` (dashboard, products, stock, CSV import, orders, returns, cashier, QR codes, stats and the pilot
+  report, Talab (missed demand), promo codes, settings, team, audit log; super-admin: organisations and demo requests)
+- Staff app: `/staff/` (installable phone app for the shop floor: fitting-room queue, orders to collect, low stock,
+  kiosk-offline alerts; the `staff` role sees nothing else)
+- Customer profile page: `/profile/<token>` (sent by the Telegram bot; only when a bot is configured)
 - API: `/api/...`, health check `GET /api/health`. Errors are `{ code, error }`: a stable `code` and the message in the
   request's language (`?lang=uz|ru` or `Accept-Language`, default Uzbek)
 - Languages: Uzbek (Latin, default) and Russian, one dictionary in `public/shared/i18n.js`; switch on the start screen
@@ -32,6 +35,19 @@ What phase 2 (tasks 13–22) added on top of the pilot:
 - **Inventory:** SKU and barcode, per-store low-stock threshold with Telegram alerts, a stock sync API for the till/1C.
 - **Hardening and kiosk:** strict CSP and security headers, per-IP rate limits, self-hosted MediaPipe/Leaflet/model,
   kiosk PWA (fullscreen, wake lock, attract loop, staff exit PIN) and a kiosk heartbeat in admin.
+
+What phase 3 (tasks 23–28, features seen in similar products) added:
+
+- **Fit learns from returns (23):** returns and size exchanges per order line with a reason, a "how did it fit?"
+  question after handover, and a per-product fit offset ("runs small → one size up") used by the size step.
+- **Missed demand (24):** every size the recommender wanted but had 0 of is logged (no personal data); admin → Talab
+  shows it with restock suggestions, the funnel drop-off by step and kiosk, and a weekly owner report in Telegram.
+- **Catalogue (25):** browse with filters, an item page with "Shu bilan yaxshi ketadi", other stores of the organisation
+  that have the size (reserve there for pickup), swap one item inside an outfit.
+- **Promotions (26):** promo codes per store or organisation and a "whole outfit" bundle discount, computed by the server.
+- **Customer profile through Telegram (27):** the shared contact verifies the phone (no SMS); sizes and body numbers
+  (never the photo), saved looks, order history, kiosk login by QR, "delete my data".
+- **Staff app (28):** `/staff/` for the shop floor (see below) and a new `staff` role.
 
 Stack: Node.js 22 + Express 5, Knex with PostgreSQL in production (SQLite file in development), vanilla JS frontend,
 Caddy for HTTPS.
@@ -122,8 +138,8 @@ The usual way, all in the browser:
 2. The owner opens it, sets a password and lands in the wizard: **store profile** (name, city, address, map point,
    delivery fee) → **products** ("Namuna faylni yuklab olish" gives a sample CSV in the import format; uploading the
    sample itself adds 52 demo items to try) → **QR code** to print, with the kiosk and phone links.
-3. Later the owner adds more stores (Sozlamalar → Do'kon → "Do'kon qo'shish", the same wizard) and invites managers
-   (Sozlamalar → Jamoa). The owner sees and manages every store of their organisation and nothing of any other.
+3. Later the owner adds more stores (Sozlamalar → Do'kon → "Do'kon qo'shish", the same wizard) and invites managers and
+   shop-floor staff (Sozlamalar → Jamoa, role "Menejer" or "Sotuvchi"). The owner sees and manages every store of their organisation and nothing of any other.
 
 Demo requests from the landing page show under the same **Tashkilotlar** page ("Ko'rib chiqildi" marks one handled).
 
@@ -136,11 +152,13 @@ Demo requests from the landing page show under the same **Tashkilotlar** page ("
    # organisation id (optional: without it the store joins the only organisation, or a new one on a fresh install)
    ```
    (Without docker: `npm run store:create -- ...`.)
-2. Create the store owner: `npm run admin:create -- owner@example.uz <store_id>` (add `manager` as a third argument for a
-   manager instead). No store id → super-admin (sees all stores). The password is asked on stdin, or taken from `ADMIN_PASSWORD`.
+2. Create the store owner: `npm run admin:create -- owner@example.uz <store_id>` (add `manager` or `staff` as a third
+   argument for a manager or a shop-floor account instead). No store id → super-admin (sees all stores). The password is asked on stdin, or taken from `ADMIN_PASSWORD`.
    Roles: **super** = every organisation; **owner** = every store of their organisation, plus the stores' settings
    (address, map pin, hours, delivery fee, staff Telegram chat), the team and the audit log; **manager** = products,
-   orders and the cashier of one store. An owner made with `admin:create` belongs to that store's organisation. After that the
+   orders and the cashier of one store; **staff** = only the staff app (`/staff/`) of one store: fitting-room requests,
+   moving paid orders forward (collect → hand over / ship), low stock and kiosk alerts. No products, prices, settings,
+   cashier or cancelling. An owner made with `admin:create` belongs to that store's organisation. After that the
    owner adds staff in `/admin` → Sozlamalar → Jamoa: "Taklif qilish" makes a one-time link (valid 48 hours) to send to the
    new manager, who sets their own password with it.
 3. Add products in `/admin` → "Kiyimlar" (form, or "CSV yuklash" for a whole catalogue), set stock per size, upload photos.
@@ -226,6 +244,25 @@ curl -X POST https://<domain>/api/sync/stock \
   `frame-ancestors 'none'`), `Referrer-Policy`, `Permissions-Policy: camera=(self)`, `X-Content-Type-Options` and
   `X-Frame-Options`. New UI code must not use inline `<script>`, `<style>` or `style="…"` (set styles from JS instead).
 
+## Staff app (shop floor)
+
+`/staff/` is a phone app for the people on the floor; owners and managers can use it too (signing in to `/admin` with a
+staff account goes straight there). Add it to the home screen (Android Chrome: "Add to Home screen", iPhone Safari:
+"Add to Home Screen"); it opens full screen, and its shell works offline (its service worker never caches the API).
+
+- **Kabinalar:** fitting-room requests from the kiosk/phone ("Kabinaga olib keling"), with the items and shelf.
+  "Qabul qilish" takes one (one person per request; others see who has it), "Olib borildi" closes it. The "Bugun" card
+  shows today's count, the average time to accept and to bring, per person, and the last few.
+- **Buyurtmalar:** paid orders to collect, oldest payment first, with a pick list sorted by shelf. Buttons are the server's
+  allowed next steps, the same rules as admin (Yig'ishni boshlash → Mijozga topshirildi, or → Yo'lga chiqarish →
+  Yetkazildi); each step updates the customer's status page and Telegram message. Staff can't cancel (a refund) or take
+  payment: that stays with a manager (Kassa).
+- **Ombor:** sizes at or below the store's low-stock threshold, sold out first.
+- **Alerts:** a red line when a kiosk seen in the last day has been quiet for 3 minutes.
+- The app polls every 5 s. A new request or a newly paid order rings twice and vibrates, after one tap on "Ovozni
+  yoqish" (browsers allow sound only after a tap). With the screen off, phones pause web pages, so keep the staff
+  Telegram chat (Sozlamalar → Do'kon) as the backup channel.
+
 ## Logs and error monitoring
 
 The server writes one JSON line per event to stdout/stderr (`{time, level, msg, ...}`), one line per request
@@ -309,6 +346,27 @@ the 2-week pilot.
 - [ ] Replace the landing screenshots (`public/landing/img/*.jpg`, taken from the demo store) with photos or
       screenshots of a real store when there is one, and confirm the sample texts in the onboarding fragment
       ("Bunyodkor ko'chasi 1", the 52-item count) still read right.
+
+**Phase 3 features (tasks 23–28)**
+- [ ] Customer profiles need the real Telegram bot (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`) and `PUBLIC_URL`:
+      on a real phone save a profile from the results screen → share the contact in the bot → the profile link
+      arrives; kiosk "Profil bilan kirish" QR scanned with a real phone fills the form; `/delete` removes it. (Task 27
+      was checked with simulated bot updates only.)
+- [ ] Profile consent text and the delete rule (finished orders keep number, items, sums and phone, lose name and
+      address) reviewed against Uzbek personal-data law.
+- [ ] Fit feedback: with `PUBLIC_URL` set, a handed-over order's status page and Telegram message ask "how did it fit?";
+      check a product's fit offset only after it has ≥ 5 answers. Refunds for returns are paid back by hand (cash or the
+      Payme/Click cabinet); staff know this.
+- [ ] Promo codes: decide the codes, dates and limits. The per-phone limit uses the typed phone (not verified), and
+      Telegram order messages show only the total.
+- [ ] Missed demand and funnel logs have no cleanup yet: decide a retention period. The funnel endpoint is public
+      (rate-limited), so treat its counts as indicative.
+- [ ] Other-store reserve works only between stores of one organisation; a reservation shows in the target store's
+      admin as an ordinary pending pickup order: tell that store's staff.
+- [ ] Staff app: invite every floor employee as "Sotuvchi"; install `/staff/` on the real staff phones (Android +
+      iPhone), tap "Ovozni yoqish", send a fitting request from the kiosk and hear it ring; collect → hand over an order
+      and see the customer's status page change. Real push notifications (screen off) are not built: keep the staff
+      Telegram chat set as the backup.
 
 **Known limits to watch during the pilot**
 - Per-IP rate limits and the open-cart cap (task 21) count a whole store's Wi-Fi as one client. If customers see
