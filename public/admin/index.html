@@ -50,6 +50,7 @@
           <li><a href="#/products" data-route="products"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><span data-i18n="adm.route.products"></span></a></li>
           <li><a href="#/stats" data-route="stats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.route.stats"></span></a></li>
           <li><a href="#/qr" data-route="qr"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg><span data-i18n="adm.route.qr"></span></a></li>
+          <li id="navOrgs" hidden><a href="#/orgs" data-route="orgs"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#store"></use></svg><span data-i18n="adm.route.orgs"></span></a></li>
           <li class="nav-sep"><a href="#/settings" data-route="settings"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#settings"></use></svg><span data-i18n="adm.route.settings"></span></a></li>
         </ul>
       </nav>
@@ -212,6 +213,90 @@
         <div class="qr-grid" id="qrGrid"></div>
       </section>
 
+      <!-- Organisations and landing-page demo requests (super-admin) -->
+      <section data-page="orgs" hidden>
+        <div class="page-head">
+          <p class="muted" data-i18n="adm.orgs.sub"></p>
+          <button type="button" class="primary" id="orgBtn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="adm.orgs.add"></span></button>
+        </div>
+        <div id="orgError"></div>
+        <div class="table-wrap">
+          <table class="table">
+            <caption class="visually-hidden" data-i18n="adm.route.orgs"></caption>
+            <thead><tr><th data-i18n="field.org_name"></th><th class="num" data-i18n="adm.orgs.stores"></th><th class="num hide-sm" data-i18n="adm.orgs.admins"></th><th class="num hide-sm" data-i18n="adm.orgs.invites"></th><th class="hide-sm" data-i18n="adm.orgs.created"></th></tr></thead>
+            <tbody id="orgRows"></tbody>
+          </table>
+        </div>
+        <h2 class="section-title" data-i18n="adm.demo.title"></h2>
+        <div id="demoError"></div>
+        <div class="table-wrap">
+          <table class="table demo-table">
+            <caption class="visually-hidden" data-i18n="adm.demo.title"></caption>
+            <thead><tr><th class="hide-sm" data-i18n="adm.orders.time"></th><th data-i18n="field.company"></th><th data-i18n="adm.demo.contact"></th><th class="hide-sm" data-i18n="field.message"></th><th><span class="visually-hidden" data-i18n="adm.team.status"></span></th></tr></thead>
+            <tbody id="demoRows"></tbody>
+          </table>
+        </div>
+        <nav class="pager" id="demoPager" data-i18n-aria-label="adm.pager"></nav>
+      </section>
+
+      <!-- Onboarding wizard for a new owner: store profile → products from CSV → QR print (#/welcome?store=…&step=…) -->
+      <section data-page="welcome" hidden>
+        <div class="wizard">
+          <ol class="steps" id="wizSteps" data-i18n-aria-label="adm.wiz.steps">
+            <li data-step="1" data-i18n="adm.wiz.step1"></li>
+            <li data-step="2" data-i18n="adm.wiz.step2"></li>
+            <li data-step="3" data-i18n="adm.wiz.step3"></li>
+          </ol>
+          <form class="card" id="wizStore" data-wiz="1" aria-labelledby="wizStoreTitle" hidden>
+            <h2 id="wizStoreTitle" tabindex="-1" data-i18n="adm.wiz.store_title"></h2>
+            <p class="muted" data-i18n="adm.wiz.store_text"></p>
+            <div class="form-grid">
+              <label class="field"><span data-i18n="field.name"></span> <input name="name" required maxlength="120" autocomplete="organization"></label>
+              <label class="field"><span data-i18n="field.city"></span> <input name="city" required maxlength="80" autocomplete="address-level2"></label>
+              <label class="field span-all"><span data-i18n="field.address"></span> <input name="address" required maxlength="200" autocomplete="street-address"></label>
+              <label class="field"><span data-i18n="adm.set.lat"></span> <input name="lat" type="number" step="any" min="-90" max="90" required inputmode="decimal"></label>
+              <label class="field"><span data-i18n="adm.set.lon"></span> <input name="lon" type="number" step="any" min="-180" max="180" required inputmode="decimal"></label>
+              <p class="hint span-all map-hint"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#map-pin"></use></svg><span data-i18n="adm.wiz.pin_hint"></span></p>
+              <label class="field"><span data-i18n="field.delivery_fee"></span> <input name="delivery_fee" type="number" min="0" step="1" required inputmode="numeric" value="0"></label>
+              <label class="field"><span data-i18n="field.free_threshold"></span> <input name="free_delivery_threshold" type="number" min="1" step="1" inputmode="numeric"><span class="hint" data-i18n="adm.set.free_hint"></span></label>
+            </div>
+            <p class="error" id="wizStoreError" role="alert"></p>
+            <div class="actions"><button class="primary"><span data-i18n="adm.wiz.create"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></button></div>
+          </form>
+          <form class="card" id="wizImport" data-wiz="2" aria-labelledby="wizImportTitle" hidden>
+            <h2 id="wizImportTitle" tabindex="-1" data-i18n="adm.wiz.import_title"></h2>
+            <p class="muted" data-i18n="adm.wiz.import_text"></p>
+            <a class="button" href="/admin/sample-products.csv" download="smart-fit-namuna.csv"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#download"></use></svg><span data-i18n="adm.wiz.sample"></span></a>
+            <label class="field"><span data-i18n="adm.import.file"></span> <input name="file" type="file" accept=".csv,text/csv" required></label>
+            <p class="notice" id="wizImportDone" role="status" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span></span></p>
+            <p class="error" id="wizImportError" role="alert"></p>
+            <ul class="error" id="wizImportErrors"></ul>
+            <div class="actions">
+              <a class="button ghost" id="wizSkip" data-i18n="adm.wiz.skip"></a>
+              <button class="primary" id="wizUpload"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#upload"></use></svg><span data-i18n="adm.import.submit"></span></button>
+              <a class="button primary" id="wizNext" hidden><span data-i18n="adm.wiz.next"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></a>
+            </div>
+          </form>
+          <section class="card" id="wizQr" data-wiz="3" aria-labelledby="wizQrTitle" hidden>
+            <h2 id="wizQrTitle" tabindex="-1" data-i18n="adm.wiz.qr_title"></h2>
+            <p class="muted" data-i18n="adm.wiz.qr_text"></p>
+            <div id="wizQrError"></div>
+            <div class="wiz-qr">
+              <div class="qr-img" id="wizQrImg"></div>
+              <div class="wiz-links">
+                <p class="muted qr-url" id="wizQrUrl"></p>
+                <a class="button" id="wizKiosk" target="_blank" rel="noopener"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#store"></use></svg><span data-i18n="adm.wiz.open_kiosk"></span></a>
+                <a class="button" id="wizPhone" target="_blank" rel="noopener"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg><span data-i18n="adm.wiz.open_phone"></span></a>
+              </div>
+            </div>
+            <div class="actions">
+              <button type="button" id="wizPrint"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#print"></use></svg><span data-i18n="adm.qrdlg.print"></span></button>
+              <a class="button primary" href="#/dashboard" id="wizDone"><span data-i18n="adm.wiz.done"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></a>
+            </div>
+          </section>
+        </div>
+      </section>
+
       <!-- Settings: store profile, team, audit log, my account (#/settings?tab=…) -->
       <section data-page="settings" hidden>
         <nav class="tabs-row" id="setTabs" data-i18n-aria-label="adm.set.sections"></nav>
@@ -220,7 +305,10 @@
           <form class="card settings-card" id="storeForm" aria-labelledby="storeTitle">
             <div class="panel-head">
               <div><h2 id="storeTitle" data-i18n="adm.set.store"></h2><p class="panel-sub" data-i18n="adm.set.store_sub"></p></div>
-              <label id="storePickWrap"><span data-i18n="common.store"></span> <select id="storePick"></select></label>
+              <div class="panel-tools">
+                <label id="storePickWrap"><span data-i18n="common.store"></span> <select id="storePick"></select></label>
+                <a class="button" href="#/welcome" id="storeAdd" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="adm.wiz.add_store"></span></a>
+              </div>
             </div>
             <div id="storeLoadError"></div>
             <p class="notice" id="storeReadOnly" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#info"></use></svg><span data-i18n="adm.set.read_only"></span></p>
@@ -365,6 +453,28 @@
       <button type="button" id="inviteCancel" data-i18n="common.cancel"></button>
       <button class="primary" id="inviteCreate" data-i18n="adm.team.create_link"></button>
       <button type="button" class="primary" id="inviteCopy" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="adm.qr.copy"></span></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="orgDlg" class="narrow" aria-labelledby="orgTitle">
+  <form id="orgForm" method="dialog">
+    <h2 id="orgTitle" data-i18n="adm.orgs.add"></h2>
+    <div id="orgAsk">
+      <p class="muted" data-i18n="adm.orgs.add_text"></p>
+      <label class="field"><span data-i18n="field.org_name"></span> <input name="name" required maxlength="120" autocomplete="off"></label>
+      <label class="field"><span data-i18n="adm.orgs.owner_email"></span> <input name="owner_email" type="email" required maxlength="200" autocomplete="off"></label>
+    </div>
+    <div id="orgDone" hidden>
+      <p data-i18n="adm.orgs.link_text"></p>
+      <label class="field"><span data-i18n="adm.team.link"></span> <input id="orgUrl" readonly></label>
+      <p class="hint" id="orgExpiry"></p>
+    </div>
+    <p class="error" id="orgDlgError" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="orgCancel" data-i18n="common.cancel"></button>
+      <button class="primary" id="orgCreate" data-i18n="adm.orgs.create"></button>
+      <button type="button" class="primary" id="orgCopy" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="adm.qr.copy"></span></button>
     </div>
   </form>
 </dialog>

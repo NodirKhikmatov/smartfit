@@ -14,8 +14,8 @@ const srcFiles = (dir = 'src') => readdirSync(new URL(`../${dir}`, import.meta.u
   .flatMap((e) => (e.isDirectory() ? srcFiles(`${dir}/${e.name}`) : e.name.endsWith('.js') ? [`${dir}/${e.name}`] : []));
 
 // Every file with user-facing text. i18n.js counts only below the dictionary (its helpers use keys too).
-const PAGES = ['public/app/index.html', 'public/app/order.html', 'public/admin/index.html'];
-const SCRIPTS = ['public/app/app.js', 'public/app/idle.js', 'public/app/pose.js', 'public/app/flow.js', 'public/app/keypad.js', 'public/app/kiosk.js', 'public/app/order.js', 'public/admin/admin.js', 'public/admin/util.js', 'public/admin/charts.js', 'public/shared/ui.js', ...srcFiles()];
+const PAGES = ['public/app/index.html', 'public/app/order.html', 'public/admin/index.html', 'public/landing/index.html'];
+const SCRIPTS = ['public/app/app.js', 'public/app/idle.js', 'public/app/pose.js', 'public/app/flow.js', 'public/app/keypad.js', 'public/app/kiosk.js', 'public/app/order.js', 'public/admin/admin.js', 'public/admin/util.js', 'public/admin/charts.js', 'public/shared/ui.js', 'public/landing/landing.js', ...srcFiles()];
 const i18nSrc = read('public/shared/i18n.js');
 const sources = Object.fromEntries([...PAGES, ...SCRIPTS].map((f) => [f, read(f)]));
 sources['public/shared/i18n.js#helpers'] = i18nSrc.slice(i18nSrc.indexOf('export const DICT'));
@@ -63,7 +63,7 @@ test('no key is written twice in one language (a later copy would silently win)'
 });
 
 test('every key used in code exists, and every dictionary key is used', () => {
-  const NS = /^(err|field|cat|gender|lang|common|kiosk|adm)\.[a-z0-9_.]+$/;
+  const NS = /^(err|field|cat|gender|lang|common|kiosk|adm|land)\.[a-z0-9_.]+$/;
   const used = new Set();
   for (const [f, text] of Object.entries(sources)) {
     // Quoted keys anywhere, including inside ${…} of a template literal.
@@ -107,7 +107,7 @@ test('no Uzbek or Russian text outside the dictionary (pages, browser JS, server
     const markup = text.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<!--[\s\S]*?-->/g, '');
     for (const m of markup.matchAll(/>([^<]+)</g)) {
       const s = m[1].trim();
-      if (s && !['Smart Fit', 'Smart Fit — Admin', '№', 'Telegram'].includes(s)) hits.push(`${f} text: ${s.slice(0, 60)}`);
+      if (s && !['Smart Fit', 'Smart Fit — Admin', '№', 'Telegram', 'Click', 'Payme', 'Excel', 'API', 'Open-Meteo', '© 2026 Smart Fit'].includes(s)) hits.push(`${f} text: ${s.slice(0, 60)}`);
     }
     // A format hint like the phone placeholder has no words to translate.
     for (const m of markup.matchAll(/\s(aria-label|title|placeholder|alt)="([^"]+)"/g)) if (/\p{L}/u.test(m[2])) hits.push(`${f} ${m[1]}: ${m[2]}`);

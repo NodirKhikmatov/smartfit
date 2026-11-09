@@ -146,7 +146,7 @@ test('invite: single use, expires, can be revoked; accepting signs in as a manag
   assert.match(inv.body.url, /\/admin\/#\/invite\?token=[0-9a-f]{32}$/);
   const token = tokenOf(inv.body.url);
   assert.ok(!(await db('admin_invites').where({ id: inv.body.id }).first()).token_hash.includes(token), 'only the hash is stored');
-  assert.deepEqual((await admin('POST', '/invite/check', { token })).body, { email: 'new.mgr@smartfit.uz', role: 'manager', store_name: (await db('stores').where({ id: tashkent }).first()).name });
+  assert.deepEqual((await admin('POST', '/invite/check', { token })).body, { email: 'new.mgr@smartfit.uz', role: 'manager', store_name: (await db('stores').where({ id: tashkent }).first()).name, org_name: (await db('organizations').join('stores', 'stores.organization_id', 'organizations.id').where('stores.id', tashkent).first('organizations.name')).name });
   assert.equal((await admin('POST', '/invite/accept', { token, password: 'short' })).status, 400);
   const ok = await admin('POST', '/invite/accept', { token, password: 'new-mgr-pass-1' });
   assert.equal(ok.status, 201);
@@ -280,6 +280,12 @@ test('every mutating admin route writes an audit row', async () => {
     'PATCH /team/:id': ['team.disable', async () => admin('PATCH', `/team/${(await member()).id}`, { disabled: true }, ownerToken)],
     'POST /sync-keys': ['sync_key.create', () => admin('POST', '/sync-keys', { name: 'Kassa' }, ownerToken)],
     'DELETE /sync-keys/:id': ['sync_key.revoke', async () => admin('DELETE', `/sync-keys/${(await admin('POST', '/sync-keys', { name: 'Eski' }, ownerToken)).body.id}`, undefined, ownerToken)],
+    'POST /stores': ['store.create', () => admin('POST', '/stores', { name: `Filial ${Date.now()}`, city: 'Toshkent', address: 'Chilonzor 1', lat: 41.28, lon: 69.2 }, ownerToken)],
+    'POST /orgs': ['org.create', () => admin('POST', '/orgs', { name: 'Audit brand', owner_email: `org${Date.now()}@smartfit.uz` }, superToken)],
+    'PATCH /demo-requests/:id': ['demo.handle', async () => {
+      const [{ id }] = await db('demo_requests').insert({ name: 'Aziz', phone: '+998901234567', company: 'Moda', lang: 'uz' }).returning('id');
+      return admin('PATCH', `/demo-requests/${id}`, { handled: true }, superToken);
+    }],
     'POST /me/password': ['account.password', async () => {
       const m = await member();
       return admin('POST', '/me/password', { current: 'walk-pass-1', password: 'walk-pass-2' }, await login(m.email, 'walk-pass-1'));

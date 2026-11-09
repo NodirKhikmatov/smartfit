@@ -132,11 +132,12 @@ test('TRUST_PROXY: behind Caddy the forwarded scheme reaches the QR URL; without
 
 test('createStore: validates and inserts; the new store serves recommendations', async () => {
   const ok = { name: 'Smart Fit Buxoro', city: 'Buxoro', lat: '39.7747', lon: '64.4286', address: 'Navoiy 1', delivery_fee: '15000', free_delivery_threshold: '' };
-  const id = await createStore(db, ok);
+  await assert.rejects(createStore(db, ok), /organization_id/, 'several organisations: the CLI must name one');
+  const id = await createStore(db, { ...ok, orgId: (await db('organizations').orderBy('id').first()).id });
   const s = await db('stores').where({ id }).first();
   assert.deepEqual([s.city, s.lat, s.delivery_fee, s.free_delivery_threshold], ['Buxoro', 39.7747, 15000, null]);
   for (const bad of [{ name: '' }, { lat: '91' }, { lon: 'x' }, { delivery_fee: '-1' }, { delivery_fee: '1.5' }, { free_delivery_threshold: '0' }, { address: undefined }]) {
-    await assert.rejects(createStore(db, { ...ok, ...bad }), JSON.stringify(bad));
+    await assert.rejects(createStore(db, { ...ok, orgId: 1, ...bad }), JSON.stringify(bad));
   }
   assert.equal((await call('GET', `/api/stores/${id}`)).body.city, 'Buxoro');
 });

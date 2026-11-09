@@ -5,13 +5,33 @@ in this store and in stock in the customer's size are suggested and sold. The cu
 in the browser, the photo is never stored), the outfits fit today's weather and budget, and the customer can put a whole
 outfit in the cart, pick it up and pay at the cashier, or order delivery and pay with Click/Payme.
 
+- Landing page: `/` (uz/ru): what it does, a live outfit card, the kiosk and phone demo links (`/kiosk?store=1`,
+  `/m?store=1`) and a "Demo so'rash" form (stored, shown to the super-admin, sent to the product owner's Telegram)
 - Customer app: `/kiosk?store=<id>` (kiosk, big buttons, resets after 90 s idle) and `/m?store=<id>` (phone)
-- Admin: `/admin` (products, stock, CSV import, orders, cashier, QR codes, stats and the pilot report)
+- Admin: `/admin` (dashboard, products, stock, CSV import, orders, cashier, QR codes, stats and the pilot report,
+  settings, team, audit log; super-admin: organisations and demo requests)
 - API: `/api/...`, health check `GET /api/health`. Errors are `{ code, error }`: a stable `code` and the message in the
   request's language (`?lang=uz|ru` or `Accept-Language`, default Uzbek)
 - Languages: Uzbek (Latin, default) and Russian, one dictionary in `public/shared/i18n.js`; switch on the start screen
   and in the admin header (the kiosk goes back to Uzbek after 90 s idle)
 - Full spec: [`docs/SPEC.md`](docs/SPEC.md), build log and decisions: [`TASKS.md`](TASKS.md)
+
+What phase 2 (tasks 13–22) added on top of the pilot:
+
+- **Organisations (SaaS tenants):** a brand is an organisation with one or more stores. Its owner manages every store of
+  the organisation and never sees another one; managers work in one store. A new customer is onboarded with an invite
+  link and a three-step wizard (store profile → products from CSV with a sample file → QR to print).
+- **Design system and languages:** one `ui.css` (tokens, components, self-hosted Onest + Cormorant fonts, icon sprite),
+  Uzbek and Russian everywhere, error messages in the request's language.
+- **Customer app:** attract screen with today's looks, step bar, outfit cards with photos, on-screen keypad on the kiosk,
+  size chips, history routing, store picker, demo catalogue of 82 items with drawn product images.
+- **Orders:** per-store order numbers, a public order status page, a live cart hold countdown, kiosk → phone cart handoff
+  by QR, and "bring it to the fitting room" requests to the staff Telegram chat.
+- **Admin back office:** sidebar shell, dashboard with KPIs and charts, paged/sorted/filtered lists, CSV export, cashier
+  page with receipts, store settings, team with one-time invites, roles (super / owner / manager), audit log.
+- **Inventory:** SKU and barcode, per-store low-stock threshold with Telegram alerts, a stock sync API for the till/1C.
+- **Hardening and kiosk:** strict CSP and security headers, per-IP rate limits, self-hosted MediaPipe/Leaflet/model,
+  kiosk PWA (fullscreen, wake lock, attract loop, staff exit PIN) and a kiosk heartbeat in admin.
 
 Stack: Node.js 22 + Express 5, Knex with PostgreSQL in production (SQLite file in development), vanilla JS frontend,
 Caddy for HTTPS.
@@ -55,11 +75,12 @@ docker stop smartfit-testpg
 | `PAYME_CHECKOUT_URL` | `https://test.paycom.uz` | Set `https://checkout.paycom.uz` for live payments. |
 | `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY` | empty | Click SHOP API. Off until all three are set. |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` | empty | Order status messages to customers. Both needed; empty → no messages. |
+| `TELEGRAM_OWNER_CHAT_ID` | empty | Your own Telegram chat id (the product owner): every landing-page demo request is sent there once. Empty → requests wait in `/admin` → Tashkilotlar and are sent once it is set. Needs the bot above. |
 | `POSTGRES_PASSWORD` | — | docker compose only: the database password (compose builds `DATABASE_URL` from it, so letters and digits only, e.g. `openssl rand -hex 24`). Required by compose. |
 | `DOMAIN` | `localhost` | docker compose only: the HTTPS domain Caddy serves and gets a certificate for. |
 | `NODE_ENV` | empty | `production` requires `ADMIN_TOKEN_SECRET` and blocks `npm run seed`. compose sets it. |
 | `TRUST_PROXY` | empty | Number of reverse proxies in front of the app. compose sets `1` (Caddy), so client IPs (login lock, rate limits, open-cart cap) and `https` (QR links) are right. Leave empty when the app is reached directly. |
-| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN` | 60, 30, 300, 20, 30, 5 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat and the kiosk exit PIN. Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
+| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN`, `RATE_DEMO_PER_MIN` | 60, 30, 300, 20, 30, 5, 3 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat, the kiosk exit PIN and the landing page's demo form. Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
 | `MAX_OPEN_CARTS_PER_IP` | 30 | Live carts (each holds stock for 15 min) one client IP may have at once; the next new cart → `429 too_many_carts`. `0` = off. |
 | `ERROR_WEBHOOK_URL` | empty | Optional error monitoring: every error log line is POSTed as JSON `{text, content, level, time}` (works with Slack, Discord and Mattermost incoming webhooks), at most 10 a minute. |
 
@@ -92,18 +113,34 @@ migrates the database on start. Check it: `curl https://fit.example.uz/api/healt
 - Local smoke test of the whole stack: `DOMAIN=localhost` (the default) and `https://localhost` (Caddy's own certificate,
   the browser will warn).
 
-## Adding a store and its staff
+## Onboarding a new customer (organisation)
+
+The usual way, all in the browser:
+
+1. Sign in to `/admin` as super-admin → **Tashkilotlar** → "Tashkilot qo'shish": the brand name and the owner's email.
+   You get a one-time link (valid 48 hours, shown once). Send it to the owner.
+2. The owner opens it, sets a password and lands in the wizard: **store profile** (name, city, address, map point,
+   delivery fee) → **products** ("Namuna faylni yuklab olish" gives a sample CSV in the import format; uploading the
+   sample itself adds 52 demo items to try) → **QR code** to print, with the kiosk and phone links.
+3. Later the owner adds more stores (Sozlamalar → Do'kon → "Do'kon qo'shish", the same wizard) and invites managers
+   (Sozlamalar → Jamoa). The owner sees and manages every store of their organisation and nothing of any other.
+
+Demo requests from the landing page show under the same **Tashkilotlar** page ("Ko'rib chiqildi" marks one handled).
+
+## Adding a store and its staff from the command line
 
 1. Create the store (the id it prints goes into the kiosk URL, the QR code and the manager account):
    ```bash
    docker compose exec app npm run store:create -- "Smart Fit Buxoro" "Buxoro" 39.7747 64.4286 "Navoiy ko'chasi 1" 25000 1000000
-   # name, city, lat, lon (for the weather), address, delivery fee in so'm, free delivery above (so'm, optional)
+   # name, city, lat, lon (for the weather), address, delivery fee in so'm, free delivery above (so'm, optional),
+   # organisation id (optional: without it the store joins the only organisation, or a new one on a fresh install)
    ```
    (Without docker: `npm run store:create -- ...`.)
 2. Create the store owner: `npm run admin:create -- owner@example.uz <store_id>` (add `manager` as a third argument for a
    manager instead). No store id → super-admin (sees all stores). The password is asked on stdin, or taken from `ADMIN_PASSWORD`.
-   Roles: **super** = every store; **owner** = one store, plus its settings (address, map pin, hours, delivery fee, staff
-   Telegram chat), its team and its audit log; **manager** = products, orders and the cashier of one store. After that the
+   Roles: **super** = every organisation; **owner** = every store of their organisation, plus the stores' settings
+   (address, map pin, hours, delivery fee, staff Telegram chat), the team and the audit log; **manager** = products,
+   orders and the cashier of one store. An owner made with `admin:create` belongs to that store's organisation. After that the
    owner adds staff in `/admin` → Sozlamalar → Jamoa: "Taklif qilish" makes a one-time link (valid 48 hours) to send to the
    new manager, who sets their own password with it.
 3. Add products in `/admin` → "Kiyimlar" (form, or "CSV yuklash" for a whole catalogue), set stock per size, upload photos.
@@ -254,6 +291,20 @@ the 2-week pilot.
 - [ ] Return and exchange terms written and shown to delivery customers (risk: wrong size delivered).
 - [ ] Staff know the cashier dialog ("Kassa"), the order statuses and that a cancelled paid order needs a manual refund.
 - [ ] Consent text on the camera screen reviewed (photo not saved; a small copy goes to Claude when the key is set).
+
+**Landing page and organisations (task 22)**
+- [ ] The landing's demo links open `/kiosk?store=1` and `/m?store=1`. On a fresh production install, create a demo
+      organisation and store first (so it gets id 1) and fill it with the sample CSV; on the migrated pilot database
+      store 1 is the real pilot store, so either accept that or change the two links in `public/landing/index.html`.
+- [ ] `TELEGRAM_OWNER_CHAT_ID` set and one demo request seen in your chat.
+- [ ] The demo form collects a name and a phone number: add a short privacy note / personal-data consent text that fits
+      Uzbek law, and decide how long requests are kept.
+- [ ] After the migration, all existing stores sit in one organisation named "Smart Fit": rename it if needed (SQL for
+      now, `update organizations set name = … where id = 1`) and check Sozlamalar → Jamoa: every former store owner is
+      now an owner of the whole organisation and can manage all its stores. Demote or disable anyone who should not.
+- [ ] Replace the landing screenshots (`public/landing/img/*.jpg`, taken from the demo store) with photos or
+      screenshots of a real store when there is one, and confirm the sample texts in the onboarding fragment
+      ("Bunyodkor ko'chasi 1", the 52-item count) still read right.
 
 **Known limits to watch during the pilot**
 - Per-IP rate limits and the open-cart cap (task 21) count a whole store's Wi-Fi as one client. If customers see

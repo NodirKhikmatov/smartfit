@@ -115,6 +115,22 @@ export async function flushLowStock(db, telegram) {
   }
 }
 
+// Landing-page demo requests (task 22) → the product owner's chat (TELEGRAM_OWNER_CHAT_ID). Outbox like the others:
+// without a chat id nothing is sent or marked, so requests wait until it is set; they also show in the super-admin.
+export async function flushDemoRequests(db, telegram, chatId = process.env.TELEGRAM_OWNER_CHAT_ID?.trim()) {
+  if (!telegram || !/^-?\d{1,15}$/.test(chatId ?? '')) return;
+  for (const d of await db('demo_requests').whereNull('notified_at').orderBy('id').limit(20)) {
+    const lines = [`Demo so'rovi #${d.id}: ${d.company}`, `${d.name}, ${d.phone}`, [d.city, d.stores && `${d.stores} ta do'kon`].filter(Boolean).join(', '), d.message].filter(Boolean);
+    try {
+      await telegram(Number(chatId), lines.join('\n'));
+    } catch (err) {
+      console.error(`telegram: demo request ${d.id} not sent:`, err.message);
+      if (err.code !== 403 && err.code !== 400) continue; // try again next round
+    }
+    await db('demo_requests').where({ id: d.id }).update({ notified_at: new Date().toISOString() });
+  }
+}
+
 // "/start <token>" from the order link → the order's messages go to this chat. The first chat to link keeps it.
 export async function handleUpdate(db, update, send) {
   const m = update?.message;
@@ -151,6 +167,7 @@ export function startNotifications(db, { telegram = telegramConfig(), sms = smsS
     await flushNotifications(db, { telegram: send, sms }).catch((err) => console.error('notify failed:', err.message));
     await flushFitting(db, send).catch((err) => console.error('fitting notify failed:', err.message));
     await flushLowStock(db, send).catch((err) => console.error('low-stock notify failed:', err.message));
+    await flushDemoRequests(db, send).catch((err) => console.error('demo request notify failed:', err.message));
     busy = false;
   };
   setInterval(flush, everyMs).unref();

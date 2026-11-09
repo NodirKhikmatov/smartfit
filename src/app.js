@@ -13,6 +13,8 @@ import { telegramConfig, telegramLink } from './notify/telegram.js';
 import { fail, langOf, errorBody } from './admin/routes.js';
 import { limitConfig, rateLimit } from './limits.js';
 import { createKioskRouter } from './kiosk.js';
+import { createDemoRouter } from './admin/orgs.js';
+import { createLandingRouter } from './landing.js';
 import { VENDOR, MODEL } from './vendor.js';
 
 // X1: same-origin only, plus OpenStreetMap tiles for the delivery map. 'wasm-unsafe-eval' lets MediaPipe compile its wasm
@@ -73,6 +75,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.post('/kiosk/exit', bucket('pin'));
   api.use('/kiosk', bucket('kiosk'), createKioskRouter(db));
   api.use('/orders', createOrderRouter(db, { methods, link }));
+  api.use('/demo-requests', bucket('demo'), createDemoRouter(db));
   api.use(() => { throw fail(404, 'err.not_found'); });
   app.use('/api', api);
   // Design system (ui.css, ui.js, icons, fonts) shared by the customer app and admin.
@@ -88,6 +91,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   for (const v of Object.values(VENDOR)) app.use(v.path, express.static(v.dir, IMMUTABLE));
   app.get(MODEL.path, (req, res, next) => (existsSync(MODEL.file) ? res.sendFile(MODEL.file, { ...IMMUTABLE, headers: { 'Content-Type': 'application/octet-stream' } }) : next()));
   app.use('/admin', express.static(fileURLToPath(new URL('../public/admin', import.meta.url))));
+  app.use(createLandingRouter()); // / and /landing/*
   // Customer app: one page for the kiosk and the phone; app.js picks the mode from the path.
   const customer = fileURLToPath(new URL('../public/app', import.meta.url));
   app.get(['/kiosk', '/m'], (req, res) => res.sendFile('index.html', { root: customer }));

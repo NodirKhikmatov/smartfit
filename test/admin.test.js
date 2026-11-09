@@ -66,7 +66,7 @@ test('login: wrong password and unknown email get the same 401', async () => {
   assert.deepEqual(a, b);
   const ok = await api('/login', { method: 'POST', body: { email: ' TASH@smartfit.uz ', password: 'tash-pass-1' } });
   assert.equal(ok.status, 200);
-  assert.deepEqual(ok.body.admin, { id: ok.body.admin.id, email: 'tash@smartfit.uz', role: 'manager', store_id: tashkent });
+  assert.deepEqual(ok.body.admin, { id: ok.body.admin.id, email: 'tash@smartfit.uz', role: 'manager', store_id: tashkent, organization_id: (await db('stores').where({ id: tashkent }).first()).organization_id });
   assert.ok(!('password_hash' in ok.body.admin));
 });
 

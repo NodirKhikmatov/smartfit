@@ -11,12 +11,13 @@ import * as handoff from './migrations/008_handoff.js';
 import * as team from './migrations/009_team.js';
 import * as inventory from './migrations/010_inventory.js';
 import * as hardening from './migrations/011_hardening.js';
+import * as orgs from './migrations/012_orgs.js';
 
 // Postgres returns bigint (count(*), Telegram chat ids, Payme ms times) as strings; all of ours fit in a double.
 pg.types.setTypeParser(20, Number);
 
 // Migrations are listed in code so they load the same way from any cwd.
-const migrations = { '001_init': init, '002_cart': cart, '003_payments': payments, '004_notify': notify, '005_pilot': pilot, '006_i18n': i18n, '007_catalogue': catalogue, '008_handoff': handoff, '009_team': team, '010_inventory': inventory, '011_hardening': hardening };
+const migrations = { '001_init': init, '002_cart': cart, '003_payments': payments, '004_notify': notify, '005_pilot': pilot, '006_i18n': i18n, '007_catalogue': catalogue, '008_handoff': handoff, '009_team': team, '010_inventory': inventory, '011_hardening': hardening, '012_orgs': orgs };
 const migrationSource = {
   getMigrations: async () => Object.keys(migrations),
   getMigrationName: (name) => name,

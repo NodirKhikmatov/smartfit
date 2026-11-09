@@ -50,10 +50,12 @@ async function call(path, opts = {}) {
   if (!res.ok) throw Object.assign(new Error(data.error || t('common.error')), { data });
   return data;
 }
-// A super-admin's store picker (sidebar) narrows every list and chart; a manager is pinned to their store by the server.
-const scoped = (params) => (me?.role === 'super' && scope ? { ...params, store_id: scope } : params);
+// A super-admin's (or a multi-store owner's) store picker (sidebar) narrows every list and chart; a manager is pinned to
+// their store by the server, an owner to their organisation's stores.
+const many = () => me?.role === 'super' || stores.length > 1;
+const scoped = (params) => (many() && scope ? { ...params, store_id: scope } : params);
 const storeName = (id) => stores.find((s) => s.id === id)?.name || '';
-const showStore = () => me?.role === 'super' && !scope;
+const showStore = () => many() && !scope;
 
 // ---------- Small building blocks
 
@@ -169,17 +171,18 @@ async function show() {
   $('app').hidden = !me;
   if (!me) return;
   stores = await call('/stores');
-  const sup = me.role === 'super';
+  const sup = many();
   scope = sup && stores.some((s) => String(s.id) === store.get('sfAdminStore')) ? store.get('sfAdminStore') : '';
   $('scope').replaceChildren(el('option', { value: '', textContent: t('adm.all_stores') }), ...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
   $('scope').value = scope;
   $('scopeWrap').hidden = !sup;
-  $('scopeName').hidden = sup;
+  $('scopeName').hidden = sup || !stores.length; // a new owner has no store until the wizard makes one
   $('scopeName').querySelector('span').textContent = stores[0]?.name || '';
   $('userEmail').textContent = me.email;
   $('userRole').textContent = roleName(me.role);
   $('avatar').textContent = me.email[0].toUpperCase();
   $('storeWrap').hidden = !sup;
+  $('navOrgs').hidden = me.role !== 'super';
   $('form').store_id.replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
   render();
   pollBadge();
@@ -233,6 +236,8 @@ const PAGES = {
   stats: { title: 'adm.route.stats', load: loadStats },
   qr: { title: 'adm.route.qr', load: loadQr },
   settings: { title: 'adm.route.settings', load: loadSettings },
+  orgs: { title: 'adm.route.orgs', load: loadOrgs },
+  welcome: { title: 'adm.route.welcome', load: loadWelcome },
 };
 const ACTIONS = {
   orders: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => exportOrders() }, icon('download'))],
@@ -245,6 +250,12 @@ const ACTIONS = {
 
 function render() {
   route = parseHash(location.hash);
+  // A new owner has no store yet: everything but the wizard and their account waits for it. Only owners add stores.
+  const welcome = me.role === 'owner' && !stores.length;
+  if ((welcome && !['welcome', 'settings'].includes(route.route)) || (route.route === 'welcome' && me.role !== 'owner') || (route.route === 'orgs' && me.role !== 'super')) {
+    route = parseHash(welcome ? '#/welcome' : '#/dashboard');
+    history.replaceState(null, '', buildHash(route.route));
+  }
   const name = route.route;
   for (const s of document.querySelectorAll('[data-page]')) s.hidden = s.dataset.page !== name;
   for (const a of document.querySelectorAll('#nav a')) a.dataset.route === name ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');
@@ -360,7 +371,7 @@ async function loadDashboard(quiet) {
     [el('li', { className: 'li-empty' }, emptyState({ ic: 'check', title: t('adm.dash.low_empty'), text: t('adm.dash.low_empty_text') }))]));
   $('dashKiosks').replaceChildren(...(d.kiosks.length ? d.kiosks.map((k) => el('li', {},
     el('div', { className: 'grow' }, el('strong', { textContent: t('adm.dash.kiosk_name', { id: k.id }) }),
-      el('div', { className: 'sizes', textContent: [!scope && me.role === 'super' && stores.find((s) => s.id === k.store_id)?.name, t('adm.dash.seen', { at: fmt.dateTime(k.last_seen_at) })].filter(Boolean).join(' · ') })),
+      el('div', { className: 'sizes', textContent: [!scope && many() && stores.find((s) => s.id === k.store_id)?.name, t('adm.dash.seen', { at: fmt.dateTime(k.last_seen_at) })].filter(Boolean).join(' · ') })),
     el('span', { className: `badge ${k.online ? 'ok' : 'off'}`, textContent: t(k.online ? 'adm.dash.online' : 'adm.dash.offline') }))) :
     [el('li', { className: 'li-empty' }, emptyState({ ic: 'info', title: t('adm.dash.kiosks_none'), text: t('adm.dash.kiosks_none_text') }))]));
 }
@@ -737,7 +748,7 @@ $('form').addEventListener('submit', async (e) => {
     shelf_location: f.shelf_location.value || null, sku: f.sku.value.trim() || null, barcode: f.barcode.value.trim() || null,
     stock: Object.fromEntries([...$('stock').querySelectorAll('input')].map((i) => [i.dataset.size, num(i.value) ?? 0])),
   };
-  if (!editing && me.role === 'super') body.store_id = Number(f.store_id.value);
+  if (!editing && many()) body.store_id = Number(f.store_id.value);
   $('save').disabled = true;
   try {
     await call(editing ? '/products/' + editing.id : '/products', { method: editing ? 'PATCH' : 'POST', body });
@@ -801,7 +812,7 @@ $('importForm').addEventListener('submit', async (e) => {
   const file = e.target.file.files[0];
   if (!file) return;
   try {
-    const r = await call('/products/import', { method: 'POST', raw: await file.text(), type: 'text/csv' });
+    const r = await call('/products/import?' + qs(scoped({})), { method: 'POST', raw: await file.text(), type: 'text/csv' });
     $('importDlg').close();
     toast(t('adm.import.done', { created: r.created, updated: r.updated }));
     reloadProducts();
@@ -897,7 +908,7 @@ function printQr(q) {
 const SET_TABS = [['store', 'adm.set.store'], ['team', 'adm.set.team'], ['sync', 'adm.set.sync'], ['audit', 'adm.set.audit'], ['account', 'adm.set.account']];
 function loadSettings() {
   const tabs = SET_TABS.filter(([k]) => me.role !== 'manager' || k === 'store' || k === 'account');
-  const tab = tabs.some(([k]) => k === route.params.tab) ? route.params.tab : 'store';
+  const tab = tabs.some(([k]) => k === route.params.tab) ? route.params.tab : stores.length ? 'store' : 'account'; // a new owner has no store yet
   $('setTabs').replaceChildren(...tabs.map(([k, label]) => {
     const a = el('a', { className: 'chip', href: buildHash('settings', k === 'store' ? {} : { tab: k }), textContent: t(label) });
     if (k === tab) a.setAttribute('aria-current', 'page');
@@ -910,7 +921,7 @@ function loadSettings() {
 // Store profile. A super-admin picks the store here (defaults to the sidebar's); everyone else has one.
 const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id', 'low_stock_threshold'];
 const sf = $('storeForm');
-const storeId = () => (me.role === 'super' ? $('storePick').value : String(me.store_id));
+const storeId = () => (many() ? $('storePick').value : String(stores[0]?.id ?? me.store_id));
 function mapLink() {
   const [lat, lon] = [sf.lat.value, sf.lon.value];
   $('mapLink').hidden = !(lat && lon);
@@ -918,8 +929,9 @@ function mapLink() {
 }
 sf.lat.oninput = sf.lon.oninput = mapLink;
 async function loadStore() {
-  const sup = me.role === 'super';
+  const sup = many();
   $('storePickWrap').hidden = !sup;
+  $('storeAdd').hidden = me.role !== 'owner';
   if (sup && $('storePick').options.length !== stores.length) {
     $('storePick').replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
     $('storePick').value = scope || stores[0]?.id || '';
@@ -972,7 +984,7 @@ sf.onsubmit = async (e) => {
 let team = null; // last /team answer, also feeds the audit "who" filter
 async function loadTeam() {
   const seq = (loads.team = (loads.team || 0) + 1);
-  const sup = me.role === 'super';
+  const sup = many();
   const stop = skeletonRows($('teamRows'), sup ? 5 : 4, 3);
   $('teamStoreCol').hidden = !sup;
   try {
@@ -1024,12 +1036,11 @@ function inviteStep(done) {
   $('inviteCancel').textContent = t(done ? 'common.close' : 'common.cancel');
 }
 $('inviteBtn').onclick = () => {
-  const sup = me.role === 'super';
   inv.reset();
   inviteStep(false);
   $('inviteDlgError').textContent = '';
-  $('inviteRoleWrap').hidden = !sup; // an owner invites managers only
-  $('inviteStoreWrap').hidden = !sup;
+  $('inviteRoleWrap').hidden = me.role !== 'super'; // an owner invites managers only
+  $('inviteStoreWrap').hidden = !many();
   inv.store_id.replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
   inv.store_id.value = scope || stores[0]?.id || '';
   $('inviteDlg').showModal();
@@ -1043,7 +1054,7 @@ $('inviteDlg').addEventListener('close', () => {
 inv.onsubmit = async (e) => {
   e.preventDefault();
   $('inviteDlgError').textContent = '';
-  const body = { email: inv.email.value.trim(), ...(me.role === 'super' && { role: inv.role.value, store_id: Number(inv.store_id.value) }) };
+  const body = { email: inv.email.value.trim(), ...(me.role === 'super' && { role: inv.role.value }), ...(many() && { store_id: Number(inv.store_id.value) }) };
   try {
     const r = await call('/team/invites', { method: 'POST', body });
     $('inviteUrl').value = r.url;
@@ -1059,7 +1070,7 @@ $('inviteCopy').onclick = () => navigator.clipboard?.writeText($('inviteUrl').va
 // Stock sync API keys: live keys with revoke, the create dialog (the key is shown once) and a curl sample.
 async function loadKeys() {
   const seq = (loads.keys = (loads.keys || 0) + 1);
-  const sup = me.role === 'super';
+  const sup = many();
   $('keySample').textContent = `curl -X POST ${location.origin}/api/sync/stock \\\n  -H "Authorization: Bearer sfk_…" -H "Content-Type: application/json" \\\n  -d '{"items":[{"sku":"SF-TP-01","size":"M","quantity":12}]}'`;
   try {
     const keys = await call('/sync-keys?' + qs(scoped({})));
@@ -1093,7 +1104,7 @@ $('keyBtn').onclick = () => {
   kf.reset();
   keyStep(false);
   $('keyDlgError').textContent = '';
-  $('keyStoreWrap').hidden = me.role !== 'super';
+  $('keyStoreWrap').hidden = !many();
   kf.store_id.replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
   kf.store_id.value = scope || stores[0]?.id || '';
   $('keyDlg').showModal();
@@ -1108,7 +1119,7 @@ kf.onsubmit = async (e) => {
   e.preventDefault();
   $('keyDlgError').textContent = '';
   try {
-    const r = await call('/sync-keys', { method: 'POST', body: { name: kf.name.value.trim(), ...(me.role === 'super' && { store_id: Number(kf.store_id.value) }) } });
+    const r = await call('/sync-keys', { method: 'POST', body: { name: kf.name.value.trim(), ...(many() && { store_id: Number(kf.store_id.value) }) } });
     $('keyValue').value = r.key;
     keyStep(true);
     $('keyValue').focus();
@@ -1210,7 +1221,7 @@ async function loadAudit() {
 function loadAccount() {
   const fact = (k, v) => [el('dt', { textContent: t(k) }), el('dd', { textContent: v })];
   $('accFacts').replaceChildren(...fact('adm.login.email', me.email), ...fact('adm.set.role', roleName(me.role)),
-    ...fact('common.store', me.role === 'super' ? t('adm.all_stores') : stores[0]?.name || ''));
+    ...fact('common.store', many() ? t('adm.all_stores') : stores[0]?.name || ''));
   $('pwForm').username.value = me.email;
 }
 $('pwForm').onsubmit = async (e) => {
@@ -1226,6 +1237,150 @@ $('pwForm').onsubmit = async (e) => {
     toast(t('adm.pw.done'), { tone: 'ok' });
   } catch (err) { $('pwError').textContent = err.message; }
 };
+
+// ---------- Organisations (super-admin): brands with their stores and admins, a new one with its owner's invite link,
+// and the landing page's demo requests.
+
+async function loadOrgs() {
+  const seq = (loads.orgs = (loads.orgs || 0) + 1);
+  const stop = [skeletonRows($('orgRows'), 5, 3), skeletonRows($('demoRows'), 5, 3)];
+  const offset = offsetOf(route.params.page, LIMIT);
+  try {
+    const [orgs, demo] = await Promise.all([call('/orgs'), call('/demo-requests?' + qs({ limit: LIMIT, offset }))]);
+    stop.forEach((f) => f());
+    if (seq !== loads.orgs) return;
+    stateBox($('orgError'));
+    stateBox($('demoError'));
+    const num = (n, cls = '') => el('td', { className: `num ${cls}`, textContent: n });
+    if (!orgs.length) emptyRow($('orgRows'), 5, { ic: 'store', title: t('adm.orgs.empty'), text: t('adm.orgs.empty_text') });
+    else $('orgRows').replaceChildren(...orgs.map((o) => el('tr', {}, el('td', {}, el('strong', { textContent: o.name })),
+      num(o.stores), num(o.admins, 'hide-sm'), num(o.invites, 'hide-sm'), el('td', { className: 'hide-sm', textContent: fmt.dateTime(o.created_at) }))));
+    if (!demo.items.length) emptyRow($('demoRows'), 5, { ic: 'user', title: t('adm.demo.empty'), text: t('adm.demo.empty_text') });
+    else $('demoRows').replaceChildren(...demo.items.map((d) => el('tr', { className: d.handled_at ? 'done' : '' },
+      el('td', { className: 'hide-sm num', textContent: fmt.dateTime(d.created_at) }),
+      el('td', {}, el('strong', { textContent: d.company }), el('div', { className: 'sizes', textContent: [d.city, d.stores && t('adm.demo.stores', { n: d.stores }), d.lang.toUpperCase()].filter(Boolean).join(' · ') })),
+      el('td', {}, el('div', { textContent: d.name }), el('a', { href: `tel:${d.phone}`, className: 'num', textContent: d.phone })),
+      el('td', { className: 'hide-sm msg', textContent: d.message || '—' }),
+      el('td', { className: 'row-actions' }, el('button', { type: 'button', className: d.handled_at ? 'ghost' : '', onclick: (e) => setHandled(d, !d.handled_at, e.currentTarget) },
+        t(d.handled_at ? 'adm.demo.reopen' : 'adm.demo.handle'))))));
+    pager($('demoPager'), demo, (page) => setParams({ ...route.params, page }));
+  } catch (err) {
+    stop.forEach((f) => f());
+    if (seq === loads.orgs) { $('orgRows').replaceChildren(); $('demoRows').replaceChildren(); stateBox($('orgError'), err, () => loadOrgs()); }
+  }
+}
+async function setHandled(d, handled, btn) {
+  btn.disabled = true;
+  try {
+    await call(`/demo-requests/${d.id}`, { method: 'PATCH', body: { handled } });
+    loadOrgs();
+  } catch (err) { toast(err.message, { tone: 'danger' }); btn.disabled = false; }
+}
+
+const of2 = $('orgForm');
+function orgStep(done) {
+  $('orgAsk').hidden = done;
+  $('orgDone').hidden = !done;
+  $('orgCreate').hidden = done;
+  $('orgCopy').hidden = !done;
+  $('orgCancel').textContent = t(done ? 'common.close' : 'common.cancel');
+}
+$('orgBtn').onclick = () => {
+  of2.reset();
+  orgStep(false);
+  $('orgDlgError').textContent = '';
+  $('orgDlg').showModal();
+};
+$('orgCancel').onclick = () => $('orgDlg').close();
+$('orgDlg').addEventListener('close', () => {
+  $('orgUrl').value = ''; // the owner's link is shown once
+  if (!$('orgDone').hidden) loadOrgs();
+  $('orgBtn').focus();
+});
+of2.onsubmit = async (e) => {
+  e.preventDefault();
+  $('orgDlgError').textContent = '';
+  try {
+    const r = await call('/orgs', { method: 'POST', body: { name: of2.name.value.trim(), owner_email: of2.owner_email.value.trim() } });
+    $('orgUrl').value = r.invite.url;
+    $('orgExpiry').textContent = t('adm.team.link_expiry', { at: fmt.dateTime(r.invite.expires_at) });
+    orgStep(true);
+    $('orgUrl').focus();
+    $('orgUrl').select();
+  } catch (err) { $('orgDlgError').textContent = err.message; }
+};
+$('orgCopy').onclick = () => navigator.clipboard?.writeText($('orgUrl').value)
+  .then(() => toast(t('adm.qr.copied'), { tone: 'ok' }), () => toast(t('common.error'), { tone: 'danger' }));
+
+// ---------- Onboarding wizard (#/welcome?store=ID&step=2|3), owners only: their first store after the invite, or
+// another one later from Settings. 1 store profile → 2 products from a CSV (sample file offered) → 3 the QR to print.
+
+const ws = $('wizStore'), wi = $('wizImport');
+let wizAt = '';
+function loadWelcome() {
+  const id = stores.find((s) => String(s.id) === route.params.store)?.id;
+  const step = id ? (route.params.step === '3' ? 3 : 2) : 1;
+  for (const li of $('wizSteps').children) Number(li.dataset.step) === step ? li.setAttribute('aria-current', 'step') : li.removeAttribute('aria-current');
+  for (const c of document.querySelectorAll('[data-wiz]')) c.hidden = Number(c.dataset.wiz) !== step;
+  const at = `${id}:${step}`;
+  if (at === wizAt) return; // a language switch or poll re-render keeps what was typed
+  wizAt = at;
+  if (step === 1) {
+    ws.reset();
+    $('wizStoreError').textContent = '';
+  } else if (step === 2) {
+    wi.reset();
+    $('wizImportDone').hidden = true;
+    $('wizImportError').textContent = '';
+    $('wizImportErrors').replaceChildren();
+    $('wizUpload').hidden = $('wizSkip').hidden = false;
+    $('wizNext').hidden = true;
+    $('wizSkip').href = $('wizNext').href = buildHash('welcome', { store: id, step: 3 });
+  } else loadWizQr(id);
+}
+ws.onsubmit = async (e) => {
+  e.preventDefault();
+  $('wizStoreError').textContent = '';
+  if (!ws.reportValidity()) return;
+  const v = (k) => ws[k].value.trim();
+  try {
+    const s = await call('/stores', { method: 'POST', body: { name: v('name'), city: v('city'), address: v('address'), lat: Number(v('lat')), lon: Number(v('lon')),
+      delivery_fee: Number(v('delivery_fee')), free_delivery_threshold: v('free_delivery_threshold') ? Number(v('free_delivery_threshold')) : null } });
+    toast(t('adm.wiz.created', { name: s.name }), { tone: 'ok' });
+    history.replaceState(null, '', buildHash('welcome', { store: s.id, step: 2 }));
+    show(); // the new store joins the pickers; renders step 2
+  } catch (err) { $('wizStoreError').textContent = err.message; }
+};
+wi.onsubmit = async (e) => {
+  e.preventDefault();
+  $('wizImportError').textContent = '';
+  $('wizImportErrors').replaceChildren();
+  const file = wi.file.files[0];
+  if (!file) return;
+  try {
+    const r = await call('/products/import?' + qs({ store_id: route.params.store }), { method: 'POST', raw: await file.text(), type: 'text/csv' });
+    $('wizImportDone').querySelector('span').textContent = t('adm.import.done', { created: r.created, updated: r.updated });
+    $('wizImportDone').hidden = false;
+    $('wizUpload').hidden = $('wizSkip').hidden = true;
+    $('wizNext').hidden = false;
+    $('wizNext').focus();
+  } catch (err) {
+    $('wizImportError').textContent = err.message;
+    $('wizImportErrors').replaceChildren(...(err.data?.errors || []).map((x) => el('li', { textContent: t('adm.import.line', { line: x.line, error: x.error }) })));
+  }
+};
+async function loadWizQr(id) {
+  stateBox($('wizQrError'));
+  try {
+    const q = await call(`/stores/${id}/qr`);
+    $('wizQrImg').innerHTML = q.svg; // generated by our server from the store URL (path data only)
+    $('wizQrImg').firstElementChild?.setAttribute('aria-hidden', 'true');
+    $('wizQrUrl').textContent = q.url;
+    $('wizPhone').href = q.url;
+    $('wizKiosk').href = `/kiosk?store=${id}`;
+    $('wizPrint').onclick = () => printQr(q);
+  } catch (err) { stateBox($('wizQrError'), err, () => loadWizQr(id)); }
+}
 
 // ---------- Invite link (/admin/#/invite?token=…): set a password and join, no session needed.
 
@@ -1251,7 +1406,7 @@ async function showInvite(tok) {
   f.hidden = false;
   try {
     const r = await call('/invite/check', { method: 'POST', body: { token: tok } });
-    $('inviteFor').textContent = t('adm.inv.for', { email: r.email, role: roleName(r.role), store: r.store_name });
+    $('inviteFor').textContent = t('adm.inv.for', { email: r.email, role: roleName(r.role), store: r.store_name || r.org_name });
     f.username.value = r.email;
     f.password.focus();
   } catch (err) {

@@ -12,6 +12,7 @@ import { dbTime } from '../recommend/routes.js';
 import { audit, diff } from './audit.js';
 import { kioskStatus } from '../kiosk.js';
 import { publicTeamRoutes, settingsRoutes, ROLES } from './settings.js';
+import { orgRoutes } from './orgs.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -24,7 +25,17 @@ export const fail = (status, key, vars = {}) => Object.assign(new Error(key), { 
 export const langOf = (req) => (LANGS.includes(req.query?.lang) ? req.query.lang : req.acceptsLanguages(...LANGS) || 'uz');
 export const errorBody = (lang, err) => ({ code: err.publicKey.slice(4), error: errorText(lang, err.publicKey, err.vars) });
 
-export const publicAdmin = ({ id, email, role, store_id }) => ({ id, email, role, store_id });
+export const publicAdmin = ({ id, email, role, store_id, organization_id }) => ({ id, email, role, store_id, organization_id });
+
+// Store scope (task 22): admin.stores is null for a super-admin (every store), every store of the organisation for an
+// owner, and the one store for a manager. Every admin query that touches store data goes through these two.
+export const canSee = (admin, storeId) => admin.stores === null || admin.stores.includes(Number(storeId));
+export const inStores = (admin, q, col) => (admin.stores === null ? q : q.whereIn(col, admin.stores));
+export async function storesOf(db, admin) {
+  if (admin.role === 'super') return null;
+  if (admin.role === 'manager') return [admin.store_id];
+  return (await db('stores').where({ organization_id: admin.organization_id }).orderBy('id').select('id')).map((s) => s.id);
+}
 
 export const text = (v, max, label, required) => {
   if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) {
@@ -218,12 +229,13 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const admin = tok ? await db('admins').where({ id: tok.sub }).first() : undefined;
     // A disabled admin, or a token from before the last password change / disable, is out at once.
     if (!admin || admin.disabled_at || tok.ver !== admin.token_version) throw fail(401, 'err.login_again');
+    admin.stores = await storesOf(db, admin);
     req.admin = admin;
     next();
   });
 
-  // Every product query goes through this: a manager only ever sees their own store.
-  const scoped = (admin) => (admin.role === 'super' ? db('products') : db('products').where('store_id', admin.store_id));
+  // Every product query goes through this: an owner sees their organisation's stores, a manager their own store.
+  const scoped = (admin) => inStores(admin, db('products'), 'store_id');
 
   async function findProduct(req) {
     const id = Number(req.params.id);
@@ -250,13 +262,13 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
 
   r.get('/stores', async (req, res) => {
     const q = db('stores').select('id', 'name', 'city').orderBy('id');
-    res.json(req.admin.role === 'super' ? await q : await q.where({ id: req.admin.store_id }));
+    res.json(await inStores(req.admin, q, 'id'));
   });
 
   // QR for the phone app (/m?store=ID), printed and placed next to the kiosk. Built offline as SVG.
   r.get('/stores/:id/qr', async (req, res) => {
     const id = Number(req.params.id);
-    if (req.admin.role !== 'super' && id !== req.admin.store_id) throw fail(404, 'err.store_not_found');
+    if (!canSee(req.admin, id)) throw fail(404, 'err.store_not_found');
     const store = Number.isInteger(id) ? await db('stores').where({ id }).first('id', 'name') : undefined;
     if (!store) throw fail(404, 'err.store_not_found');
     const url = `${publicBase(req)}/m?store=${store.id}`;
@@ -271,7 +283,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const dir = pick(req.query.dir, sort === 'name' ? ['asc', 'desc'] : ['desc', 'asc'], 'field.sort');
     const filter = pick(req.query.filter, ['', 'low', 'out', 'no_image'], 'field.filter');
     const q = db('products as p').leftJoin(stockTotals(db).as('s'), 's.product_id', 'p.id');
-    if (req.admin.role !== 'super') q.where('p.store_id', req.admin.store_id);
+    inStores(req.admin, q, 'p.store_id');
     if (req.query.store_id) q.where('p.store_id', Number(req.query.store_id) || 0);
     if (req.query.category) q.where('p.category', String(req.query.category));
     if (req.query.q) {
@@ -292,11 +304,14 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     res.json(p);
   });
 
-  // `storeId` undefined = not given. Super-admin must name an existing store; a manager may only name their own.
+  // `storeId` undefined = not given. Super-admin must name an existing store; an owner or manager may only name one of
+  // theirs, and without one gets their own store (an owner's first one, or the only one).
   async function resolveStore(q, admin, storeId) {
     if (admin.role !== 'super') {
-      if (storeId !== undefined && Number(storeId) !== admin.store_id) throw fail(403, 'err.store_forbidden');
-      return admin.store_id;
+      if (storeId !== undefined && !canSee(admin, storeId)) throw fail(403, 'err.store_forbidden');
+      const id = storeId !== undefined ? Number(storeId) : canSee(admin, admin.store_id) ? admin.store_id : admin.stores[0];
+      if (!id) throw fail(400, 'err.invalid', { field: 'field.store' }); // an owner who has no store yet
+      return id;
     }
     const id = Number(storeId);
     if (storeId === undefined || !Number.isInteger(id) || !(await q('stores').where({ id }).first())) throw fail(400, 'err.invalid', { field: 'field.store' });
@@ -389,7 +404,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
           try {
             if (cells.slice(cols.length).some((c) => c.trim())) throw fail(400, 'err.csv_extra');
             const body = {}, stock = {};
-            let id, storeId;
+            let id, storeId = req.query.store_id || undefined; // a row's store_id column wins over ?store_id
             cols.forEach((col, j) => {
               const raw = cells[j] ?? '';
               if (SIZE_COLS.includes(col)) {
@@ -470,7 +485,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   function ordersQuery(req) {
     const f = req.query;
     const q = db('orders as o').join('stores as s', 's.id', 'o.store_id');
-    if (req.admin.role !== 'super') q.where('o.store_id', req.admin.store_id);
+    inStores(req.admin, q, 'o.store_id');
     if (f.store_id) q.where('o.store_id', Number(f.store_id) || 0);
     if (f.status) q.where('o.status', pick(f.status, ORDER_STATUSES, 'field.status'));
     if (f.payment) q.where('o.payment_status', pick(f.payment, ['pending', 'paid', 'cancelled'], 'field.payment'));
@@ -526,7 +541,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   // Unseen-orders badge: how many orders (not cancelled) came in after the last one this admin saw, and the newest id.
   r.get('/orders/unseen', async (req, res) => {
     const q = db('orders').whereNot('status', 'cancelled');
-    if (req.admin.role !== 'super') q.where('store_id', req.admin.store_id);
+    inStores(req.admin, q, 'store_id');
     const since = Math.max(Number.parseInt(req.query.since, 10) || 0, 0);
     const [{ n }] = await q.clone().where('id', '>', since).count({ n: '*' });
     const [{ latest }] = await q.clone().max({ latest: 'id' });
@@ -538,7 +553,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     await releaseExpired(db);
     const id = Number(req.params.id);
     const q = db('orders').where({ id: Number.isInteger(id) && id > 0 ? id : 0 });
-    if (req.admin.role !== 'super') q.where('store_id', req.admin.store_id);
+    inStores(req.admin, q, 'store_id');
     const o = await q.first();
     if (!o) throw fail(404, 'err.order_not_found');
     return o;
@@ -578,12 +593,12 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const q = db('fitting_requests as f').join('stores as s', 's.id', 'f.store_id').where('f.status', 'new')
       .where('f.created_at', '>', dbTime(Date.now() - FITTING_TTL_MS)).orderBy('f.id').limit(50)
       .select('f.id', 'f.store_id', 's.name as store_name', 'f.cabin', 'f.items', 'f.created_at');
-    if (req.admin.role !== 'super') q.where('f.store_id', req.admin.store_id);
+    inStores(req.admin, q, 'f.store_id');
     res.json(await fittingView(db, await q));
   });
   r.post('/fitting/:id/done', async (req, res) => {
     const q = db('fitting_requests').where({ id: Number(req.params.id) || 0 });
-    if (req.admin.role !== 'super') q.where('store_id', req.admin.store_id);
+    inStores(req.admin, q, 'store_id');
     const f = await q.first();
     if (!f) throw fail(404, 'err.not_found');
     await db.transaction(async (trx) => {
@@ -594,10 +609,11 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   });
 
   settingsRoutes(r, db, { secret, lock, resolveStore });
+  orgRoutes(r, db);
 
   // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.
   const inScope = (req, q, col = 'store_id') => {
-    if (req.admin.role !== 'super') q.where(col, req.admin.store_id);
+    inStores(req.admin, q, col);
     if (req.query.store_id) q.where(col, Number(req.query.store_id) || 0);
     return q;
   };
@@ -713,20 +729,37 @@ export async function fittingView(db, rows) {
   return parsed.map((r) => ({ ...r, items: r.items.map((i) => ({ ...products.find((p) => p.id === i.product_id), size: i.size })) }));
 }
 
-// No store = super-admin; with a store the role is 'owner' (default) or 'manager'.
-export async function createAdmin(db, { email, password, storeId = null, role = storeId ? 'owner' : 'super' }) {
+// No store and no organisation = super-admin. An owner belongs to an organisation (store optional: their first store,
+// made in the onboarding wizard); a manager to one store. With a store, the organisation is that store's.
+export async function createAdmin(db, { email, password, storeId = null, orgId = null, role = storeId || orgId ? 'owner' : 'super' }) {
   email = String(email ?? '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Invalid email');
   if (typeof password !== 'string' || password.length < 8 || password.length > 200) throw new Error('Password must be 8–200 characters');
-  if (storeId !== null && !(Number.isInteger(storeId) && storeId > 0)) throw new Error('Invalid store_id');
-  if (!ROLES.includes(role) || (role === 'super') !== (storeId === null)) throw new Error('Invalid role: super has no store; owner and manager need one');
-  const [{ id }] = await db('admins').insert({ email, password_hash: await hashPassword(password), role, store_id: storeId }).returning('id');
+  if (storeId !== null) {
+    const s = Number.isInteger(storeId) && storeId > 0 ? await db('stores').where({ id: storeId }).first('organization_id') : undefined;
+    if (!s?.organization_id || (orgId !== null && orgId !== s.organization_id)) throw new Error('Invalid store_id');
+    orgId = s.organization_id;
+  } else if (orgId !== null && !(Number.isInteger(orgId) && (await db('organizations').where({ id: orgId }).first()))) throw new Error('Invalid organization');
+  const ok = role === 'super' ? orgId === null : role === 'owner' ? orgId !== null : role === 'manager' && storeId !== null;
+  if (!ok) throw new Error('Invalid role: super has no store; an owner needs an organisation, a manager a store');
+  const [{ id }] = await db('admins').insert({ email, password_hash: await hashPassword(password), role, store_id: storeId, organization_id: orgId }).returning('id');
   return id;
+}
+
+// The CLI's organisation: the one given, else the only one, else a new one named after the store (a fresh install).
+async function orgFor(db, orgId, name) {
+  if (orgId != null) {
+    if (!(await db('organizations').where({ id: Number(orgId) || 0 }).first())) throw new Error('organization_id: no such organisation');
+    return Number(orgId);
+  }
+  const orgs = await db('organizations').limit(2).select('id');
+  if (orgs.length > 1) throw new Error('Several organisations exist: pass organization_id');
+  return orgs[0]?.id ?? (await db('organizations').insert({ name: String(name ?? '').trim().slice(0, 120) || 'Smart Fit' }).returning('id'))[0].id;
 }
 
 // New store (CLI: npm run store:create). Weather comes from lat/lon; the delivery fee is a flat city fee in so'm,
 // free above free_delivery_threshold (empty = never free).
-export async function createStore(db, { name, city, lat, lon, address, delivery_fee = 0, free_delivery_threshold = null }) {
+export async function createStore(db, { name, city, lat, lon, address, delivery_fee = 0, free_delivery_threshold = null, orgId }) {
   const str = (v, label) => {
     const s = String(v ?? '').trim();
     if (!s || s.length > 200) throw new Error(`${label}: 1–200 characters`);
@@ -742,7 +775,7 @@ export async function createStore(db, { name, city, lat, lon, address, delivery_
   if (!Number.isInteger(fee) || (free !== null && !Number.isInteger(free))) throw new Error('Prices must be whole numbers');
   const [{ id }] = await db('stores').insert({
     name: str(name, 'name'), city: str(city, 'city'), address: str(address, 'address'),
-    lat: num(lat, -90, 90, 'lat'), lon: num(lon, -180, 180, 'lon'), delivery_fee: fee, free_delivery_threshold: free,
+    lat: num(lat, -90, 90, 'lat'), lon: num(lon, -180, 180, 'lon'), delivery_fee: fee, free_delivery_threshold: free, organization_id: await orgFor(db, orgId, name),
   }).returning('id');
   return id;
 }

@@ -1,0 +1,53 @@
+﻿sku;name;name_ru;category;gender;color;style;price;discount_price;temp_min;temp_max;waterproof;shelf_location;XS;S;M;L;XL;XXL;36;37;38;39;40;41;42;43;44;45;ONE
+SF-OW-01;Qishki puxovik;Зимний пуховик;outerwear;unisex;qora;casual;1290000;990000;-25;0;ha;A-1;3;3;3;3;3;3;;;;;;;;;;;
+SF-OW-02;Parka;Парка;outerwear;unisex;zaytun;casual;1150000;;-20;5;ha;A-2;3;3;3;3;3;3;;;;;;;;;;;
+SF-OW-03;Yengil puxovik;Лёгкий пуховик;outerwear;unisex;to'q ko'k;sport;690000;;-12;10;yo'q;A-3;3;3;3;3;3;3;;;;;;;;;;;
+SF-OW-09;Plashch;Плащ;outerwear;unisex;bej;classic;890000;750000;5;19;ha;A-4;3;3;3;3;3;3;;;;;;;;;;;
+SF-OW-10;Yengil vetrovka;Лёгкая ветровка;outerwear;unisex;to'q ko'k;sport;420000;;8;22;ha;A-5;3;3;3;3;3;3;;;;;;;;;;;
+SF-OW-11;Jinsi kurtka;Джинсовая куртка;outerwear;unisex;ko'k;casual;380000;;10;22;yo'q;A-6;3;3;3;3;3;3;;;;;;;;;;;
+SF-OW-12;Yomg'irpo'sh;Дождевик;outerwear;unisex;sariq;casual;290000;;8;24;ha;A-7;3;3;3;3;3;3;;;;;;;;;;;
+SF-OW-16;Issiq jilet;Тёплый жилет;outerwear;unisex;qora;sport;350000;;-5;12;yo'q;A-8;3;3;3;3;3;3;;;;;;;;;;;
+SF-OW-17;Softshell kurtka;Куртка софтшелл;outerwear;unisex;kulrang;sport;540000;;0;16;ha;A-9;3;3;3;3;3;3;;;;;;;;;;;
+SF-TP-01;Issiq sviter;Тёплый свитер;top;unisex;kulrang;casual;380000;;-25;10;yo'q;A-10;3;3;3;3;3;3;;;;;;;;;;;
+SF-TP-02;Hudi;Худи;top;unisex;qora;sport;290000;240000;-10;18;yo'q;A-11;3;3;3;3;3;3;;;;;;;;;;;
+SF-TP-05;Paxta futbolka;Хлопковая футболка;top;unisex;oq;casual;120000;99000;18;40;yo'q;A-12;3;3;3;3;3;3;;;;;;;;;;;
+SF-TP-08;Vodolazka;Водолазка;top;unisex;qora;classic;220000;;-20;12;yo'q;A-13;3;3;3;3;3;3;;;;;;;;;;;
+SF-TP-13;Bazaviy futbolka;Базовая футболка;top;unisex;qora;casual;89000;;18;40;yo'q;A-14;3;3;3;3;3;3;;;;;;;;;;;
+SF-TP-16;Sport futbolka;Спортивная футболка;top;unisex;kulrang;sport;140000;;15;40;yo'q;A-15;3;3;3;3;3;3;;;;;;;;;;;
+SF-TP-17;Oksford ko'ylak;Оксфордская рубашка;top;unisex;havorang;classic;290000;;8;28;yo'q;A-16;3;3;3;3;3;3;;;;;;;;;;;
+SF-TP-18;Flis kofta;Флисовая кофта;top;unisex;zaytun;sport;270000;;-10;12;yo'q;A-17;3;3;3;3;3;3;;;;;;;;;;;
+SF-TP-19;Termo longsliv;Термолонгслив;top;unisex;oq;sport;150000;;-20;8;yo'q;A-18;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-01;Isitilgan jinsi;Утеплённые джинсы;bottom;unisex;to'q ko'k;casual;420000;;-25;8;yo'q;A-19;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-02;Klassik jinsi;Классические джинсы;bottom;unisex;ko'k;casual;350000;290000;-10;25;yo'q;A-20;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-03;Chino shim;Брюки чинос;bottom;male;bej;classic;310000;;8;32;yo'q;A-21;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-04;Midi yubka;Юбка миди;bottom;female;qora;classic;270000;;10;32;yo'q;A-22;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-05;Shorti;Шорты;bottom;unisex;kulrang;sport;150000;;22;40;yo'q;A-23;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-06;Jun shim;Шерстяные брюки;bottom;female;kulrang;classic;390000;;-20;10;yo'q;A-24;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-07;Klassik shim;Классические брюки;bottom;male;qora;classic;450000;;-10;25;yo'q;A-25;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-08;Jogger;Джоггеры;bottom;unisex;qora;sport;220000;;-5;20;yo'q;A-26;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-09;Issiq jogger;Утеплённые джоггеры;bottom;unisex;kulrang;sport;260000;;-20;5;yo'q;A-27;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-10;Keng shim;Широкие брюки;bottom;female;krem;classic;360000;;12;32;yo'q;A-28;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-11;Plisse yubka;Юбка плиссе;bottom;female;yashil;casual;290000;;15;32;yo'q;A-29;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-12;Zig'ir shim;Льняные брюки;bottom;male;krem;casual;340000;;22;40;yo'q;A-30;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-13;Jinsi shorti;Джинсовые шорты;bottom;female;ko'k;casual;160000;;22;40;yo'q;A-31;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-15;Issiq leggings;Тёплые леггинсы;bottom;female;qora;sport;180000;;-15;10;yo'q;A-32;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-16;Slim jinsi;Джинсы слим;bottom;female;qora;casual;320000;;-5;25;yo'q;A-33;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-17;Chino shorti;Шорты чинос;bottom;male;to'q ko'k;casual;190000;;22;40;yo'q;A-34;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-18;Premium jinsi;Джинсы премиум;bottom;male;to'q ko'k;casual;690000;;-10;22;yo'q;A-35;3;3;3;3;3;3;;;;;;;;;;;
+SF-BT-19;Yengil shim;Лёгкие брюки;bottom;male;kulrang;classic;330000;;18;38;yo'q;A-36;3;3;3;3;3;3;;;;;;;;;;;
+SF-SH-01;Qishki etik;Зимние сапоги;shoes;unisex;qora;casual;950000;790000;-25;5;ha;A-37;;;;;;;3;3;3;3;3;3;3;3;3;3;
+SF-SH-02;Charm botinka;Кожаные ботинки;shoes;unisex;jigarrang;classic;820000;;-10;15;ha;A-38;;;;;;;3;3;3;3;3;3;3;3;3;3;
+SF-SH-03;Krossovka;Кроссовки;shoes;unisex;oq;sport;590000;;5;30;yo'q;A-39;;;;;;;3;3;3;3;3;3;3;3;3;3;
+SF-SH-04;Sandal;Сандалии;shoes;unisex;bej;casual;230000;;22;40;yo'q;A-40;;;;;;;3;3;3;3;3;3;3;3;3;3;
+SF-SH-05;Chelsi;Челси;shoes;unisex;qora;classic;690000;;-5;18;yo'q;A-41;;;;;;;3;3;3;3;3;3;3;3;3;3;
+SF-SH-08;Yugurish krossovkasi;Беговые кроссовки;shoes;unisex;kulrang;sport;450000;;5;32;yo'q;A-42;;;;;;;3;3;3;3;3;3;3;3;3;3;
+SF-SH-09;Keda;Кеды;shoes;unisex;oq;casual;180000;;15;35;yo'q;A-43;;;;;;;3;3;3;3;3;3;3;3;3;3;
+SF-SH-11;Trekking botinka;Треккинговые ботинки;shoes;unisex;jigarrang;sport;740000;;-15;12;ha;A-44;;;;;;;3;3;3;3;3;3;3;3;3;3;
+SF-SH-12;Shippak;Шлёпанцы;shoes;unisex;qora;sport;99000;;25;40;yo'q;A-45;;;;;;;3;3;3;3;3;3;3;3;3;3;
+SF-SH-14;Qishki krossovka;Зимние кроссовки;shoes;unisex;qora;sport;650000;560000;-10;10;ha;A-46;;;;;;;3;3;3;3;3;3;3;3;3;3;
+SF-SH-16;Mo'ynali botinka;Ботинки с мехом;shoes;unisex;bej;casual;780000;;-25;3;ha;A-47;;;;;;;3;3;3;3;3;3;3;3;3;3;
+SF-AC-01;Jun sharf;Шерстяной шарф;accessory;unisex;qizil;casual;140000;;-25;5;yo'q;A-48;;;;;;;;;;;;;;;;;3
+SF-AC-02;Trikotaj shapka;Вязаная шапка;accessory;unisex;kulrang;casual;90000;;-25;5;yo'q;A-49;;;;;;;;;;;;;;;;;3
+SF-AC-03;Kepka;Кепка;accessory;unisex;qora;sport;85000;70000;18;40;yo'q;A-50;;;;;;;;;;;;;;;;;3
+SF-AC-04;Charm qo'lqop;Кожаные перчатки;accessory;unisex;jigarrang;classic;210000;;-25;5;yo'q;A-51;;;;;;;;;;;;;;;;;3
+SF-AC-08;Quyosh ko'zoynagi;Солнцезащитные очки;accessory;unisex;qora;casual;250000;;15;40;yo'q;A-52;;;;;;;;;;;;;;;;;3

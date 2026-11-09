@@ -277,7 +277,7 @@ a.kpi:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); col
 .map-hint .icon { margin-right: var(--s-1); }
 .map-hint a[hidden] { display: none; }
 .cell-email { overflow-wrap: anywhere; margin-right: var(--s-2); }
-.team-table .row-actions button { width: auto; padding: 0 var(--s-3); }
+.team-table .row-actions button, .demo-table .row-actions button { width: auto; padding: 0 var(--s-3); }
 .invite-list { display: grid; gap: var(--s-2); list-style: none; margin: 0; padding: 0; }
 .invite-row { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-3) var(--s-4); }
 .invite-row .grow { flex: 1; min-width: 0; }
@@ -294,7 +294,7 @@ a.kpi:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); col
 .grid .check { align-self: end; min-height: var(--control-h); }
 .stock { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr)); gap: var(--s-2); }
 #imgPreview { max-width: 10rem; max-height: 10rem; border-radius: var(--r-md); display: block; margin: var(--s-2) 0; }
-#importErrors { max-height: 15rem; overflow: auto; font-size: var(--text-sm); padding-left: var(--s-5); }
+#importErrors, #wizImportErrors { max-height: 15rem; overflow: auto; font-size: var(--text-sm); padding-left: var(--s-5); }
 dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }
 
 /* Fitting-room requests above the orders table (task 17) */
@@ -304,3 +304,16 @@ dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }
 .fitting ul { list-style: none; margin: 0; padding: 0; }
 .fitting li { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); padding: var(--s-2) 0; border-top: 1px solid var(--line); }
 .fitting li:first-child { border-top: 0; }
+
+/* Task 22: store tools in the settings head, the onboarding wizard, demo requests. */
+.panel-tools { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s-3); }
+.wizard { max-width: 48rem; }
+.wizard .card > h2 { margin-top: 0; }
+.wizard .card > h2:focus { outline: none; }
+.wizard .card > .button { margin-bottom: var(--s-4); }
+.wiz-qr { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-5); margin: var(--s-4) 0; }
+.wiz-links { display: grid; gap: var(--s-3); justify-items: start; min-width: 0; flex: 1 1 14rem; }
+.wiz-links .qr-url { margin: 0; overflow-wrap: anywhere; }
+.demo-table td { vertical-align: top; }
+.demo-table .msg { max-width: 24rem; white-space: pre-line; overflow-wrap: anywhere; }
+.demo-table tr.done td { color: var(--ink-3); }

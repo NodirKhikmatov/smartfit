@@ -1,7 +1,8 @@
 // Settings API (task 19): store profile, team (one-time invites, disable), my account (password change) and the audit log.
-// Roles: super = every store; owner = one store, its settings and its managers; manager = products and orders of one store.
+// Roles: super = every organisation; owner = every store of one organisation (task 22), their settings and managers;
+// manager = products and orders of one store.
 import { randomBytes, createHash } from 'node:crypto';
-import { fail, text, int, paging, dateRange, createAdmin, publicAdmin } from './routes.js';
+import { fail, text, int, paging, dateRange, createAdmin, publicAdmin, canSee, inStores } from './routes.js';
 import { hashPassword, verifyPassword, signToken } from './auth.js';
 import { audit, diff, AUDIT_ENTITIES } from './audit.js';
 import { publicBase } from '../qr.js';
@@ -10,31 +11,32 @@ import { stamp } from '../cart/cart.js';
 export const ROLES = ['super', 'owner', 'manager'];
 export const INVITE_TTL_MS = 48 * 60 * 60 * 1000;
 const SYNC_KEYS_MAX = 10; // live keys per store
+const STORES_MAX = 50; // per organisation: a typo loop can't fill the table
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 const iso = (ms) => new Date(ms).toISOString(); // written and compared as ISO strings, like cart.js
 const isPassword = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const canEditStore = (admin, storeId) => admin.role === 'super' || (admin.role === 'owner' && admin.store_id === storeId);
+const canEditStore = (admin, storeId) => admin.role === 'super' || (admin.role === 'owner' && canSee(admin, storeId));
 const ownerOrSuper = (admin) => {
   if (admin.role === 'manager') throw fail(403, 'err.forbidden');
 };
-// Who an admin may disable: super → any owner or manager; owner → managers of their own store. Never yourself or a super.
+// Who an admin may disable: super → any owner or manager; owner → managers of their organisation. Never yourself or a super.
 const manages = (admin, target) => target.id !== admin.id && target.role !== 'super'
-  && (admin.role === 'super' || (admin.role === 'owner' && target.role === 'manager' && target.store_id === admin.store_id));
+  && (admin.role === 'super' || (admin.role === 'owner' && target.role === 'manager' && target.organization_id === admin.organization_id));
 
 // Invite links work without a session: check shows who it is for, accept sets the password and signs in.
 export function publicTeamRoutes(r, db, { secret }) {
   const liveInvite = (q, token) => (typeof token === 'string' && /^[0-9a-f]{32}$/.test(token)
-    ? q('admin_invites as i').join('stores as s', 's.id', 'i.store_id').where('i.token_hash', sha256(token)).whereNull('i.used_at')
-      .where('i.expires_at', '>', iso(Date.now())).first('i.*', 's.name as store_name')
+    ? q('admin_invites as i').leftJoin('stores as s', 's.id', 'i.store_id').join('organizations as g', 'g.id', 'i.organization_id')
+      .where('i.token_hash', sha256(token)).whereNull('i.used_at').where('i.expires_at', '>', iso(Date.now())).first('i.*', 's.name as store_name', 'g.name as org_name')
     : undefined);
 
   // The token travels in the body (never in a path), so it can't land in the request log.
   r.post('/invite/check', async (req, res) => {
     const inv = await liveInvite(db, req.body?.token);
     if (!inv) throw fail(410, 'err.invite_invalid');
-    res.json({ email: inv.email, role: inv.role, store_name: inv.store_name });
+    res.json({ email: inv.email, role: inv.role, store_name: inv.store_name, org_name: inv.org_name });
   });
 
   r.post('/invite/accept', async (req, res) => {
@@ -45,13 +47,29 @@ export function publicTeamRoutes(r, db, { secret }) {
       // The conditional UPDATE claims the invite: of two parallel accepts only one gets the row.
       if (!inv || !(await trx('admin_invites').where({ id: inv.id }).whereNull('used_at').update({ used_at: iso(Date.now()) }))) throw fail(410, 'err.invite_invalid');
       if (await trx('admins').where({ email: inv.email }).first()) throw fail(409, 'err.email_taken');
-      const id = await createAdmin(trx, { email: inv.email, password, storeId: inv.store_id, role: inv.role });
+      const id = await createAdmin(trx, { email: inv.email, password, storeId: inv.store_id, orgId: inv.organization_id, role: inv.role });
       const a = await trx('admins').where({ id }).first();
       await audit(trx, a, { action: 'team.join', storeId: a.store_id, entityId: id, label: a.email, after: { role: a.role } });
       return a;
     });
     res.status(201).json({ ...signToken(secret, admin.id, Date.now(), admin.token_version), admin: publicAdmin(admin) });
   });
+}
+
+// A one-time invite link (shown once; only its sha256 is stored). A fresh link replaces the open one for that email.
+export async function createInvite(req, q, { email, role, storeId, orgId }) {
+  if (await q('admins').where({ email }).first()) throw fail(409, 'err.email_taken');
+  const token = randomBytes(16).toString('hex');
+  const expires = Date.now() + INVITE_TTL_MS;
+  const run = async (trx) => {
+    await trx('admin_invites').where({ email, organization_id: orgId }).whereNull('used_at').del();
+    const [{ id }] = await trx('admin_invites').insert({ token_hash: sha256(token), email, role, store_id: storeId, organization_id: orgId, created_by: req.admin.id, expires_at: iso(expires) }).returning('id');
+    await audit(trx, req.admin, { action: 'team.invite', storeId, entityId: id, label: email, after: { email, role } });
+    return id;
+  };
+  const id = q.isTransaction ? await run(q) : await q.transaction(run);
+  // In the #fragment, so the token never reaches a server log when the link is opened.
+  return { id, email, role, store_id: storeId, organization_id: orgId, expires_at: iso(expires), url: `${publicBase(req)}/admin/#/invite?token=${token}` };
 }
 
 // Store profile as the settings form edits it.
@@ -92,7 +110,7 @@ function validStore(b) {
 export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
   async function findStore(req) {
     const id = Number(req.params.id);
-    if (req.admin.role !== 'super' && id !== req.admin.store_id) throw fail(404, 'err.store_not_found');
+    if (!canSee(req.admin, id)) throw fail(404, 'err.store_not_found');
     const s = Number.isInteger(id) && id > 0 ? await db('stores').where({ id }).first(STORE_COLS) : undefined;
     if (!s) throw fail(404, 'err.store_not_found');
     return s;
@@ -126,27 +144,52 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
     res.json({ id, ...next, kiosk_pin_set: await pinSet(id), can_edit: true });
   });
 
-  // Store scope for team and audit: an owner is pinned to their store; ?store_id narrows a super-admin.
+  // New store (onboarding wizard step 1, or "add a store" later): an owner adds one to their organisation, a super-admin
+  // to the organisation they name. The owner's first store becomes their own (store_id), the default for imports etc.
+  r.post('/stores', async (req, res) => {
+    ownerOrSuper(req.admin);
+    const b = req.body && typeof req.body === 'object' ? req.body : {};
+    const orgId = req.admin.role === 'super' ? (await db('organizations').where({ id: Number(b.organization_id) || 0 }).first('id'))?.id : req.admin.organization_id;
+    if (!orgId) throw fail(400, 'err.invalid', { field: 'field.org' });
+    const s = validStore({ ...Object.fromEntries(STORE_COLS.map((k) => [k, b[k]])), delivery_fee: b.delivery_fee ?? 0, low_stock_threshold: b.low_stock_threshold ?? 1 });
+    if (Number((await db('stores').where({ organization_id: orgId }).count({ n: '*' }))[0].n) >= STORES_MAX) throw fail(409, 'err.stores_max', { max: STORES_MAX });
+    const id = await db.transaction(async (trx) => {
+      const [{ id }] = await trx('stores').insert({ ...s, organization_id: orgId }).returning('id');
+      if (req.admin.role === 'owner' && !req.admin.store_id) await trx('admins').where({ id: req.admin.id }).update({ store_id: id, updated_at: trx.fn.now() });
+      await audit(trx, req.admin, { action: 'store.create', storeId: id, entityId: id, label: s.name, after: s });
+      return id;
+    });
+    res.status(201).json({ id, ...s, organization_id: orgId, kiosk_pin_set: false, can_edit: true });
+  });
+
+  // Store scope for sync keys and audit: an owner sees their organisation's stores; ?store_id narrows further.
   const inScope = (req, q, col) => {
-    if (req.admin.role !== 'super') q.where(col, req.admin.store_id);
-    else if (req.query.store_id) q.where(col, Number(req.query.store_id) || 0);
+    inStores(req.admin, q, col);
+    if (req.query.store_id) q.where(col, Number(req.query.store_id) || 0);
+    return q;
+  };
+  // Team members and invites belong to an organisation (an owner may have no store yet); ?store_id narrows to one store.
+  const teamScope = (req, q, a) => {
+    if (req.admin.role !== 'super') q.where(`${a}.organization_id`, req.admin.organization_id);
+    if (req.query.store_id) q.where(`${a}.store_id`, Number(req.query.store_id) || 0);
     return q;
   };
 
   r.get('/team', async (req, res) => {
     ownerOrSuper(req.admin);
-    const members = await inScope(req, db('admins as a').leftJoin('stores as s', 's.id', 'a.store_id').orderBy('a.id')
-      .select('a.id', 'a.email', 'a.role', 'a.store_id', 's.name as store_name', 'a.disabled_at', 'a.created_at'), 'a.store_id');
-    const invites = await inScope(req, db('admin_invites as i').join('stores as s', 's.id', 'i.store_id').whereNull('i.used_at')
-      .where('i.expires_at', '>', iso(Date.now())).orderBy('i.id', 'desc')
-      .select('i.id', 'i.email', 'i.role', 'i.store_id', 's.name as store_name', 'i.expires_at', 'i.created_at'), 'i.store_id');
+    const members = await teamScope(req, db('admins as a').leftJoin('stores as s', 's.id', 'a.store_id').leftJoin('organizations as g', 'g.id', 'a.organization_id').orderBy('a.id')
+      .select('a.id', 'a.email', 'a.role', 'a.store_id', 'a.organization_id', 's.name as store_name', 'g.name as org_name', 'a.disabled_at', 'a.created_at'), 'a');
+    const invites = await teamScope(req, db('admin_invites as i').leftJoin('stores as s', 's.id', 'i.store_id').join('organizations as g', 'g.id', 'i.organization_id')
+      .whereNull('i.used_at').where('i.expires_at', '>', iso(Date.now())).orderBy('i.id', 'desc')
+      .select('i.id', 'i.email', 'i.role', 'i.store_id', 's.name as store_name', 'g.name as org_name', 'i.expires_at', 'i.created_at'), 'i');
     res.json({
       members: members.map(({ disabled_at, created_at, ...m }) => ({ ...m, disabled: disabled_at != null, created_at: stamp(created_at), can_manage: manages(req.admin, m) })),
       invites: invites.map((i) => ({ ...i, expires_at: stamp(i.expires_at), created_at: stamp(i.created_at), can_revoke: req.admin.role === 'super' || i.role === 'manager' })),
     });
   });
 
-  // { email, role, store_id } → a one-time link, shown once. Owners invite managers to their own store; super invites owners too.
+  // { email, role, store_id, organization_id } → a one-time link, shown once. Owners invite managers to a store of their
+  // organisation; super also invites owners, to an organisation (store_id optional: without it they make one in the wizard).
   r.post('/team/invites', async (req, res) => {
     ownerOrSuper(req.admin);
     const b = req.body ?? {};
@@ -155,24 +198,18 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
     const role = b.role ?? 'manager';
     if (!['owner', 'manager'].includes(role)) throw fail(400, 'err.invalid', { field: 'field.role' });
     if (role === 'owner' && req.admin.role !== 'super') throw fail(403, 'err.forbidden');
-    const storeId = await resolveStore(db, req.admin, b.store_id);
-    if (await db('admins').where({ email }).first()) throw fail(409, 'err.email_taken');
-    const token = randomBytes(16).toString('hex');
-    const expires = Date.now() + INVITE_TTL_MS;
-    const id = await db.transaction(async (trx) => {
-      await trx('admin_invites').where({ email, store_id: storeId }).whereNull('used_at').del(); // a fresh link replaces the open one
-      const [{ id }] = await trx('admin_invites').insert({ token_hash: sha256(token), email, role, store_id: storeId, created_by: req.admin.id, expires_at: iso(expires) }).returning('id');
-      await audit(trx, req.admin, { action: 'team.invite', storeId, entityId: id, label: email, after: { email, role } });
-      return id;
-    });
-    // In the #fragment, so the token never reaches a server log when the link is opened.
-    res.status(201).json({ id, email, role, store_id: storeId, expires_at: iso(expires), url: `${publicBase(req)}/admin/#/invite?token=${token}` });
+    const ownerOrg = role === 'owner' && b.store_id == null;
+    const storeId = ownerOrg ? null : await resolveStore(db, req.admin, b.store_id);
+    const orgId = ownerOrg ? (await db('organizations').where({ id: Number(b.organization_id) || 0 }).first('id'))?.id
+      : (await db('stores').where({ id: storeId }).first('organization_id')).organization_id;
+    if (!orgId) throw fail(400, 'err.invalid', { field: 'field.org' });
+    res.status(201).json(await createInvite(req, db, { email, role, storeId, orgId }));
   });
 
   r.delete('/team/invites/:id', async (req, res) => {
     ownerOrSuper(req.admin);
     const q = db('admin_invites').where({ id: Number(req.params.id) || 0 }).whereNull('used_at');
-    if (req.admin.role !== 'super') q.where({ store_id: req.admin.store_id, role: 'manager' });
+    if (req.admin.role !== 'super') q.where({ organization_id: req.admin.organization_id, role: 'manager' });
     const inv = await q.first();
     if (!inv) throw fail(404, 'err.not_found');
     await db.transaction(async (trx) => {
@@ -229,8 +266,7 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
   r.delete('/sync-keys/:id', async (req, res) => {
     ownerOrSuper(req.admin);
     const q = db('sync_keys').where({ id: Number(req.params.id) || 0 }).whereNull('revoked_at');
-    if (req.admin.role !== 'super') q.where({ store_id: req.admin.store_id });
-    const k = await q.first();
+    const k = await inStores(req.admin, q, 'store_id').first();
     if (!k) throw fail(404, 'err.not_found');
     await db.transaction(async (trx) => {
       await trx('sync_keys').where({ id: k.id }).update({ revoked_at: iso(Date.now()) });
