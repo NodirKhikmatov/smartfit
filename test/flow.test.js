@@ -125,7 +125,7 @@ test('privacy: sessionStorage holds only the screen, form numbers and sizes, nev
   }, storage);
   const raw = storage.dump();
   for (const bad of ['data:image', 'base64', 'Dilnoza', '998901234567', 'Amir', 'shoulder']) assert.ok(!raw.includes(bad), bad);
-  assert.deepEqual(Object.keys(JSON.parse(raw)).sort(), ['form', 'manual', 'screen', 'sizes']);
+  assert.deepEqual(Object.keys(JSON.parse(raw)).sort(), ['form', 'item', 'manual', 'screen', 'sizes']);
   assert.deepEqual(Object.keys(JSON.parse(raw).form).sort(), ['budget', 'gender', 'height', 'shoes', 'weight']);
   // A tampered or broken entry is cleaned up, not trusted.
   storage.setItem('sfRoute', JSON.stringify({ screen: 'admin', form: { height: 'x'.repeat(500), phone: '+99890' }, sizes: { top: '<b>', bottom: 'M' } }));
@@ -133,6 +133,27 @@ test('privacy: sessionStorage holds only the screen, form numbers and sizes, nev
   storage.setItem('sfRoute', '{not json');
   assert.equal(loadRoute(storage), null);
   assert.doesNotThrow(() => saveRoute({ screen: 'form' }, { setItem() { throw new Error('quota'); } }), 'storage errors are ignored');
+});
+
+test('task 25: item pages keep their product id in history and survive a refresh; a bad id falls back to the catalogue', () => {
+  const win = fakeWindow();
+  const shown = [];
+  const router = createRouter(win, {
+    render: (name, data) => shown.push([name, data.item ?? null]),
+    allowed: (name, data) => allowedScreen(name, { itemOk: !!data?.item }),
+  });
+  router.go('catalog', { replace: true });
+  router.go('item', { data: { item: 7 } });
+  router.go('item', { data: { item: 9 } }); // a "goes well with" tile
+  win.history.back();
+  assert.deepEqual(shown.at(-1), ['item', 7], 'back shows the previous item, not the last one');
+  win.history.back();
+  assert.deepEqual(shown.at(-1), ['catalog', null]);
+  win.history.forward();
+  assert.deepEqual(shown.at(-1), ['item', 7]);
+  assert.equal(allowedScreen('item', {}), 'catalog');
+  assert.equal(routeData({ screen: 'item', item: 7 }).item, 7);
+  for (const bad of [0, -1, 1.5, '7', null]) assert.equal(routeData({ screen: 'item', item: bad }).item, null);
 });
 
 test('inline validation: an error clears as soon as the field is fine (no stale error)', () => {

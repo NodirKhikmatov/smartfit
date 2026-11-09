@@ -1,6 +1,6 @@
 // Customer-app flow without the DOM (task 16): field rules for inline validation, history routing, and the only
 // route data kept in session storage. Tested in test/flow.test.js.
-export const SCREENS = ['start', 'form', 'camera', 'results', 'cart', 'done'];
+export const SCREENS = ['start', 'form', 'camera', 'results', 'cart', 'done', 'catalog', 'item'];
 export const CLOTHES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 export const SHOES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
 const ROUTE_KEY = 'sfRoute';
@@ -40,9 +40,9 @@ export function toRequest(v, storeId) {
   };
 }
 
-// The whitelist of what survives a refresh: the screen, the form's numbers and the chosen sizes.
+// The whitelist of what survives a refresh: the screen, the form's numbers, the chosen sizes and the open item page.
 // Never the photo, the name, the phone or the address.
-export function routeData({ screen, form = {}, sizes = {}, manual = false } = {}) {
+export function routeData({ screen, form = {}, sizes = {}, manual = false, item = null } = {}) {
   return {
     screen: SCREENS.includes(screen) ? screen : 'start',
     form: Object.fromEntries(FORM.map((k) => [k, str(form?.[k]).slice(0, 12)])),
@@ -52,6 +52,7 @@ export function routeData({ screen, form = {}, sizes = {}, manual = false } = {}
       shoes: SHOES.includes(sizes?.shoes) ? sizes.shoes : null,
     },
     manual: manual === true,
+    item: Number.isInteger(item) && item > 0 ? item : null,
   };
 }
 export function saveRoute(route, storage = globalThis.sessionStorage) {
@@ -68,29 +69,32 @@ export function clearRoute(storage = globalThis.sessionStorage) {
 }
 
 // Which screen may show, for a refresh or a back/forward step, given what the app holds in memory.
-export function allowedScreen(screen, { formOk = false, sizesOk = false, orderOk = false } = {}) {
+export function allowedScreen(screen, { formOk = false, sizesOk = false, orderOk = false, itemOk = false } = {}) {
   if (screen === 'camera') return formOk ? 'camera' : 'form';
   if (screen === 'results') return formOk && sizesOk ? 'results' : formOk ? 'camera' : 'form';
   if (screen === 'done') return orderOk ? 'done' : 'start';
+  if (screen === 'item') return itemOk ? 'item' : 'catalog';
   return SCREENS.includes(screen) ? screen : 'start';
 }
 
 // One history entry per screen. Back/forward arrive through popstate and pass `allowed` first.
 // Each entry keeps its depth, so the in-app back button (the kiosk has no browser back) never leaves the app.
+// An entry may carry `data` (the item page's product id), handed back to render and allowed on back/forward.
 export function createRouter(win, { render, allowed }) {
   let depth = win.history.state?.depth ?? 0;
   win.addEventListener('popstate', (e) => {
     depth = e.state?.depth ?? 0;
     const want = e.state?.screen ?? 'start';
-    const to = allowed(want);
+    const data = { item: e.state?.item ?? null };
+    const to = allowed(want, data);
     if (to !== want) win.history.replaceState({ screen: to, depth }, '');
-    render(to);
+    render(to, to === want ? data : {});
   });
   const router = {
-    go(screen, { replace = false } = {}) {
+    go(screen, { replace = false, data = {} } = {}) {
       if (!replace) depth += 1;
-      win.history[replace ? 'replaceState' : 'pushState']({ screen, depth }, '');
-      render(screen);
+      win.history[replace ? 'replaceState' : 'pushState']({ ...data, screen, depth }, '');
+      render(screen, data);
     },
     back(fallback) {
       if (depth > 0) win.history.back();

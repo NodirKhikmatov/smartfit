@@ -2,7 +2,7 @@ import { watchIdle } from './idle.js';
 import { loadPose, measure } from './pose.js';
 import { keypad } from './keypad.js';
 import { kioskShell, attract, kioskDevice, randomId } from './kiosk.js';
-import { CLOTHES, SHOES, nextError, toRequest, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
+import { CLOTHES, SHOES, nextError, fieldError, toRequest, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
 import { icon, confirmDialog, showAfter, skeletonCard, toast } from '/shared/ui.js';
 import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName } from '/shared/i18n.js';
 
@@ -69,23 +69,26 @@ $('langBox').replaceChildren(switcher);
 // History routing (U2): one entry per screen, so the phone's back button steps back inside the app.
 const formValues = () => ({ gender: form.gender.value, height: form.height.value, weight: form.weight.value, shoes: form.shoes.value, budget: form.budget.value });
 const appState = () => ({ formOk: !!request, sizesOk: !!(request?.sizes.top && request?.sizes.bottom), orderOk: !!lastOrder });
-const remember = () => saveRoute({ screen: current, form: formValues(), sizes: request?.sizes, manual: sizeInfo?.manual });
+const remember = () => saveRoute({ screen: current, form: formValues(), sizes: request?.sizes, manual: sizeInfo?.manual, item: current === 'item' ? itemId : null });
 const ENTER = {
   camera: () => showCamera(),
   results: () => (lastResult ? renderResults(lastResult) : loadResults()),
   cart: () => renderCartScreen(),
+  catalog: () => loadCatalog(),
+  item: (data) => loadItem(data.item ?? itemId),
 };
-const PARENT = { form: 'start', camera: 'form', results: 'form', cart: () => (request ? 'results' : 'start'), done: 'start' };
+const PARENT = { form: 'start', camera: 'form', results: 'form', cart: () => (request ? 'results' : 'start'), done: 'start', catalog: 'start', item: 'catalog' };
 // Funnel drop-off (task 24): one random id per customer visit, one event per step reached (the server keeps the first).
 // Only ids and the step: no sizes, photo, name or phone. Forgotten at the kiosk reset.
-const FUNNEL = { form: 'start', camera: 'size', results: 'outfits', cart: 'cart', done: 'order' };
+const FUNNEL = { form: 'start', catalog: 'start', item: 'start', camera: 'size', results: 'outfits', cart: 'cart', done: 'order' };
 let visit = null;
 function track(name) {
   if (!FUNNEL[name] || !(storeId > 0)) return;
   visit ??= randomId();
   api('/funnel', { store_id: storeId, visit, step: FUNNEL[name], ...(kiosk && { device: kioskDevice() }) }).catch(() => {});
 }
-function render(name) {
+const NO_STEPS = ['start', 'done', 'catalog', 'item']; // the catalogue is outside the four-step flow
+function render(name, data = {}) {
   track(name);
   if (name !== 'camera') stopCamera();
   if (name !== 'cart') clearInterval(holdTimer);
@@ -94,15 +97,15 @@ function render(name) {
   $('home').hidden = name === 'start';
   $('back').hidden = name === 'start' || name === 'done';
   $('langBox').hidden = name !== 'start'; // the language is picked before starting
-  $('steps').hidden = name === 'start' || name === 'done';
+  $('steps').hidden = NO_STEPS.includes(name);
   for (const li of $('steps').children) li.dataset.step === name ? li.setAttribute('aria-current', 'step') : li.removeAttribute('aria-current');
   window.scrollTo(0, 0);
   document.querySelector(`[data-screen="${name}"] h1`).focus({ preventScroll: true });
-  ENTER[name]?.();
+  ENTER[name]?.(data);
   syncCartUi();
   remember();
 }
-const router = createRouter(window, { render, allowed: (s) => allowedScreen(s, appState()) });
+const router = createRouter(window, { render, allowed: (s, data) => allowedScreen(s, { ...appState(), itemOk: !!data?.item }) });
 const go = (name, opts) => router.go(name, opts);
 $('back').onclick = () => router.back(typeof PARENT[current] === 'function' ? PARENT[current]() : PARENT[current] ?? 'start');
 form.addEventListener('input', () => remember());
@@ -148,6 +151,7 @@ async function api(path, body, method = body ? 'POST' : 'GET') {
 
 async function loadStore() {
   $('startError').textContent = '';
+  $('catalogBtn').hidden = true;
   $('storePicker').hidden = true;
   $('start').disabled = true;
   if (!Number.isInteger(storeId) || storeId < 1) return showPicker('kiosk.start.no_store');
@@ -164,6 +168,7 @@ async function loadStore() {
   $('storeName').textContent = store.name;
   $('startLabel').textContent = t('kiosk.start.go');
   $('start').disabled = false;
+  $('catalogBtn').hidden = false;
   renderWeather();
   $('lookbook').replaceChildren(...store.looks.map((l) => el('img', { src: l.image_url, alt: '' })));
   $('lookbook').hidden = store.looks.length < 2;
@@ -208,6 +213,7 @@ function renderWeather() {
 }
 
 $('start').onclick = () => (store ? go('form') : loadStore());
+$('catalogBtn').onclick = () => go('catalog');
 
 // Inline validation (U3): a field is checked when it is left with a value, and its error clears as soon as it is fine.
 // The error keeps its key in data-i18n, so a language switch translates it too.
@@ -489,11 +495,11 @@ const sizeName = (s) => (s === 'ONE' ? t('common.size_one') : s);
 const thumb = (p) => (p.image_url ? el('img', { className: 'thumb', src: p.image_url, alt: '' }) : el('div', { className: 'thumb' }, icon(p.category)));
 const chosen = new Map(); // product id → shoe size picked on the results screen (shared by an outfit and its cheaper variant)
 
-// Size chips (U11): one pressed chip per group; onPick gets the size.
-function sizeChips(sizes, current, label, onPick) {
+// Chips (U11): one pressed chip per group; onPick gets the value. options: [[value, text]].
+function chipRow(options, current, label, onPick) {
   const group = el('div', { className: 'size-chips', role: 'group', ariaLabel: label });
-  group.append(...sizes.map((s) => {
-    const b = el('button', { type: 'button', className: 'chip', textContent: sizeName(s) });
+  group.append(...options.map(([s, text]) => {
+    const b = el('button', { type: 'button', className: 'chip', textContent: text });
     b.setAttribute('aria-pressed', String(s === current));
     b.onclick = () => {
       group.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(c === b)));
@@ -503,6 +509,7 @@ function sizeChips(sizes, current, label, onPick) {
   }));
   return group;
 }
+const sizeChips = (sizes, current, label, onPick) => chipRow(sizes.map((s) => [s, sizeName(s)]), current, label, onPick);
 
 // Photo collage of an outfit (D2): the clothes, not the accessory, up to four.
 function look(items) {
@@ -524,16 +531,26 @@ function picker(p) {
   return box;
 }
 
-function itemRow(p) {
+const priceEl = (p) => el('div', { className: p.discount_price ? 'price sale' : 'price' }, ...(p.discount_price ? [el('s', { textContent: som(p.price) })] : []), som(p.unit_price));
+
+// swap(p, li): an outfit card's "Almashtirish" for this item (task 25); none on the partial card.
+function itemRow(p, swap) {
   const size = p.size ? (p.size === 'ONE' ? t('common.size_one') : t('kiosk.size.value', { size: p.size })) : '';
   // The photo above shows the category, so the line says colour, size and shelf.
-  return el('li', {},
+  const li = el('li', {},
     el('div', { className: 'name', textContent: productName(p) }),
-    el('div', { className: p.discount_price ? 'price sale' : 'price' }, ...(p.discount_price ? [el('s', { textContent: som(p.price) })] : []), som(p.unit_price)),
+    priceEl(p),
     el('div', { className: 'meta', textContent: [colorName(p.color), size, p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }),
     fitHint(p),
     picker(p),
   );
+  if (swap) {
+    const b = el('button', { type: 'button', className: 'ghost swap', ariaLabel: t('kiosk.outfit.swap_aria', { name: productName(p) }) }, icon('refresh'), t('kiosk.outfit.swap'));
+    b.setAttribute('aria-expanded', 'false');
+    b.onclick = () => swap(p, li, b);
+    li.append(b);
+  }
+  return li;
 }
 
 // Task 23: this model runs small or big (learnt from buyers' answers and returns); the server already shifted the size.
@@ -559,7 +576,7 @@ function needSize(items, card, msg) {
   return true;
 }
 
-function addButton(items, card, className = 'primary wide', label = 'kiosk.add.btn') {
+function addButton(items, card, className = 'primary wide', label = 'kiosk.add.btn', rec = request?.rec) {
   const size = sizeOf;
   const has = (p) => cart?.items.some((c) => c.product_id === p.id && (!size(p) || c.size === size(p)));
   const b = el('button', { className });
@@ -571,7 +588,7 @@ function addButton(items, card, className = 'primary wide', label = 'kiosk.add.b
     b.disabled = true;
     try {
       const todo = items.filter((p) => !has(p)).map((p) => ({ product_id: p.id, size: size(p) }));
-      setCart(await api('/cart/items', { token: cart?.token, store_id: storeId, items: todo, rec: request?.rec }));
+      setCart(await api('/cart/items', { token: cart?.token, store_id: storeId, items: todo, rec }));
     } catch (err) {
       msg.textContent = err.message;
     }
@@ -582,12 +599,12 @@ function addButton(items, card, className = 'primary wide', label = 'kiosk.add.b
   return el('div', { className: 'add' }, b, msg);
 }
 
-function card(heading, items, total, reason) {
+function card(heading, items, total, reason, swap) {
   const c = el('article', { className: 'outfit card' });
   const body = el('div', { className: 'outfit-body' },
-    el('h2', { textContent: heading }),
+    el('h2', { textContent: heading, tabIndex: -1 }),
     ...(reason ? [el('p', { className: 'muted reason', textContent: reason })] : []),
-    el('ul', { className: 'items' }, ...items.map(itemRow)),
+    el('ul', { className: 'items' }, ...items.map((p) => itemRow(p, swap))),
     el('div', { className: 'outfit-foot' }, el('div', { className: 'total' }, el('span', { textContent: t('common.total') }), el('strong', { textContent: som(total) })), addButton(items, c), fittingBox(items, c)));
   c.append(look(items), body);
   return c;
@@ -636,7 +653,8 @@ function fittingBox(items, card) {
 }
 
 function outfitCard(o, n) {
-  const c = card(o.title ? t('kiosk.outfit.n_title', { n, title: o.title }) : t('kiosk.outfit.n', { n }), o.items, o.total, o.reason);
+  const c = card(o.title ? t('kiosk.outfit.n_title', { n, title: o.title }) : t('kiosk.outfit.n', { n }), o.items, o.total, o.reason, (p, li, b) => swapBox(o, n, p, li, b));
+  c.dataset.outfit = n;
   // R5: the cheaper variant is one compact "swap X for Y, save N" row, not a second outfit.
   if (o.alternative) {
     const swap = o.alternative.items.find((p) => !o.items.some((x) => x.id === p.id));
@@ -652,9 +670,232 @@ function outfitCard(o, n) {
   return c;
 }
 
+// Task 25: other items of the same category for one item of this outfit, picked and priced by the server (in stock in
+// the customer's size, within budget, not in another outfit shown). Picking one redraws the results with the new outfit.
+async function swapBox(o, n, p, li, btn) {
+  const open = li.querySelector('.swap-box');
+  btn.setAttribute('aria-expanded', String(!open));
+  if (open) return open.remove();
+  const box = el('div', { className: 'swap-box' }, el('p', { className: 'meta', role: 'status', textContent: t('kiosk.catalog.loading') }));
+  li.append(box);
+  const others = [...new Set(lastResult.outfits.filter((x) => x !== o).flatMap((x) => [...x.items, ...(x.alternative?.items ?? [])].map((i) => i.id)))];
+  let r;
+  try {
+    r = await api('/recommend/swap', { ...request, photo: undefined, items: o.items.map((i) => i.id), replace: p.id, exclude: others, relaxed: lastResult.relaxed });
+  } catch (err) {
+    return box.replaceChildren(el('p', { className: 'field-error', role: 'alert', textContent: err.message }));
+  }
+  if (!r.options.length) return box.replaceChildren(el('p', { className: 'meta', role: 'status', textContent: t('kiosk.outfit.swap_none') }));
+  box.replaceChildren(el('div', { className: 'meta', textContent: t('kiosk.outfit.swap_title') }), el('ul', { className: 'swap-list' }, ...r.options.map((opt) => {
+    const x = opt.items.find((i) => i.id === opt.swap);
+    const pick = () => {
+      Object.assign(o, { items: opt.items, total: opt.total, alternative: null, reason: null }); // the old reason may name the old item
+      renderResults(lastResult);
+      $('results').querySelector(`[data-outfit="${n}"] h2`)?.focus();
+    };
+    return el('li', {}, thumb(x),
+      el('div', {}, el('div', { className: 'name', textContent: productName(x) }),
+        el('div', { className: 'meta', textContent: [colorName(x.color), som(x.unit_price), t('kiosk.outfit.swap_total', { sum: som(opt.total) })].join(' · ') })),
+      el('button', { type: 'button', className: 'secondary', onclick: pick }, t('kiosk.outfit.swap_pick')));
+  })));
+}
+
 // Nothing fits the budget: the required items that do fit, cheapest first (the full cheapest outfit follows).
 function partialCard(p) {
   return card(t('kiosk.partial.title'), p.items, p.total, p.missing.length ? t('kiosk.partial.missing', { cats: p.missing.map(cat).join(', ') }) : '');
+}
+
+// --- Task 25: catalogue and item page. The server sends only items and sizes with free stock now.
+const CATEGORY_LIST = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
+const PRICE_BANDS = [[null, 300_000], [300_000, 800_000], [800_000, null]]; // what the customer pays (discount price first)
+const NO_FILTER = { category: '', gender: '', size: '', price: '' };
+let filters = { ...NO_FILTER };
+let itemId = null; // the open item page
+let catalogSeq = 0, itemSeq = 0; // only the newest answer may draw
+
+const bandName = ([lo, hi]) => (lo === null ? t('kiosk.catalog.price_upto', { sum: fmt.num(hi) })
+  : hi === null ? t('kiosk.catalog.price_from', { sum: fmt.num(lo) }) : `${fmt.num(lo)} – ${fmt.num(hi)}`);
+function renderFilters() {
+  const f = filters;
+  const sizes = f.category === 'shoes' ? SHOES : f.category === 'accessory' ? [] : CLOTHES;
+  const all = ['', t('common.all')];
+  const group = (key, label, options) => {
+    const g = el('div', { className: 'filter' }, el('div', { className: 'meta', textContent: label }), chipRow([all, ...options], f[key], label, (v) => {
+      filters = { ...filters, [key]: v, ...(key === 'category' && { size: '' }) };
+      loadCatalog();
+      $('catalogFilters').querySelector(`[data-group="${key}"] [aria-pressed="true"]`)?.focus(); // the chips were redrawn
+    }));
+    g.dataset.group = key;
+    return g;
+  };
+  $('catalogFilters').replaceChildren(
+    group('category', t('field.category'), CATEGORY_LIST.map((c) => [c, cat(c)])),
+    group('gender', t('kiosk.catalog.gender'), [['male', t('gender.male')], ['female', t('gender.female')]]),
+    group('price', t('field.price'), PRICE_BANDS.map((b, i) => [String(i), bandName(b)])),
+    ...(sizes.length ? [group('size', t('kiosk.catalog.size'), sizes.map((x) => [x, x]))] : []),
+  );
+}
+
+async function loadCatalog() {
+  const seq = ++catalogSeq;
+  renderFilters();
+  const band = PRICE_BANDS[filters.price] ?? [null, null];
+  const q = new URLSearchParams(Object.entries({ category: filters.category, gender: filters.gender, size: filters.size, min: band[0] ?? '', max: band[1] ?? '' })
+    .filter(([, v]) => v !== ''));
+  $('catalogStatus').textContent = t('kiosk.catalog.loading');
+  const done = showAfter(300, () => seq === catalogSeq && $('catalogGrid').replaceChildren(skeletonCard(2), skeletonCard(2), skeletonCard(2)));
+  let r;
+  try {
+    r = await api(`/catalog/${storeId}?${q}`);
+  } catch (err) {
+    done();
+    if (seq !== catalogSeq) return;
+    $('catalogStatus').textContent = err.message;
+    $('catalogGrid').replaceChildren(el('button', { className: 'primary', textContent: t('common.retry'), onclick: loadCatalog }));
+    return;
+  }
+  done();
+  if (seq !== catalogSeq) return;
+  $('catalogStatus').textContent = t('kiosk.catalog.found', { n: r.items.length });
+  if (r.items.length) return $('catalogGrid').replaceChildren(...r.items.map(tile));
+  $('catalogGrid').replaceChildren(el('div', { className: 'empty' }, icon('search'), el('p', { textContent: t('kiosk.catalog.empty') }),
+    el('button', { type: 'button', onclick: () => { filters = { ...NO_FILTER }; loadCatalog(); } }, t('kiosk.catalog.reset'))));
+}
+
+// A catalogue or "goes well with" tile: photo, name, price and the sizes in stock. Opens the item page.
+const tile = (p) => el('button', { type: 'button', className: 'tile', onclick: () => go('item', { data: { item: p.id } }) },
+  p.image_url ? el('img', { src: p.image_url, alt: '' }) : el('span', { className: 'ph' }, icon(p.category)),
+  el('span', { className: 'name', textContent: productName(p) }), priceEl(p),
+  el('span', { className: 'meta', textContent: p.sizes.map(sizeName).join(' ') }));
+
+async function loadItem(id) {
+  if (!id) return go('catalog', { replace: true });
+  itemId = id;
+  remember();
+  const seq = ++itemSeq;
+  $('itemName').textContent = '';
+  $('itemBody').replaceChildren();
+  const done = showAfter(300, () => seq === itemSeq && $('itemBody').replaceChildren(skeletonCard(5)));
+  let r;
+  try {
+    r = await api(`/catalog/${storeId}/items/${id}`);
+  } catch (err) {
+    done();
+    if (seq !== itemSeq) return;
+    $('itemName').textContent = err.status === 404 ? t('kiosk.item.gone') : err.message;
+    $('itemBody').replaceChildren(el('div', { className: 'empty' }, icon('hanger'),
+      el('button', { type: 'button', className: 'primary', onclick: () => go('catalog') }, t('kiosk.item.to_catalog'))));
+    return;
+  }
+  done();
+  if (seq === itemSeq) renderItem(r.item, r.pairs);
+}
+
+// Every size of the item: the ones in stock add to the cart, a sold-out one shows the organisation's other stores.
+function renderItem(p, pairs) {
+  syncs = new Set();
+  $('itemName').textContent = productName(p);
+  const all = p.category === 'shoes' ? SHOES : p.category === 'accessory' ? p.sizes : CLOTHES;
+  chosen.delete(p.id);
+  if (p.category === 'accessory') chosen.set(p.id, p.sizes[0]);
+  const other = el('div', { className: 'elsewhere' });
+  const err = el('p', { className: 'field-error' });
+  const chips = chipRow(all.map((x) => [x, sizeName(x)]), chosen.get(p.id), t('kiosk.size.aria', { name: productName(p) }), (x) => {
+    err.textContent = '';
+    if (p.sizes.includes(x)) {
+      chosen.set(p.id, x);
+      other.replaceChildren();
+    } else {
+      chosen.delete(p.id);
+      elsewhere(p, x, other);
+    }
+    syncs.forEach((f) => f());
+  });
+  [...chips.children].forEach((c, i) => {
+    if (p.sizes.includes(all[i])) return;
+    c.classList.add('out');
+    c.ariaLabel = t('kiosk.item.size_out', { size: sizeName(all[i]) });
+  });
+  const pick = el('div', { className: 'pick' }, el('div', { className: 'meta', textContent: t('kiosk.size.pick') }), chips, err);
+  pick.dataset.pick = p.id;
+  const page = $('itemBody');
+  page.replaceChildren(
+    el('div', { className: 'item-page' },
+      p.image_url ? el('img', { className: 'item-photo', src: p.image_url, alt: '' }) : el('div', { className: 'item-photo ph' }, icon(p.category)),
+      el('div', { className: 'item-info card' }, priceEl(p),
+        el('p', { className: 'meta', textContent: [cat(p.category), colorName(p.color), p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }),
+        ...(p.description ? [el('p', { textContent: p.description })] : []),
+        fitHint(p), pick, other,
+        addButton([{ ...p, size: null }], page, 'primary wide', 'kiosk.add.btn', null))),
+    ...(pairs.length ? [el('section', { className: 'pairs' }, el('h2', { textContent: t('kiosk.item.pairs') }), el('div', { className: 'catalog-grid' }, ...pairs.map(tile)))] : []),
+  );
+}
+
+// The chosen size has none free here: where else in this organisation it is (logged as missed demand by the server).
+async function elsewhere(p, size, box) {
+  box.dataset.size = size;
+  box.replaceChildren(el('p', { className: 'meta', role: 'status', textContent: t('kiosk.catalog.loading') }));
+  let r;
+  try {
+    r = await api('/catalog/elsewhere', { store_id: storeId, product_id: p.id, size, ...(visit && { session: visit }) });
+  } catch (err) {
+    return box.replaceChildren(el('p', { className: 'field-error', role: 'alert', textContent: err.message }));
+  }
+  if (box.dataset.size !== size) return; // another size was picked meanwhile
+  const head = el('p', { className: 'notice warn', role: 'status' }, icon('info'), el('span', { textContent: t('kiosk.item.size_out', { size: sizeName(size) }) }));
+  if (!r.stores.length) return box.replaceChildren(head, el('p', { className: 'meta', textContent: t('kiosk.item.nowhere') }));
+  box.replaceChildren(head, el('h3', { textContent: t('kiosk.item.elsewhere') }), el('ul', { className: 'store-stock' }, ...r.stores.map((s) => {
+    const li = el('li', {}, el('div', {}, el('strong', { textContent: s.name }), el('div', { className: 'meta', textContent: [s.city, s.address].filter(Boolean).join(', ') })),
+      el('span', { className: 'stock-count', textContent: t('kiosk.item.count', { n: s.count }) }));
+    const b = el('button', { type: 'button', className: 'secondary wide' }, icon('store'), t('kiosk.item.reserve'));
+    b.onclick = () => reserveForm(p, size, s, li, b);
+    li.append(b);
+    return li;
+  })));
+}
+
+// Pickup reservation in another store of the organisation: name and phone, then an unpaid order there (held 3 h).
+// Inline, not a dialog, so the kiosk's on-screen keyboard keeps working.
+function reserveForm(p, size, s, li, btn) {
+  const id = `res-${s.store_id}`;
+  const field = (name, label, props, keys) => {
+    const input = el('input', { id: `${id}-${name}`, name, ...props });
+    input.dataset.keys = keys;
+    input.setAttribute('aria-describedby', `${id}-${name}-err`);
+    const error = el('span', { className: 'field-error', id: `${id}-${name}-err` });
+    return { input, error, label: el('label', { className: 'field', htmlFor: input.id }, el('span', { textContent: t(label) }), input, error) };
+  };
+  const fields = [field('fullname', 'kiosk.checkout.name', { autocomplete: 'name', maxLength: 80 }, 'letters'),
+    field('phone', 'kiosk.checkout.phone', { type: 'tel', inputMode: 'tel', autocomplete: 'tel', placeholder: '+998 90 123 45 67', maxLength: 20 }, 'phone')];
+  const msg = el('p', { className: 'field-error', role: 'alert' });
+  const send = el('button', { type: 'submit', className: 'primary wide' }, t('kiosk.reserve.go'));
+  const f = el('form', { className: 'reserve-form', noValidate: true }, el('p', { className: 'meta', textContent: t('kiosk.reserve.text') }), ...fields.map((x) => x.label), msg, send);
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const bad = fields.filter(({ input, error }) => {
+      const key = fieldError(input.name, input.value);
+      error.textContent = key ? t(key) : '';
+      input.setAttribute('aria-invalid', String(!!key));
+      return key;
+    });
+    if (bad.length) return bad[0].input.focus();
+    msg.textContent = '';
+    send.disabled = true;
+    try {
+      const r = await api('/catalog/reserve', { from_store_id: storeId, product_id: s.product_id, size, name: fields[0].input.value, phone: fields[1].input.value });
+      li.replaceChildren(el('div', { className: 'notice stack', role: 'status' },
+        el('strong', { textContent: t('kiosk.reserve.done', { n: r.order.number }) }),
+        el('p', { textContent: t('kiosk.reserve.until', { store: r.store.name, address: r.store.address, time: fmt.time(r.order.expires_at) }) }),
+        el('div', { className: 'sum' }, sumRow(`${productName(p)} · ${sizeName(size)}`, som(r.order.total))),
+        trackBlock(r.track)));
+    } catch (err) {
+      msg.textContent = err.message;
+      send.disabled = false;
+    }
+  };
+  btn.remove();
+  li.append(f);
+  fields[0].input.focus();
 }
 
 // --- Cart and checkout. Every number shown here comes from the server; the browser sends no prices.
@@ -921,6 +1162,9 @@ function reset() {
   clearCheckout();
   for (const n of FORM_FIELDS) showError(n, '');
   $('results').replaceChildren();
+  $('itemBody').replaceChildren(); // the reserve form may hold the last customer's name and phone
+  filters = { ...NO_FILTER };
+  itemId = null;
   clearRoute();
   go('start', { replace: true });
   loadStore();
@@ -949,7 +1193,7 @@ if (saved) {
   }
 }
 budgetChips();
-go(storeId > 0 ? allowedScreen(saved?.screen ?? 'start', appState()) : 'start', { replace: true });
+go(storeId > 0 ? allowedScreen(saved?.screen ?? 'start', { ...appState(), itemOk: !!saved?.item }) : 'start', { replace: true, data: { item: saved?.item } });
 loadStore();
 const handoffToken = params.get('handoff');
 if (!kiosk && handoffToken) {

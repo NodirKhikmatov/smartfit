@@ -193,3 +193,38 @@ export function cheaperAlternative(items, pool, used) {
   const alt = items.map((p, i) => (i === best.idx ? best.swap : p));
   return { items: alt, total: totalOf(alt), replaces: items[best.idx].id };
 }
+
+// Task 25, "Shu bilan yaxshi ketadi": one item per other category that is worn in the same temperature window, closest
+// season first, then picked by the outfit rules (same style, never a second bright colour). Outerwear only for an item
+// worn below OUTERWEAR_BELOW. The item itself and repeats can't appear (one per category). Caller filters gender + stock.
+const mid = (p) => (p.temp_min + p.temp_max) / 2;
+export function pairWith(item, candidates, max = 4) {
+  const cats = ORDER.filter((c) => c !== item.category && (c !== 'outerwear' || mid(item) < OUTERWEAR_BELOW));
+  const picked = [item];
+  for (const c of cats) {
+    const list = candidates.filter((p) => p.category === c && p.id !== item.id && p.temp_min <= item.temp_max && p.temp_max >= item.temp_min)
+      .sort((a, b) => Math.abs(mid(a) - mid(item)) - Math.abs(mid(b) - mid(item)) || a.id - b.id);
+    const p = bestFor(list, picked, false);
+    if (p) picked.push(p);
+  }
+  return picked.slice(1, max + 1);
+}
+
+// Task 25: what can take `replace`'s place in a shown outfit. Same category (so the outfit keeps its required
+// categories), not in this outfit or another shown one (`exclude`), and within budget; an outfit that is already over
+// budget (the cheapest-outfit fallback) only gets cheaper items. Best first by the outfit rules.
+// → [{ swap, items, total }]: the whole new outfit, priced from the candidate rows (DB).
+export function swapOptions(candidates, { items, replace, exclude = [], budget = null, temperature, raining = false, limit = 4 }) {
+  const old = items.find((p) => p.id === replace);
+  if (!old) return [];
+  const rest = items.filter((p) => p.id !== replace);
+  const used = new Set([...items.map((p) => p.id), ...exclude]);
+  const over = budget && totalOf(items) > budget;
+  const fits = (p) => !budget || (over ? p.unit_price < old.unit_price : totalOf(rest) + p.unit_price <= budget);
+  const list = rankPool(candidates, { temperature, raining, budget })[old.category].filter((p) => !used.has(p.id) && fits(p));
+  return list.map((p, i) => ({ p, s: pickScore(p, i, rest, raining) })).sort((a, b) => a.s - b.s).slice(0, limit)
+    .map(({ p }) => {
+      const next = [...rest, p].sort(byOrder);
+      return { swap: p.id, items: next, total: totalOf(next) };
+    });
+}

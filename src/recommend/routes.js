@@ -2,7 +2,7 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { sizesFor } from '../db/seed.js';
 import { fail, langOf } from '../admin/routes.js';
-import { filterCandidates, ruleOutfits, missedItems } from './engine.js';
+import { filterCandidates, ruleOutfits, missedItems, swapOptions, SPREADS } from './engine.js';
 import { logMissed } from '../demand.js';
 import { parsePhoto, applyStylist, withDeadline, TIMEOUT_MS } from './stylist.js';
 
@@ -15,6 +15,20 @@ const pick = (v, allowed, label, required) => {
   if (!allowed.includes(s)) throw fail(400, 'err.invalid', { field: label });
   return s;
 };
+
+// The customer part of a /recommend body: store, gender, sizes and budget. → { sizes, budget }.
+function parseRequest(b) {
+  if (!Number.isInteger(b.store_id) || b.store_id < 1) throw fail(400, 'err.invalid', { field: 'field.store' });
+  if (!['male', 'female'].includes(b.gender)) throw fail(400, 'err.invalid', { field: 'field.gender' });
+  const sizes = {
+    top: pick(b.sizes?.top, sizesFor('top'), 'field.top_size', true),
+    bottom: pick(b.sizes?.bottom, sizesFor('bottom'), 'field.bottom_size', true),
+    shoes: pick(b.sizes?.shoes, sizesFor('shoes'), 'field.shoe_size', false),
+  };
+  const budget = b.budget === undefined || b.budget === null || b.budget === 0 ? null : b.budget;
+  if (budget !== null && (!Number.isInteger(budget) || budget < 1 || budget > 1e9)) throw fail(400, 'err.invalid', { field: 'field.budget' });
+  return { sizes, budget };
+}
 
 // shortcut: in-memory per-IP cap on paid Claude calls (over it → rules, never an error); one process only.
 const AI_PER_MINUTE = 30;
@@ -42,15 +56,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
 
   r.post('/', async (req, res) => {
     const b = req.body ?? {};
-    if (!Number.isInteger(b.store_id) || b.store_id < 1) throw fail(400, 'err.invalid', { field: 'field.store' });
-    if (!['male', 'female'].includes(b.gender)) throw fail(400, 'err.invalid', { field: 'field.gender' });
-    const sizes = {
-      top: pick(b.sizes?.top, sizesFor('top'), 'field.top_size', true),
-      bottom: pick(b.sizes?.bottom, sizesFor('bottom'), 'field.bottom_size', true),
-      shoes: pick(b.sizes?.shoes, sizesFor('shoes'), 'field.shoe_size', false),
-    };
-    const budget = b.budget === undefined || b.budget === null || b.budget === 0 ? null : b.budget;
-    if (budget !== null && (!Number.isInteger(budget) || budget < 1 || budget > 1e9)) throw fail(400, 'err.invalid', { field: 'field.budget' });
+    const { sizes, budget } = parseRequest(b);
     const photo = parsePhoto(b.photo); // memory only: goes to Claude for this request, never stored or logged
 
     const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon');
@@ -95,6 +101,34 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       .then((items) => logMissed(db, { storeId: store.id, session: rec, items, source: 'recommend' }))
       .catch((err) => console.error('missed demand not logged:', err.message));
     res.json({ weather: w, budget, over_budget, partial, relaxed, notice, source, style_guess, outfits, rec });
+  });
+
+  // Task 25: swap one item of a shown outfit. The / body (no photo) plus { items: [this outfit's ids], replace,
+  // exclude: [ids in the other outfits shown], relaxed } → { options: [{ swap, items, total }] }, priced here from the
+  // same in-stock candidates (customer's sizes, the answer's temperature window). Nothing is logged.
+  r.post('/swap', async (req, res) => {
+    const b = req.body ?? {};
+    const { sizes, budget } = parseRequest(b);
+    const ids = (v, max) => {
+      if (!Array.isArray(v) || v.length > max || !v.every((x) => Number.isInteger(x) && x > 0) || new Set(v).size !== v.length) throw fail(400, 'err.invalid', { field: 'field.items' });
+      return v;
+    };
+    const outfit = ids(b.items, 6), exclude = ids(b.exclude ?? [], 30);
+    if (!outfit.includes(b.replace)) throw fail(400, 'err.invalid', { field: 'field.items' });
+    const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon');
+    if (!store) throw fail(404, 'err.store_not_found');
+    const w = await weather(store);
+    // Nothing in the outfit's window → widen it like the outfits do (R1: ±3, then ±6 °C); in-window items still rank first.
+    let options = [];
+    for (const spread of SPREADS.filter((x) => x >= (SPREADS.includes(b.relaxed) ? b.relaxed : 0))) {
+      const candidates = await filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread });
+      const byId = new Map(candidates.map((p) => [p.id, p]));
+      const items = outfit.map((id) => byId.get(id));
+      if (items.some((p) => !p)) throw fail(409, 'err.outfit_stale'); // sold out or resized since the outfit was shown
+      options = swapOptions(candidates, { items, replace: b.replace, exclude, budget, temperature: w.temperature, raining: w.raining });
+      if (options.length) break;
+    }
+    res.json({ options });
   });
 
   // Pilot funnel: the customer tapped "Kiyib ko'rdim" (tried the suggestion on). { rec } → 204, once per results screen.

@@ -16,6 +16,7 @@ import { createKioskRouter } from './kiosk.js';
 import { createDemoRouter } from './admin/orgs.js';
 import { createLandingRouter } from './landing.js';
 import { createFunnelRouter } from './demand.js';
+import { createCatalogRouter } from './catalog.js';
 import { VENDOR, MODEL } from './vendor.js';
 
 // X1: same-origin only, plus OpenStreetMap tiles for the delivery map. 'wasm-unsafe-eval' lets MediaPipe compile its wasm
@@ -75,6 +76,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/cart', bucket('cart'), createCartRouter(db, { methods, link, maxOpenCarts: lim.openCarts }));
   api.post('/kiosk/exit', bucket('pin'));
   api.use('/kiosk', bucket('kiosk'), createKioskRouter(db));
+  api.use('/catalog', bucket('catalog'), createCatalogRouter(db, { link, maxOpen: lim.openCarts })); // task 25
   api.use('/funnel', bucket('funnel'), createFunnelRouter(db)); // task 24: drop-off by step
   api.use('/orders', createOrderRouter(db, { methods, link }));
   api.use('/demo-requests', bucket('demo'), createDemoRouter(db));

@@ -209,6 +209,55 @@ dialog.handoff .done .icon { width: 3rem; height: 3rem; color: var(--accent); ma
 .fit-form { display: grid; gap: var(--s-2); }
 .fit-form .field { margin: 0; }
 
+/* ---------- Catalogue and item page (task 25) */
+#catalogBtn { margin-top: var(--s-3); }
+html.kiosk #catalogBtn { min-height: 3.5rem; font-size: var(--text-lg); }
+.filters { display: grid; gap: var(--s-3); margin-bottom: var(--s-3); }
+.filter { display: grid; gap: var(--s-1); }
+html.kiosk .filter .chip { min-height: 2.75rem; padding-inline: var(--s-3); font-size: var(--text-md); }
+.catalog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: var(--s-3); margin-bottom: var(--s-5); }
+html.kiosk .catalog-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-4); }
+.tile { display: grid; grid-template-rows: auto auto auto 1fr; justify-items: start; align-content: start; gap: var(--s-1); height: auto; min-height: 0; padding: 0 0 var(--s-3); overflow: hidden; text-align: left; white-space: normal; border-radius: var(--r-lg); background: var(--surface); }
+.tile img, .tile .ph { display: grid; place-items: center; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; background: var(--sunken); color: var(--ink-3); margin-bottom: var(--s-1); }
+.tile > :not(img, .ph) { padding-inline: var(--s-3); }
+.tile .name { font-weight: var(--weight-medium); line-height: var(--leading-snug); }
+.tile .price { text-align: left; }
+.item-page { display: grid; gap: var(--s-4); margin-bottom: var(--s-5); }
+@media (min-width: 40em) { .item-page { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
+.item-photo { display: grid; place-items: center; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; border-radius: var(--r-lg); background: var(--sunken); color: var(--ink-3); }
+.item-info { display: grid; gap: var(--s-3); }
+.item-info > p { margin: 0; }
+.item-info > .price { text-align: left; font: var(--weight-strong) var(--text-2xl)/1 var(--font-display); font-variant-numeric: lining-nums; }
+.item-info .pick { display: grid; gap: var(--s-1); }
+.item-info .pick .field-error:empty { display: none; }
+.item-info .fit-hint { display: flex; align-items: center; gap: var(--s-1); width: fit-content; padding: 2px var(--s-2); border-radius: var(--r-sm); background: var(--warn-soft); color: var(--warn-ink); font-size: var(--text-sm); }
+.item-info .fit-hint .icon { width: 1rem; height: 1rem; flex: none; }
+.size-chips .chip.out { border-style: dashed; color: var(--ink-2); text-decoration: line-through; }
+.size-chips .chip.out[aria-pressed="true"] { background: var(--warn-soft); border-color: var(--warn-ink); color: var(--warn-ink); }
+.elsewhere:empty { display: none; }
+.elsewhere h3 { font-size: var(--text-md); margin: 0 0 var(--s-2); }
+.elsewhere .notice { margin-bottom: var(--s-3); }
+.store-stock { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+.store-stock > li { display: grid; grid-template-columns: 1fr auto; gap: var(--s-2) var(--s-3); align-items: center; padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); }
+.store-stock > li > :is(button, form, .notice) { grid-column: 1 / -1; }
+.store-stock .stock-count { font-weight: var(--weight-strong); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.store-stock .notice { margin: 0; }
+.store-stock .tgqr { margin-top: var(--s-3); }
+.reserve-form { display: grid; gap: var(--s-2); }
+.reserve-form .field { margin: 0; }
+.reserve-form > p { margin: 0; }
+.reserve-form .field-error:empty { display: none; }
+.pairs h2 { font: var(--weight-strong) var(--text-2xl)/var(--leading-tight) var(--font-display); margin-bottom: var(--s-3); }
+/* Swap one item of an outfit (task 25) */
+.items .swap { grid-column: 1 / -1; justify-self: start; min-height: 2.5rem; padding: 0 var(--s-2); margin-left: calc(-1 * var(--s-2)); font-size: var(--text-sm); }
+.swap-box { grid-column: 1 / -1; display: grid; gap: var(--s-2); padding: var(--s-3); border-radius: var(--r-md); background: var(--sunken); }
+.swap-box p { margin: 0; }
+.swap-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+.items .swap-list li { grid-template-columns: 3rem 1fr; align-items: center; padding: 0 0 var(--s-2); }
+.swap-list .thumb { width: 3rem; height: 3rem; grid-row: span 3; }
+.items .swap-list :is(.name, .meta, button) { grid-column: 2; }
+.swap-list button { grid-column: 2; justify-self: start; min-height: 2.5rem; font-size: var(--text-sm); }
+
 /* ---------- Order status page (/order/<token>) */
 .track h1 { margin-bottom: var(--s-1); }
 .track #where { margin-bottom: var(--s-5); }
@@ -248,4 +297,8 @@ a.button.wide { margin: var(--s-3) 0; }
   #cartBtn { padding: 0 var(--s-3); }
   .cart-bar { padding-left: var(--s-4); }
   .cart-bar button { padding: 0 var(--s-3); }
+  /* Catalogue filters: one sideways-scrolling row each, so the items start on the first screen. */
+  .filter .size-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: calc(-1 * var(--s-4)); padding-inline: var(--s-4); }
+  .filter .chip { flex: none; }
+  .item-photo { aspect-ratio: auto; height: 40dvh; }
 }

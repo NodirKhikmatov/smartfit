@@ -33,7 +33,7 @@ export const totals = (store, subtotal, fulfillment) => {
 };
 
 // Takes n units of free stock; false when fewer than n are free.
-const hold = async (trx, productId, size, n) =>
+export const hold = async (trx, productId, size, n) =>
   (await trx('product_stock').where({ product_id: productId, size }).whereRaw('quantity - reserved >= ?', [n]).increment('reserved', n)) === 1;
 // Clamped at 0 so one inconsistent row (e.g. a hand-edited DB) can't make the sweep, and with it every cart request, fail.
 const release = (trx, lines) =>
@@ -138,7 +138,7 @@ export async function markPaid(db, orderId, now = Date.now()) {
 // SQLite CURRENT_TIMESTAMP is 'YYYY-MM-DD HH:MM:SS' in UTC, which Date would read as local time.
 export const stamp = (v) => (v == null ? null : new Date(typeof v === 'string' && !v.includes('T') ? `${v.replace(' ', 'T')}Z` : v).toISOString());
 const msLeft = (v) => (v == null ? null : Math.max(0, Date.parse(stamp(v)) - Date.now()));
-const storeOf = (db, id) => db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold');
+export const storeOf = (db, id) => db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold');
 
 // Prices always come from the products table, never from the request.
 async function cartView(db, cart, payments) {
@@ -193,7 +193,7 @@ export function normalizePhone(v) {
   return '+' + full;
 }
 
-function customer(b, store) {
+export function customer(b, store) {
   if (!['pickup', 'delivery'].includes(b.fulfillment)) throw fail(400, 'err.fulfillment');
   const c = { customer_name: text(b.name, 2, 80, 'field.customer_name'), phone: normalizePhone(b.phone), fulfillment: b.fulfillment, address: null, lat: null, lon: null };
   if (c.fulfillment === 'pickup') return c;
@@ -213,6 +213,17 @@ function parseItems(items) {
     if (!Number.isInteger(i?.product_id) || i.product_id < 1 || typeof i.size !== 'string') throw fail(400, 'err.item_missing');
     return { product_id: i.product_id, size: i.size };
   });
+}
+
+// One order from lines priced from the DB ({ product_id, size, quantity, unit_price }); the caller already holds their stock.
+// Per-store display number: the UPDATE locks the store row, so parallel orders get 1, 2, 3… with no gaps or repeats.
+export async function insertOrder(trx, store, c, lines, { method = 'cashier', notifyToken, recommendationId = null, holdMs = HOLD_MS, client = null }) {
+  const t = totals(store, lines.reduce((s, l) => s + l.unit_price * l.quantity, 0), c.fulfillment);
+  await trx('stores').where({ id: store.id }).increment('order_seq', 1);
+  const { order_seq: number } = await trx('stores').where({ id: store.id }).first('order_seq');
+  const [{ id }] = await trx('orders').insert({ store_id: store.id, number, ...c, ...t, payment_method: method, notify_token: notifyToken, recommendation_id: recommendationId, client, expires_at: iso(Date.now() + holdMs) }).returning('id');
+  await trx('order_items').insert(lines.map((l) => ({ order_id: id, product_id: l.product_id, size: l.size, quantity: l.quantity, unit_price: l.unit_price })));
+  return id;
 }
 
 // Public, keyed by an unguessable cart token. The token is the customer's only handle on the cart.
@@ -371,12 +382,7 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
       const lines = await trx('cart_items as c').join('products as p', 'p.id', 'c.product_id').where('c.cart_id', cart.id)
         .orderBy('c.id').select('c.product_id', 'c.size', 'c.quantity', 'p.price', 'p.discount_price');
       if (!lines.length) throw fail(400, 'err.cart_empty');
-      const t = totals(store, lines.reduce((s, l) => s + unitPrice(l) * l.quantity, 0), c.fulfillment);
-      // Per-store display number. The UPDATE locks the store row, so parallel checkouts get 1, 2, 3… with no gaps or repeats.
-      await trx('stores').where({ id: store.id }).increment('order_seq', 1);
-      const { order_seq: number } = await trx('stores').where({ id: store.id }).first('order_seq');
-      const [{ id }] = await trx('orders').insert({ store_id: store.id, number, ...c, ...t, payment_method: method, notify_token: notifyToken, recommendation_id: cart.recommendation_id, expires_at: iso(Date.now() + HOLD_MS) }).returning('id');
-      await trx('order_items').insert(lines.map((l) => ({ order_id: id, product_id: l.product_id, size: l.size, quantity: l.quantity, unit_price: unitPrice(l) })));
+      const id = await insertOrder(trx, store, c, lines.map((l) => ({ ...l, unit_price: unitPrice(l) })), { method, notifyToken, recommendationId: cart.recommendation_id });
       await trx('carts').where({ id: cart.id }).del(); // reserved stays: the order owns the hold now
       return id;
     });
