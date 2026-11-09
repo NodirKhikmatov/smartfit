@@ -5,8 +5,9 @@ export const AUDIT_ACTIONS = [
   'product.create', 'product.update', 'product.delete', 'product.image', 'product.image_delete',
   'order.status', 'order.pay', 'fitting.done',
   'store.update', 'team.invite', 'team.invite_revoke', 'team.join', 'team.disable', 'team.enable', 'account.password',
+  'sync_key.create', 'sync_key.revoke', 'stock.sync',
 ];
-export const AUDIT_ENTITIES = ['product', 'order', 'fitting', 'store', 'team', 'account'];
+export const AUDIT_ENTITIES = ['product', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock'];
 
 const json = (v) => (v == null ? null : JSON.stringify(v));
 

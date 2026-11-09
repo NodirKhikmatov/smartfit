@@ -90,6 +90,31 @@ export async function flushFitting(db, telegram) {
   }
 }
 
+// Low stock (task 20) → the store's staff chat, once per crossing: product_stock.low_alerted is set when a size is told
+// about and cleared when it is above the store's threshold again. One message per store per round, sold-out sizes first.
+const LOW_LINES = 30; // Telegram caps a message at 4096 characters
+export async function flushLowStock(db, telegram) {
+  if (!telegram) return;
+  const free = 'ps.quantity - ps.reserved';
+  const base = () => db('product_stock as ps').join('products as p', 'p.id', 'ps.product_id').join('stores as s', 's.id', 'p.store_id');
+  await db('product_stock').where('low_alerted', true).whereIn('id', base().whereRaw(`${free} > s.low_stock_threshold`).select('ps.id')).update({ low_alerted: false });
+  const rows = await base().where('ps.low_alerted', false).whereRaw(`${free} <= s.low_stock_threshold`).whereNotNull('s.telegram_chat_id')
+    .orderBy('s.id').orderByRaw(`${free}, p.name, ps.id`)
+    .select('ps.id', 'ps.size', 'p.name', 'p.sku', 's.id as store_id', 's.telegram_chat_id', db.raw(`${free} as free`));
+  for (const storeId of new Set(rows.map((r) => r.store_id))) {
+    const mine = rows.filter((r) => r.store_id === storeId);
+    const lines = mine.slice(0, LOW_LINES).map((r) => `• ${r.name}${r.sku ? ` (${r.sku})` : ''} — ${r.size === 'ONE' ? 'yagona razmer' : r.size}: ${r.free > 0 ? `${r.free} dona qoldi` : 'tugadi'}`);
+    if (mine.length > LOW_LINES) lines.push(`…va yana ${mine.length - LOW_LINES} ta`);
+    try {
+      await telegram(mine[0].telegram_chat_id, ['Kam qolgan kiyimlar:', ...lines].join('\n'));
+    } catch (err) {
+      console.error(`telegram: low-stock alert for store ${storeId} not sent:`, err.message);
+      if (err.code !== 403 && err.code !== 400) continue; // try again next round
+    }
+    await db('product_stock').whereIn('id', mine.map((r) => r.id)).update({ low_alerted: true });
+  }
+}
+
 // "/start <token>" from the order link → the order's messages go to this chat. The first chat to link keeps it.
 export async function handleUpdate(db, update, send) {
   const m = update?.message;
@@ -125,6 +150,7 @@ export function startNotifications(db, { telegram = telegramConfig(), sms = smsS
     busy = true;
     await flushNotifications(db, { telegram: send, sms }).catch((err) => console.error('notify failed:', err.message));
     await flushFitting(db, send).catch((err) => console.error('fitting notify failed:', err.message));
+    await flushLowStock(db, send).catch((err) => console.error('low-stock notify failed:', err.message));
     busy = false;
   };
   setInterval(flush, everyMs).unref();

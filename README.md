@@ -104,9 +104,10 @@ migrates the database on start. Check it: `curl https://fit.example.uz/api/healt
    owner adds staff in `/admin` → Sozlamalar → Jamoa: "Taklif qilish" makes a one-time link (valid 48 hours) to send to the
    new manager, who sets their own password with it.
 3. Add products in `/admin` → "Kiyimlar" (form, or "CSV yuklash" for a whole catalogue), set stock per size, upload photos.
-   CSV columns (`,` or `;`, UTF-8, header row): `id, store_id, name, name_ru, category, gender, color, style, price,
-   discount_price, temp_min, temp_max, waterproof, shelf_location` plus one stock column per size (`XS…XXL`, `36…45`, `ONE`). Empty `id`
-   creates a product, a filled one updates it; categories `outerwear/top/bottom/shoes/accessory`, genders
+   CSV columns (`,` or `;`, UTF-8, header row): `id, sku, barcode, store_id, name, name_ru, category, gender, color, style, price,
+   discount_price, temp_min, temp_max, waterproof, shelf_location` plus one stock column per size (`XS…XXL`, `36…45`, `ONE`). A filled
+   `id` updates that product; else a `sku` that already exists in the row's store updates that product; else a new one is
+   created. SKUs are unique per store (letters, digits, `. _ - /`, up to 40). Categories `outerwear/top/bottom/shoes/accessory`, genders
    `male/female/unisex`, prices in whole so'm. Any bad row rejects the whole file with the line numbers.
 4. Kiosk: open `https://<domain>/kiosk?store=<id>` full screen in the kiosk browser (Chrome kiosk mode), allow the camera.
 5. Phone: `/admin` → "QR kodlar" → "QR chop etish" and put the print next to the kiosk / in the fitting rooms.
@@ -133,7 +134,35 @@ Cashier payment always works. A provider appears in the phone app only when all 
    the bot and then gets a message on every status change.
 3. The app long-polls the bot, so don't set a webhook on it and run only one app instance.
 
+4. Low stock: when a size's free units (stock minus what carts hold) drop to the store's threshold (Sozlamalar → Do'kon →
+   "Kam qoldi chegarasi", default 1), the staff chat gets one message listing the sizes that crossed. It comes again only
+   after the size went above the threshold and back down. The same sizes show on the dashboard under "sizes running out".
+
 SMS is a stub (`src/notify/sms.js`): return a `(phone, text)` sender there to switch it on.
+
+## Stock sync API (POS / 1C)
+
+A store's cash register or ERP can push on-hand quantities instead of typing them in. The store owner (or super-admin)
+creates a key in `/admin` → Sozlamalar → Ombor API → "Kalit yaratish"; the key (`sfk_…`) is shown once, only its SHA-256
+is stored, and it works for that one store until it is deleted there. Every key create/delete and every sync that changed
+something lands in the audit log.
+
+```bash
+curl -X POST https://<domain>/api/sync/stock \
+  -H "Authorization: Bearer sfk_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" \
+  -H "Content-Type: application/json" \
+  -d '{"items":[{"sku":"SF-TP-01","size":"M","quantity":12},{"sku":"SF-SH-03","size":"42","quantity":0}]}'
+# → 200 {"updated":2,"unchanged":0}
+```
+
+- `quantity` is the absolute count on hand for that SKU and size (an integer 0–100 000), not a delta. Sizes are
+  `XS…XXL`, `36…45` or `ONE`, depending on the product's category. Products themselves (name, price…) are not created here:
+  add them in admin or by CSV with the same SKU first.
+- Up to 1000 items per request. The batch is all-or-nothing: any bad row → `400 {"code":"sync_rows","errors":[{index,sku,size,code,error}]}`
+  and nothing changes. Row codes: `sync_sku` (no such SKU in this key's store), `bad_size`, `invalid_qty`, `sync_dup`
+  (same SKU + size twice), `size_reserved` (the new quantity is below what customers' carts hold right now; retry later
+  or send at least that many).
+- A missing, wrong or deleted key → `401 {"code":"sync_key"}`. Errors are in Uzbek, or Russian with `?lang=ru`.
 
 ## Logs and error monitoring
 

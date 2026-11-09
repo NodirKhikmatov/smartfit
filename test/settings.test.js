@@ -278,6 +278,8 @@ test('every mutating admin route writes an audit row', async () => {
       return admin('POST', '/invite/accept', { token: tokenOf(inv.body.url), password: 'join-pass-1' });
     }],
     'PATCH /team/:id': ['team.disable', async () => admin('PATCH', `/team/${(await member()).id}`, { disabled: true }, ownerToken)],
+    'POST /sync-keys': ['sync_key.create', () => admin('POST', '/sync-keys', { name: 'Kassa' }, ownerToken)],
+    'DELETE /sync-keys/:id': ['sync_key.revoke', async () => admin('DELETE', `/sync-keys/${(await admin('POST', '/sync-keys', { name: 'Eski' }, ownerToken)).body.id}`, undefined, ownerToken)],
     'POST /me/password': ['account.password', async () => {
       const m = await member();
       return admin('POST', '/me/password', { current: 'walk-pass-1', password: 'walk-pass-2' }, await login(m.email, 'walk-pass-1'));

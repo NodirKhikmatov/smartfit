@@ -10,7 +10,6 @@ const STATUSES = ['new', 'packing', 'shipping', 'delivered', 'cancelled'];
 const SIZES = { shoes: ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'], accessory: ['ONE'] };
 const sizesFor = (c) => SIZES[c] || ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 const LIMIT = 25;
-const LOW_LEFT = 1; // same as src/admin/routes.js
 const TZ = 'Asia/Tashkent';
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => {
@@ -105,11 +104,11 @@ function kpi({ label, value, suffix, d, unit, sub, href, exact }) {
 const kpiSkeleton = (n) => Array.from({ length: n }, () => el('div', { className: 'kpi card', ariaHidden: 'true' },
   el('span', { className: 'skeleton line short' }), el('span', { className: 'skeleton block' })));
 const thumb = (p) => (p.image_url ? el('img', { className: 'thumb', src: p.image_url, alt: '', loading: 'lazy' }) : el('span', { className: 'thumb ph' }, icon(p.category || 'hanger')));
-// Stock per size as small heat cells: size + free units, red when sold out, amber when running out.
-function heat(stock) {
+// Stock per size as small heat cells: size + free units, red when sold out, amber at or below the store's threshold.
+function heat(stock, low = 1) {
   return el('span', { className: 'heat' }, ...stock.map((s) => {
     const free = s.quantity - s.reserved;
-    return el('span', { className: `cell l${stockLevel(free, LOW_LEFT)}`, title: t('adm.products.cell', { size: s.size === 'ONE' ? t('common.size_one') : s.size, n: free }) },
+    return el('span', { className: `cell l${stockLevel(free, low)}`, title: t('adm.products.cell', { size: s.size === 'ONE' ? t('common.size_one') : s.size, n: free }) },
       s.size === 'ONE' ? null : el('span', { textContent: s.size }), el('b', { textContent: free }));
   }));
 }
@@ -353,7 +352,7 @@ async function loadDashboard(quiet) {
   $('dashLow').replaceChildren(...(d.low_stock.items.length ? d.low_stock.items.map((x) => el('li', {},
     thumb(x),
     el('span', { className: 'rank-name' }, el('strong', { textContent: productName(x) }), el('span', { className: 'muted', textContent: [x.sku, showStore() && storeName(x.store_id)].filter(Boolean).join(' · ') })),
-    heat(x.stock),
+    heat(x.stock, x.low_stock_threshold),
     el('button', { type: 'button', className: 'icon-btn ghost', title: t('adm.products.edit'), ariaLabel: t('adm.products.edit_aria', { name: productName(x) }), onclick: () => openForm(x) }, icon('edit')))) :
     [el('li', { className: 'li-empty' }, emptyState({ ic: 'check', title: t('adm.dash.low_empty'), text: t('adm.dash.low_empty_text') }))]));
 }
@@ -673,7 +672,7 @@ async function loadProducts() {
         el('td', { className: 'hide-sm', textContent: cat(x.category) }),
         ...(showStore() ? [el('td', { className: 'hide-sm', textContent: storeName(x.store_id) })] : []),
         el('td', { className: 'num hide-sm' }, price(x)),
-        el('td', {}, heat(x.stock)),
+        el('td', {}, heat(x.stock, x.low_stock_threshold)),
         el('td', { className: 'row-actions hide-sm' },
           el('button', { type: 'button', className: 'icon-btn ghost', title: t('adm.products.edit'), ariaLabel: t('adm.products.edit_aria', { name: productName(x) }), onclick: () => openForm(x) }, icon('edit')),
           el('button', { type: 'button', className: 'icon-btn ghost danger', title: t('common.delete'), ariaLabel: t('adm.products.delete_aria', { name: productName(x) }), onclick: () => remove(x) }, icon('trash'))))));
@@ -703,7 +702,7 @@ function openForm(p) {
   f.reset();
   $('formError').textContent = '';
   $('formTitle').textContent = t(p ? 'adm.form.edit' : 'adm.form.new');
-  for (const k of ['name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'shelf_location']) f[k].value = p?.[k] ?? '';
+  for (const k of ['name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'shelf_location', 'sku', 'barcode']) f[k].value = p?.[k] ?? '';
   if (!p) { f.category.value = 'top'; f.gender.value = 'unisex'; }
   f.waterproof.checked = !!p?.waterproof;
   f.store_id.value = p?.store_id ?? (scope || stores[0]?.id || '');
@@ -727,7 +726,7 @@ $('form').addEventListener('submit', async (e) => {
     name: f.name.value, name_ru: f.name_ru.value || null, category: f.category.value, gender: f.gender.value, color: f.color.value,
     style: f.style.value || null, price: num(f.price.value), discount_price: num(f.discount_price.value),
     temp_min: num(f.temp_min.value), temp_max: num(f.temp_max.value), waterproof: f.waterproof.checked,
-    shelf_location: f.shelf_location.value || null,
+    shelf_location: f.shelf_location.value || null, sku: f.sku.value.trim() || null, barcode: f.barcode.value.trim() || null,
     stock: Object.fromEntries([...$('stock').querySelectorAll('input')].map((i) => [i.dataset.size, num(i.value) ?? 0])),
   };
   if (!editing && me.role === 'super') body.store_id = Number(f.store_id.value);
@@ -779,7 +778,7 @@ async function remove(p) {
   }
 }
 
-$('importCols').textContent = 'id, store_id, name, name_ru, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, shelf_location, XS, S, M, L, XL, XXL, 36 … 45, ONE';
+$('importCols').textContent = 'id, sku, barcode, store_id, name, name_ru, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, shelf_location, XS, S, M, L, XL, XXL, 36 … 45, ONE';
 function openImport() {
   $('importForm').reset();
   $('importError').textContent = '';
@@ -887,7 +886,7 @@ function printQr(q) {
 // ---------- Settings: store profile, team, audit log, my account (#/settings?tab=…).
 // The server decides who may do what; the tabs only hide what a role can't open.
 
-const SET_TABS = [['store', 'adm.set.store'], ['team', 'adm.set.team'], ['audit', 'adm.set.audit'], ['account', 'adm.set.account']];
+const SET_TABS = [['store', 'adm.set.store'], ['team', 'adm.set.team'], ['sync', 'adm.set.sync'], ['audit', 'adm.set.audit'], ['account', 'adm.set.account']];
 function loadSettings() {
   const tabs = SET_TABS.filter(([k]) => me.role !== 'manager' || k === 'store' || k === 'account');
   const tab = tabs.some(([k]) => k === route.params.tab) ? route.params.tab : 'store';
@@ -897,11 +896,11 @@ function loadSettings() {
     return a;
   }));
   for (const s of document.querySelectorAll('[data-tab]')) s.hidden = s.dataset.tab !== tab;
-  ({ store: loadStore, team: loadTeam, audit: loadAudit, account: loadAccount })[tab]();
+  ({ store: loadStore, team: loadTeam, sync: loadKeys, audit: loadAudit, account: loadAccount })[tab]();
 }
 
 // Store profile. A super-admin picks the store here (defaults to the sidebar's); everyone else has one.
-const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id'];
+const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id', 'low_stock_threshold'];
 const sf = $('storeForm');
 const storeId = () => (me.role === 'super' ? $('storePick').value : String(me.store_id));
 function mapLink() {
@@ -943,7 +942,7 @@ sf.onsubmit = async (e) => {
     name: v('name'), city: v('city'), address: v('address'), lat: Number(v('lat')), lon: Number(v('lon')),
     opens_at: v('opens_at') || null, closes_at: v('closes_at') || null,
     delivery_fee: Number(v('delivery_fee')), free_delivery_threshold: v('free_delivery_threshold') ? Number(v('free_delivery_threshold')) : null,
-    telegram_chat_id: v('telegram_chat_id') || null,
+    telegram_chat_id: v('telegram_chat_id') || null, low_stock_threshold: Number(v('low_stock_threshold')),
   };
   try {
     const s = await call(`/stores/${storeId()}`, { method: 'PATCH', body });
@@ -1044,6 +1043,68 @@ inv.onsubmit = async (e) => {
 $('inviteCopy').onclick = () => navigator.clipboard?.writeText($('inviteUrl').value)
   .then(() => toast(t('adm.qr.copied'), { tone: 'ok' }), () => toast(t('common.error'), { tone: 'danger' }));
 
+// Stock sync API keys: live keys with revoke, the create dialog (the key is shown once) and a curl sample.
+async function loadKeys() {
+  const seq = (loads.keys = (loads.keys || 0) + 1);
+  const sup = me.role === 'super';
+  $('keySample').textContent = `curl -X POST ${location.origin}/api/sync/stock \\\n  -H "Authorization: Bearer sfk_…" -H "Content-Type: application/json" \\\n  -d '{"items":[{"sku":"SF-TP-01","size":"M","quantity":12}]}'`;
+  try {
+    const keys = await call('/sync-keys?' + qs(scoped({})));
+    if (seq !== loads.keys) return;
+    stateBox($('keyError'));
+    $('keyList').replaceChildren(...(keys.length ? keys.map((k) => el('li', { className: 'card invite-row' },
+      el('div', { className: 'grow' }, el('strong', { textContent: k.name }),
+        el('div', { className: 'sizes', textContent: [`${k.prefix}…`, sup && k.store_name, t('adm.sync.created', { at: fmt.dateTime(k.created_at) }),
+          k.last_used_at ? t('adm.sync.used', { at: fmt.dateTime(k.last_used_at) }) : t('adm.sync.never')].filter(Boolean).join(' · ') })),
+      el('button', { type: 'button', className: 'icon-btn ghost', title: t('adm.sync.revoke'), ariaLabel: t('adm.sync.revoke_aria', { name: k.name }), onclick: () => revokeKey(k) }, icon('trash'))))
+      : [el('li', { className: 'li-empty' }, emptyState({ ic: 'settings', title: t('adm.sync.none'), text: t('adm.sync.none_text') }))]));
+  } catch (err) {
+    if (seq === loads.keys) { $('keyList').replaceChildren(); stateBox($('keyError'), err, () => loadKeys()); }
+  }
+}
+async function revokeKey(k) {
+  if (!(await confirmDialog({ title: t('adm.sync.revoke_q', { name: k.name }), text: t('adm.sync.revoke_text'), ok: t('adm.sync.revoke'), danger: true }))) return;
+  try {
+    await call(`/sync-keys/${k.id}`, { method: 'DELETE' });
+    toast(t('adm.sync.revoked', { name: k.name }), { tone: 'ok' });
+    loadKeys();
+  } catch (err) { toast(err.message, { tone: 'danger' }); }
+}
+const kf = $('keyForm');
+function keyStep(done) {
+  $('keyAsk').hidden = $('keyCreate').hidden = done;
+  $('keyDone').hidden = $('keyCopy').hidden = !done;
+  $('keyCancel').textContent = t(done ? 'common.close' : 'common.cancel');
+}
+$('keyBtn').onclick = () => {
+  kf.reset();
+  keyStep(false);
+  $('keyDlgError').textContent = '';
+  $('keyStoreWrap').hidden = me.role !== 'super';
+  kf.store_id.replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
+  kf.store_id.value = scope || stores[0]?.id || '';
+  $('keyDlg').showModal();
+};
+$('keyCancel').onclick = () => $('keyDlg').close();
+$('keyDlg').addEventListener('close', () => {
+  $('keyValue').value = ''; // shown once; don't leave it in the DOM
+  if (!$('keyDone').hidden) loadKeys();
+  $('keyBtn').focus();
+});
+kf.onsubmit = async (e) => {
+  e.preventDefault();
+  $('keyDlgError').textContent = '';
+  try {
+    const r = await call('/sync-keys', { method: 'POST', body: { name: kf.name.value.trim(), ...(me.role === 'super' && { store_id: Number(kf.store_id.value) }) } });
+    $('keyValue').value = r.key;
+    keyStep(true);
+    $('keyValue').focus();
+    $('keyValue').select();
+  } catch (err) { $('keyDlgError').textContent = err.message; }
+};
+$('keyCopy').onclick = () => navigator.clipboard?.writeText($('keyValue').value)
+  .then(() => toast(t('adm.qr.copied'), { tone: 'ok' }), () => toast(t('common.error'), { tone: 'danger' }));
+
 // Audit log: newest first, filtered by what / who / dates (all in the hash), paged.
 const AUDIT_FIELDS = {
   name: 'field.name', name_ru: 'field.name_ru', category: 'field.category', gender: 'field.gender', color: 'field.color', style: 'field.style',
@@ -1051,6 +1112,7 @@ const AUDIT_FIELDS = {
   shelf_location: 'field.shelf_location', image_url: 'field.photo', stock: 'field.stock', status: 'field.status', payment_status: 'adm.orders.payment',
   city: 'field.city', address: 'field.address', lat: 'adm.set.lat', lon: 'adm.set.lon', opens_at: 'adm.set.opens', closes_at: 'adm.set.closes',
   delivery_fee: 'field.delivery_fee', free_delivery_threshold: 'field.free_threshold', telegram_chat_id: 'field.telegram_chat',
+  sku: 'field.sku', barcode: 'field.barcode', low_stock_threshold: 'field.low_stock', prefix: 'adm.sync.key',
   email: 'field.email', role: 'field.role', disabled: 'adm.team.status',
 };
 const MONEY = ['price', 'discount_price', 'delivery_fee', 'free_delivery_threshold'];
@@ -1086,7 +1148,7 @@ function auditLines(l) {
 }
 const auditSubject = (l) => (l.entity === 'order' ? t('adm.order.title', { id: l.entity_label }) : l.entity === 'fitting' ? t('adm.fit.cabin', { cabin: l.entity_label }) : l.entity_label || '');
 const af = $('auditFilters');
-for (const e of ['product', 'order', 'fitting', 'store', 'team', 'account']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
+for (const e of ['product', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
 af.entity.onchange = af.admin.onchange = af.from.onchange = af.to.onchange = () =>
   setParams({ tab: 'audit', entity: af.entity.value, admin: af.admin.value, from: af.from.value, to: af.to.value });
 af.onsubmit = (e) => e.preventDefault();

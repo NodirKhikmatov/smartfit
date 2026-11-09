@@ -38,6 +38,14 @@ export const int = (v, min, max, label) => {
   return v;
 };
 
+// SKU / barcode: letters, digits and . _ - / (no spaces), not starting with a symbol (also keeps CSV formulas out).
+export const SKU = /^[A-Za-z0-9][A-Za-z0-9._\-/]{0,39}$/;
+const code = (v, label) => {
+  const c = text(v, 40, label, false);
+  if (c !== null && !SKU.test(c)) throw fail(400, 'err.invalid', { field: label });
+  return c;
+};
+
 // Validates a full product (create, or existing row merged with a partial edit).
 function validProduct(b) {
   const p = {
@@ -53,6 +61,8 @@ function validProduct(b) {
     temp_max: int(b.temp_max, -60, 60, 'field.temp_max'),
     waterproof: b.waterproof ?? false,
     shelf_location: text(b.shelf_location, 40, 'field.shelf_location', false),
+    sku: code(b.sku, 'field.sku'),
+    barcode: code(b.barcode, 'field.barcode'),
   };
   if (!CATEGORIES.includes(p.category)) throw fail(400, 'err.invalid', { field: 'field.category' });
   if (!GENDERS.includes(p.gender)) throw fail(400, 'err.invalid', { field: 'field.gender' });
@@ -95,11 +105,12 @@ async function snapProduct(q, id) {
   };
 }
 
-// CSV import: one row = one product, stock in one column per size. A filled `id` cell updates that product.
-const PRODUCT_COLS = ['name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'shelf_location'];
+// CSV import: one row = one product, stock in one column per size. A filled `id` cell, or else a `sku` already in
+// that store, updates that product; other rows create one.
+const PRODUCT_COLS = ['sku', 'barcode', 'name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'shelf_location'];
 const SIZE_COLS = [...sizesFor('top'), ...sizesFor('shoes'), ...sizesFor('accessory')];
 const IMPORT_COLS = ['id', 'store_id', ...PRODUCT_COLS, ...SIZE_COLS];
-const TEXT_COLS = ['name', 'name_ru', 'color', 'style', 'shelf_location'];
+const TEXT_COLS = ['sku', 'barcode', 'name', 'name_ru', 'color', 'style', 'shelf_location'];
 const MAX_IMPORT_ROWS = 2000;
 const YES = ['1', 'true', 'ha', 'yes'], NO = ['0', 'false', "yo'q", 'yoq', 'no'];
 
@@ -157,13 +168,12 @@ const EXPORT_MAX = 10000;
 // '+998901234567' → '998 90 123 45 67': readable, and Excel keeps it as text (no leading '+', no 12-digit number).
 const phoneText = (p) => String(p ?? '').replace(/^\+?998(\d{2})(\d{3})(\d{2})(\d{2})$/, '998 $1 $2 $3 $4');
 const PRODUCT_SORT = { created: 'p.id', name: 'p.name', price: 'coalesce(p.discount_price, p.price)', stock: 'coalesce(s.free, 0)' };
-// A size with this many free units or fewer is running out (shown in the low-stock list). shortcut: fixed; task 20 makes it a setting.
-export const LOW_LEFT = 1;
-// Per product: free units over all sizes, and how many sizes are running out.
-const stockTotals = (db) => db('product_stock').select('product_id')
-  .sum({ free: db.raw('quantity - reserved') })
-  .sum({ thin: db.raw(`case when quantity - reserved <= ${LOW_LEFT} then 1 else 0 end`) })
-  .groupBy('product_id');
+// Per product: free units over all sizes, and how many sizes are running out (≤ the store's low_stock_threshold free).
+const stockTotals = (db) => db('product_stock as ps').join('products as pp', 'pp.id', 'ps.product_id').join('stores as st', 'st.id', 'pp.store_id')
+  .select('ps.product_id')
+  .sum({ free: db.raw('ps.quantity - ps.reserved') })
+  .sum({ thin: db.raw('case when ps.quantity - ps.reserved <= st.low_stock_threshold then 1 else 0 end') })
+  .groupBy('ps.product_id');
 
 export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   const imageDir = path.resolve(uploadDir, 'products');
@@ -223,13 +233,15 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
 
   async function withStock(products) {
     const rows = await db('product_stock').whereIn('product_id', products.map((p) => p.id));
+    const low = Object.fromEntries((await db('stores').whereIn('id', [...new Set(products.map((p) => p.store_id))]).select('id', 'low_stock_threshold'))
+      .map((s) => [s.id, s.low_stock_threshold]));
     return products.map((p) => {
       const sizes = sizesFor(p.category);
       const stock = rows
         .filter((s) => s.product_id === p.id)
         .sort((a, b) => sizes.indexOf(a.size) - sizes.indexOf(b.size))
         .map(({ size, quantity, reserved }) => ({ size, quantity, reserved }));
-      return { ...p, waterproof: Boolean(p.waterproof), stock };
+      return { ...p, waterproof: Boolean(p.waterproof), low_stock_threshold: low[p.store_id], stock };
     });
   }
 
@@ -267,7 +279,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
       q.where((w) => w.whereILike('p.name', like).orWhereILike('p.name_ru', like).orWhereILike('p.sku', like));
     }
     if (filter === 'out') q.whereRaw('coalesce(s.free, 0) = 0');
-    if (filter === 'low') q.where('s.thin', '>', 0); // any size with ≤ LOW_LEFT free, fully sold-out ones included: the restock list
+    if (filter === 'low') q.where('s.thin', '>', 0); // any size at or below the threshold, fully sold-out ones included: the restock list
     if (filter === 'no_image') q.whereNull('p.image_url');
     const [{ n }] = await q.clone().count({ n: '*' });
     const rows = await q.select('p.*').orderByRaw(`${PRODUCT_SORT[sort]} ${dir}, p.id ${dir}`).limit(limit).offset(offset);
@@ -290,10 +302,16 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     return id;
   }
 
+  // A friendly 409 before the unique index would turn it into a 500.
+  async function skuFree(trx, storeId, sku, exceptId = 0) {
+    if (sku !== null && (await trx('products').where({ store_id: storeId, sku }).whereNot('id', exceptId).first())) throw fail(409, 'err.sku_taken', { sku });
+  }
+
   async function insertProduct(trx, admin, body) {
     const product = validProduct(body);
     const stock = validStock(body.stock, product.category);
     const storeId = await resolveStore(trx, admin, body.store_id);
+    await skuFree(trx, storeId, product.sku);
     const [{ id }] = await trx('products').insert({ ...product, store_id: storeId }).returning('id');
     await trx('product_stock').insert(sizesFor(product.category).map((size) => ({ product_id: id, size, quantity: 0 })));
     await applyStock(trx, id, stock);
@@ -308,6 +326,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     // Sizes depend on category group; switching group would orphan the stock rows.
     if (sizesFor(product.category) !== sizesFor(existing.category)) throw fail(400, 'err.category_locked');
     const stock = validStock(body.stock, product.category);
+    await skuFree(trx, existing.store_id, product.sku, existing.id);
     const before = await snapProduct(trx, existing.id);
     await trx('products').where({ id: existing.id }).update({ ...product, updated_at: trx.fn.now() });
     await applyStock(trx, existing.id, stock);
@@ -380,12 +399,15 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
             });
             if (Object.keys(stock).length) body.stock = stock;
             if (storeId !== undefined) body.store_id = storeId;
-            if (id === undefined) {
-              await insertProduct(trx, req.admin, body);
+            // No id: a SKU that already exists in the row's store picks the product to update.
+            const bySku = id === undefined && body.sku
+              ? await trx('products').where({ store_id: await resolveStore(trx, req.admin, storeId), sku: body.sku }).first() : undefined;
+            if (id === undefined && !bySku) {
+              seenIds.add(await insertProduct(trx, req.admin, body)); // a later row with the same SKU is a duplicate, not an update
               created++;
             } else {
-              const n = Number(id);
-              const existing = Number.isInteger(n) ? await scoped(req.admin).transacting(trx).where({ id: n }).first() : undefined;
+              const n = bySku ? bySku.id : Number(id);
+              const existing = bySku ?? (Number.isInteger(n) ? await scoped(req.admin).transacting(trx).where({ id: n }).first() : undefined);
               if (!existing) throw fail(400, 'err.csv_id_missing', { id });
               if (seenIds.has(n)) throw fail(400, 'err.csv_id_dup', { id: n });
               seenIds.add(n);

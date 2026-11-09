@@ -281,6 +281,8 @@ a.kpi:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); col
 .invite-list { display: grid; gap: var(--s-2); list-style: none; margin: 0; padding: 0; }
 .invite-row { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-3) var(--s-4); }
 .invite-row .grow { flex: 1; min-width: 0; }
+.code-sample code { background: none; padding: 0; word-break: normal; }
+.code-sample { margin: 0; padding: var(--s-3) var(--s-4); overflow-x: auto; max-width: 100%; font-size: var(--text-sm, .875rem); line-height: 1.5; }
 .changes { list-style: none; margin: 0; padding: 0; font-size: var(--text-sm); }
 .changes li { overflow-wrap: anywhere; }
 .audit-table details summary { cursor: pointer; font-size: var(--text-sm); color: var(--ink-2); }

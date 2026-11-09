@@ -234,6 +234,7 @@
                 <label class="field"><span data-i18n="field.delivery_fee"></span> <input name="delivery_fee" type="number" min="0" step="1" required inputmode="numeric"></label>
                 <label class="field"><span data-i18n="field.free_threshold"></span> <input name="free_delivery_threshold" type="number" min="1" step="1" inputmode="numeric"><span class="hint" data-i18n="adm.set.free_hint"></span></label>
                 <label class="field span-all"><span data-i18n="field.telegram_chat"></span> <input name="telegram_chat_id" inputmode="numeric" pattern="-?[0-9]{1,15}" maxlength="16" autocomplete="off"><span class="hint" data-i18n="adm.set.chat_hint"></span></label>
+                <label class="field"><span data-i18n="field.low_stock"></span> <input name="low_stock_threshold" type="number" min="0" max="1000" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.low_hint"></span></label>
               </div>
             </fieldset>
             <p class="error" id="storeError" role="alert"></p>
@@ -256,6 +257,18 @@
           </div>
           <h2 class="section-title" data-i18n="adm.team.invites"></h2>
           <ul class="invite-list" id="inviteList"></ul>
+        </section>
+
+        <section data-tab="sync" hidden>
+          <div class="page-head">
+            <p class="muted" data-i18n="adm.sync.sub"></p>
+            <button type="button" class="primary" id="keyBtn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="adm.sync.create"></span></button>
+          </div>
+          <div id="keyError"></div>
+          <ul class="invite-list" id="keyList"></ul>
+          <h2 class="section-title" data-i18n="adm.sync.how"></h2>
+          <p class="muted" data-i18n="adm.sync.how_text"></p>
+          <pre class="card code-sample"><code id="keySample"></code></pre>
         </section>
 
         <section data-tab="audit" hidden>
@@ -351,6 +364,26 @@
   </form>
 </dialog>
 
+<dialog id="keyDlg" class="narrow" aria-labelledby="keyTitle">
+  <form id="keyForm" method="dialog">
+    <h2 id="keyTitle" data-i18n="adm.sync.create"></h2>
+    <div id="keyAsk">
+      <label class="field"><span data-i18n="field.key_name"></span> <input name="name" required maxlength="60" autocomplete="off"><span class="hint" data-i18n="adm.sync.name_hint"></span></label>
+      <label class="field" id="keyStoreWrap"><span data-i18n="common.store"></span> <select name="store_id"></select></label>
+    </div>
+    <div id="keyDone" hidden>
+      <p data-i18n="adm.sync.key_text"></p>
+      <label class="field"><span data-i18n="adm.sync.key"></span> <input id="keyValue" readonly spellcheck="false"></label>
+    </div>
+    <p class="error" id="keyDlgError" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="keyCancel" data-i18n="common.cancel"></button>
+      <button class="primary" id="keyCreate" data-i18n="adm.sync.create"></button>
+      <button type="button" class="primary" id="keyCopy" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="adm.qr.copy"></span></button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlg" aria-labelledby="formTitle">
   <form id="form" method="dialog">
     <h2 id="formTitle"></h2>
@@ -368,6 +401,8 @@
       <label><span data-i18n="adm.form.temp_min"></span> <input name="temp_min" type="number" step="1" required></label>
       <label><span data-i18n="adm.form.temp_max"></span> <input name="temp_max" type="number" step="1" required></label>
       <label><span data-i18n="adm.form.shelf"></span> <input name="shelf_location" maxlength="40"></label>
+      <label><span data-i18n="field.sku"></span> <input name="sku" maxlength="40" pattern="[A-Za-z0-9][A-Za-z0-9._\-\/]{0,39}" autocomplete="off" spellcheck="false"></label>
+      <label><span data-i18n="field.barcode"></span> <input name="barcode" maxlength="40" pattern="[A-Za-z0-9][A-Za-z0-9._\-\/]{0,39}" autocomplete="off" spellcheck="false" inputmode="numeric"></label>
       <label id="storeWrap"><span data-i18n="common.store"></span> <select name="store_id"></select></label>
       <label class="check"><input name="waterproof" type="checkbox"> <span data-i18n="adm.form.waterproof"></span></label>
     </div>

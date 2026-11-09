@@ -9,6 +9,7 @@ import { stamp } from '../cart/cart.js';
 
 export const ROLES = ['super', 'owner', 'manager'];
 export const INVITE_TTL_MS = 48 * 60 * 60 * 1000;
+const SYNC_KEYS_MAX = 10; // live keys per store
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 const iso = (ms) => new Date(ms).toISOString(); // written and compared as ISO strings, like cart.js
 const isPassword = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200;
@@ -54,7 +55,7 @@ export function publicTeamRoutes(r, db, { secret }) {
 }
 
 // Store profile as the settings form edits it.
-const STORE_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'opens_at', 'closes_at', 'telegram_chat_id'];
+const STORE_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'opens_at', 'closes_at', 'telegram_chat_id', 'low_stock_threshold'];
 function validStore(b) {
   const num = (v, min, max, field) => {
     const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
@@ -77,6 +78,7 @@ function validStore(b) {
     opens_at: time(b.opens_at, 'field.hours'),
     closes_at: time(b.closes_at, 'field.hours'),
     telegram_chat_id: null,
+    low_stock_threshold: int(typeof b.low_stock_threshold === 'string' && b.low_stock_threshold.trim() !== '' ? Number(b.low_stock_threshold) : b.low_stock_threshold, 0, 1000, 'field.low_stock'),
   };
   if ((s.opens_at === null) !== (s.closes_at === null)) throw fail(400, 'err.invalid', { field: 'field.hours' });
   // Telegram chat ids: up to 13 digits, negative for groups (-100…); 15 digits still fit a double exactly.
@@ -192,6 +194,43 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
       });
     }
     res.json({ id: target.id, email: target.email, role: target.role, store_id: target.store_id, disabled });
+  });
+
+  // Stock sync API keys (task 20): owner of the store or super. The key is returned once; only its sha256 is kept.
+  r.get('/sync-keys', async (req, res) => {
+    ownerOrSuper(req.admin);
+    const keys = await inScope(req, db('sync_keys as k').join('stores as s', 's.id', 'k.store_id').whereNull('k.revoked_at').orderBy('k.id', 'desc')
+      .select('k.id', 'k.name', 'k.prefix', 'k.store_id', 's.name as store_name', 'k.created_at', 'k.last_used_at'), 'k.store_id');
+    res.json(keys.map((k) => ({ ...k, created_at: stamp(k.created_at), last_used_at: k.last_used_at && stamp(k.last_used_at) })));
+  });
+
+  r.post('/sync-keys', async (req, res) => {
+    ownerOrSuper(req.admin);
+    const name = text(req.body?.name, 60, 'field.key_name', true);
+    const storeId = await resolveStore(db, req.admin, req.body?.store_id);
+    if (Number((await db('sync_keys').where({ store_id: storeId }).whereNull('revoked_at').count({ n: '*' }))[0].n) >= SYNC_KEYS_MAX) throw fail(409, 'err.sync_keys_max', { max: SYNC_KEYS_MAX });
+    const key = `sfk_${randomBytes(24).toString('base64url')}`;
+    const prefix = key.slice(0, 10);
+    const id = await db.transaction(async (trx) => {
+      const [{ id }] = await trx('sync_keys').insert({ store_id: storeId, name, key_hash: sha256(key), prefix, created_by: req.admin.id }).returning('id');
+      await audit(trx, req.admin, { action: 'sync_key.create', storeId, entityId: id, label: name, after: { name, prefix } });
+      return id;
+    });
+    res.status(201).json({ id, name, prefix, store_id: storeId, key });
+  });
+
+  // Revoked keys stay as rows (revoked_at) so the audit log and last use still make sense; they never work again.
+  r.delete('/sync-keys/:id', async (req, res) => {
+    ownerOrSuper(req.admin);
+    const q = db('sync_keys').where({ id: Number(req.params.id) || 0 }).whereNull('revoked_at');
+    if (req.admin.role !== 'super') q.where({ store_id: req.admin.store_id });
+    const k = await q.first();
+    if (!k) throw fail(404, 'err.not_found');
+    await db.transaction(async (trx) => {
+      await trx('sync_keys').where({ id: k.id }).update({ revoked_at: iso(Date.now()) });
+      await audit(trx, req.admin, { action: 'sync_key.revoke', storeId: k.store_id, entityId: k.id, label: k.name, before: { name: k.name, prefix: k.prefix } });
+    });
+    res.status(204).end();
   });
 
   // { current, password } → a fresh token for this session; every other token of this admin stops working.

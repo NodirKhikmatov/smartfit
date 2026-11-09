@@ -1,6 +1,7 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { createAdminRouter } from './admin/routes.js';
+import { createSyncRouter } from './admin/sync.js';
 import { createRecommendRouter, createStoreRouter } from './recommend/routes.js';
 import { createWeather } from './recommend/weather.js';
 import { createStylist } from './recommend/stylist.js';
@@ -36,6 +37,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
     res.json({ ok: true });
   });
   api.use('/admin', createAdminRouter(db, { uploadDir }));
+  api.use('/sync', createSyncRouter(db)); // POS / ERP stock push, per-store API key
   api.use('/recommend', createRecommendRouter(db, { weather, stylist, stylistTimeoutMs }));
   api.use('/stores', createStoreRouter(db, { weather }));
   api.use('/size', createSizeRouter());
