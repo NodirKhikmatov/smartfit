@@ -7,50 +7,55 @@ import { sizesFor } from '../db/seed.js';
 import { parseCsv } from './csv.js';
 import { hashPassword, verifyPassword, DUMMY_HASH, tokenSecret, signToken, verifyToken } from './auth.js';
 import { releaseExpired, markPaid, orderView, nextStatuses, changeStatus, stamp } from '../cart/cart.js';
+import { LANGS, errorText } from '../../public/shared/i18n.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
 const MAX_FAILS = 10;
 const LOCK_MS = 15 * 60 * 1000;
 
-// Errors with publicMessage are shown to the client as-is (see app.js).
-export const fail = (status, message) => Object.assign(new Error(message), { status, publicMessage: message });
+// Client errors carry a dictionary key ('err.…') and its vars; app.js answers { code, error } in the request's language.
+export const fail = (status, key, vars = {}) => Object.assign(new Error(key), { status, publicKey: key, vars });
+// The apps send their UI language as Accept-Language (or ?lang=); anything else gets Uzbek.
+export const langOf = (req) => (LANGS.includes(req.query?.lang) ? req.query.lang : req.acceptsLanguages(...LANGS) || 'uz');
+export const errorBody = (lang, err) => ({ code: err.publicKey.slice(4), error: errorText(lang, err.publicKey, err.vars) });
 
 const publicAdmin = ({ id, email, role, store_id }) => ({ id, email, role, store_id });
 
 const text = (v, max, label, required) => {
   if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) {
-    if (required) throw fail(400, `${label} majburiy`);
+    if (required) throw fail(400, 'err.required', { field: label });
     return null;
   }
-  if (typeof v !== 'string' || v.trim().length > max) throw fail(400, `${label} noto'g'ri`);
+  if (typeof v !== 'string' || v.trim().length > max) throw fail(400, 'err.invalid', { field: label });
   return v.trim();
 };
 const int = (v, min, max, label) => {
-  if (!Number.isInteger(v) || v < min || v > max) throw fail(400, `${label} noto'g'ri`);
+  if (!Number.isInteger(v) || v < min || v > max) throw fail(400, 'err.invalid', { field: label });
   return v;
 };
 
 // Validates a full product (create, or existing row merged with a partial edit).
 function validProduct(b) {
   const p = {
-    name: text(b.name, 120, 'Nomi', true),
+    name: text(b.name, 120, 'field.name', true),
+    name_ru: text(b.name_ru, 120, 'field.name_ru', false),
     category: b.category,
     gender: b.gender,
-    color: text(b.color, 40, 'Rangi', true),
-    style: text(b.style, 40, 'Uslubi', false),
-    price: int(b.price, 1, 1e9, 'Narxi'),
+    color: text(b.color, 40, 'field.color', true),
+    style: text(b.style, 40, 'field.style', false),
+    price: int(b.price, 1, 1e9, 'field.price'),
     discount_price: b.discount_price ?? null,
-    temp_min: int(b.temp_min, -60, 60, 'Min harorat'),
-    temp_max: int(b.temp_max, -60, 60, 'Max harorat'),
+    temp_min: int(b.temp_min, -60, 60, 'field.temp_min'),
+    temp_max: int(b.temp_max, -60, 60, 'field.temp_max'),
     waterproof: b.waterproof ?? false,
-    shelf_location: text(b.shelf_location, 40, 'Javondagi joyi', false),
+    shelf_location: text(b.shelf_location, 40, 'field.shelf_location', false),
   };
-  if (!CATEGORIES.includes(p.category)) throw fail(400, "Kategoriya noto'g'ri");
-  if (!GENDERS.includes(p.gender)) throw fail(400, "Jins noto'g'ri");
-  if (p.discount_price !== null) int(p.discount_price, 1, p.price - 1, 'Chegirmali narx');
-  if (p.temp_min > p.temp_max) throw fail(400, 'Min harorat max haroratdan katta');
-  if (typeof p.waterproof !== 'boolean' && p.waterproof !== 0 && p.waterproof !== 1) throw fail(400, "Suv o'tkazmasligi noto'g'ri");
+  if (!CATEGORIES.includes(p.category)) throw fail(400, 'err.invalid', { field: 'field.category' });
+  if (!GENDERS.includes(p.gender)) throw fail(400, 'err.invalid', { field: 'field.gender' });
+  if (p.discount_price !== null) int(p.discount_price, 1, p.price - 1, 'field.discount_price');
+  if (p.temp_min > p.temp_max) throw fail(400, 'err.temp_range');
+  if (typeof p.waterproof !== 'boolean' && p.waterproof !== 0 && p.waterproof !== 1) throw fail(400, 'err.invalid', { field: 'field.waterproof' });
   p.waterproof = Boolean(p.waterproof);
   return p;
 }
@@ -58,11 +63,12 @@ function validProduct(b) {
 // stock = { "M": 3, "L": 0 } → validated entries for this category's sizes.
 function validStock(stock, category) {
   if (stock === undefined) return [];
-  if (!stock || typeof stock !== 'object' || Array.isArray(stock)) throw fail(400, "Qoldiq noto'g'ri");
+  if (!stock || typeof stock !== 'object' || Array.isArray(stock)) throw fail(400, 'err.invalid', { field: 'field.stock' });
   const sizes = sizesFor(category);
   return Object.entries(stock).map(([size, qty]) => {
-    if (!sizes.includes(size)) throw fail(400, `Razmer noto'g'ri: ${size}`);
-    return [size, int(qty, 0, 100000, `${size} soni`)];
+    if (!sizes.includes(size)) throw fail(400, 'err.bad_size', { size });
+    if (!Number.isInteger(qty) || qty < 0 || qty > 100000) throw fail(400, 'err.invalid_qty', { size });
+    return [size, qty];
   });
 }
 
@@ -70,16 +76,16 @@ async function applyStock(trx, productId, entries) {
   const current = await trx('product_stock').where({ product_id: productId });
   for (const [size, quantity] of entries) {
     const row = current.find((r) => r.size === size);
-    if (row && row.reserved > quantity) throw fail(409, `${size}: ${row.reserved} dona savatlarda band, undan kam qilib bo'lmaydi`);
+    if (row && row.reserved > quantity) throw fail(409, 'err.size_reserved', { size, n: row.reserved });
     await trx('product_stock').insert({ product_id: productId, size, quantity }).onConflict(['product_id', 'size']).merge(['quantity']);
   }
 }
 
 // CSV import: one row = one product, stock in one column per size. A filled `id` cell updates that product.
-const PRODUCT_COLS = ['name', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'shelf_location'];
+const PRODUCT_COLS = ['name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'shelf_location'];
 const SIZE_COLS = [...sizesFor('top'), ...sizesFor('shoes'), ...sizesFor('accessory')];
 const IMPORT_COLS = ['id', 'store_id', ...PRODUCT_COLS, ...SIZE_COLS];
-const TEXT_COLS = ['name', 'color', 'style', 'shelf_location'];
+const TEXT_COLS = ['name', 'name_ru', 'color', 'style', 'shelf_location'];
 const MAX_IMPORT_ROWS = 2000;
 const YES = ['1', 'true', 'ha', 'yes'], NO = ['0', 'false', "yo'q", 'yoq', 'no'];
 
@@ -87,7 +93,7 @@ const YES = ['1', 'true', 'ha', 'yes'], NO = ['0', 'false', "yo'q", 'yoq', 'no']
 function importCell(col, raw) {
   const v = raw.trim();
   // Spreadsheet formula injection: a cell starting with these runs as a formula when the data is opened in Excel.
-  if (TEXT_COLS.includes(col) && /^[=+\-@]/.test(v)) throw fail(400, `${col}: = + - @ belgisi bilan boshlanmasin`);
+  if (TEXT_COLS.includes(col) && /^[=+\-@]/.test(v)) throw fail(400, 'err.csv_formula', { col });
   if (v === '') return null;
   if (TEXT_COLS.includes(col)) return v;
   if (col === 'waterproof') return YES.includes(v.toLowerCase()) ? true : NO.includes(v.toLowerCase()) ? false : v;
@@ -114,14 +120,14 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   r.post('/login', async (req, res) => {
     const now = Date.now();
     const f = fails.get(req.ip);
-    if (f && f.until > now && f.count >= MAX_FAILS) throw fail(429, "Juda ko'p urinish. 15 daqiqadan keyin qayta urining");
+    if (f && f.until > now && f.count >= MAX_FAILS) throw fail(429, 'err.too_many_attempts');
     const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     const password = typeof req.body?.password === 'string' && req.body.password.length <= 200 ? req.body.password : '';
     const admin = email ? await db('admins').where({ email }).first() : undefined;
     const ok = (await verifyPassword(password, admin?.password_hash ?? DUMMY_HASH)) && admin && password;
     if (!ok) {
       fails.set(req.ip, f && f.until > now ? { count: f.count + 1, until: f.until } : { count: 1, until: now + LOCK_MS });
-      throw fail(401, "Email yoki parol noto'g'ri");
+      throw fail(401, 'err.bad_login');
     }
     fails.delete(req.ip);
     res.json({ ...signToken(secret, admin.id), admin: publicAdmin(admin) });
@@ -131,7 +137,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const auth = req.get('authorization') || '';
     const id = auth.startsWith('Bearer ') ? verifyToken(secret, auth.slice(7)) : null;
     const admin = id ? await db('admins').where({ id }).first() : undefined;
-    if (!admin) throw fail(401, 'Qayta kiring');
+    if (!admin) throw fail(401, 'err.login_again');
     req.admin = admin;
     next();
   });
@@ -142,7 +148,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   async function findProduct(req) {
     const id = Number(req.params.id);
     const p = Number.isInteger(id) ? await scoped(req.admin).where({ id }).first() : undefined;
-    if (!p) throw fail(404, 'Kiyim topilmadi');
+    if (!p) throw fail(404, 'err.product_not_found');
     return p;
   }
 
@@ -168,9 +174,9 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   // QR for the phone app (/m?store=ID), printed and placed next to the kiosk. Built offline as SVG.
   r.get('/stores/:id/qr', async (req, res) => {
     const id = Number(req.params.id);
-    if (req.admin.role !== 'super' && id !== req.admin.store_id) throw fail(404, "Do'kon topilmadi");
+    if (req.admin.role !== 'super' && id !== req.admin.store_id) throw fail(404, 'err.store_not_found');
     const store = Number.isInteger(id) ? await db('stores').where({ id }).first('id', 'name') : undefined;
-    if (!store) throw fail(404, "Do'kon topilmadi");
+    if (!store) throw fail(404, 'err.store_not_found');
     const base = (process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
     const url = `${base}/m?store=${store.id}`;
     const qr = qrcode(0, 'M');
@@ -183,7 +189,11 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const q = scoped(req.admin).orderBy('id');
     if (req.query.store_id) q.where('store_id', Number(req.query.store_id) || 0);
     if (req.query.category) q.where('category', String(req.query.category));
-    if (req.query.q) q.whereILike('name', `%${String(req.query.q).trim()}%`);
+    if (req.query.q) {
+      // shortcut: SQLite (dev) LIKE ignores case for ASCII only, so a Cyrillic search is case-sensitive there; Postgres ILIKE is fine.
+      const like = `%${String(req.query.q).trim()}%`;
+      q.where((w) => w.whereILike('name', like).orWhereILike('name_ru', like));
+    }
     res.json(await withStock(await q));
   });
 
@@ -195,11 +205,11 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   // `storeId` undefined = not given. Super-admin must name an existing store; a manager may only name their own.
   async function resolveStore(q, admin, storeId) {
     if (admin.role !== 'super') {
-      if (storeId !== undefined && Number(storeId) !== admin.store_id) throw fail(403, "Boshqa do'konga ruxsat yo'q");
+      if (storeId !== undefined && Number(storeId) !== admin.store_id) throw fail(403, 'err.store_forbidden');
       return admin.store_id;
     }
     const id = Number(storeId);
-    if (storeId === undefined || !Number.isInteger(id) || !(await q('stores').where({ id }).first())) throw fail(400, "Do'kon noto'g'ri");
+    if (storeId === undefined || !Number.isInteger(id) || !(await q('stores').where({ id }).first())) throw fail(400, 'err.invalid', { field: 'field.store' });
     return id;
   }
 
@@ -215,10 +225,10 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
 
   // Partial edit: only the given fields change, plus optional `stock`. store_id cannot change.
   async function updateProduct(trx, existing, body) {
-    if (body.store_id !== undefined && Number(body.store_id) !== existing.store_id) throw fail(400, "Do'konni o'zgartirib bo'lmaydi");
+    if (body.store_id !== undefined && Number(body.store_id) !== existing.store_id) throw fail(400, 'err.store_locked');
     const product = validProduct({ ...existing, ...body });
     // Sizes depend on category group; switching group would orphan the stock rows.
-    if (sizesFor(product.category) !== sizesFor(existing.category)) throw fail(400, "Bu kategoriyaga o'zgartirib bo'lmaydi (razmerlar boshqa)");
+    if (sizesFor(product.category) !== sizesFor(existing.category)) throw fail(400, 'err.category_locked');
     const stock = validStock(body.stock, product.category);
     await trx('products').where({ id: existing.id }).update({ ...product, updated_at: trx.fn.now() });
     await applyStock(trx, existing.id, stock);
@@ -239,8 +249,8 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
 
   r.delete('/products/:id', async (req, res) => {
     const p = await findProduct(req);
-    if (await db('order_items').where({ product_id: p.id }).first()) throw fail(409, "Bu kiyim buyurtmalarda bor. O'chirish o'rniga qoldiqni 0 qiling");
-    if (await db('product_stock').where({ product_id: p.id }).andWhere('reserved', '>', 0).first()) throw fail(409, "Bu kiyim savatlarda band. Keyinroq urining");
+    if (await db('order_items').where({ product_id: p.id }).first()) throw fail(409, 'err.product_in_orders');
+    if (await db('product_stock').where({ product_id: p.id }).andWhere('reserved', '>', 0).first()) throw fail(409, 'err.product_in_carts');
     await db('products').where({ id: p.id }).del();
     await removeImage(p.image_url);
     res.status(204).end();
@@ -248,23 +258,23 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
 
   // Body is the raw CSV file. All-or-nothing: any bad row rolls back the whole import.
   r.post('/products/import', express.text({ type: () => true, limit: '1mb' }), async (req, res) => {
-    if (typeof req.body !== 'string' || !req.body.trim()) throw fail(400, 'CSV fayl bo\'sh');
-    if (req.body.includes('\uFFFD')) throw fail(400, 'Faylni "CSV UTF-8" formatida saqlang');
+    if (typeof req.body !== 'string' || !req.body.trim()) throw fail(400, 'err.csv_empty');
+    if (req.body.includes('\uFFFD')) throw fail(400, 'err.csv_encoding');
     let rows;
     try {
       rows = parseCsv(req.body);
     } catch {
-      throw fail(400, 'CSV buzilgan: yopilmagan qo\'shtirnoq');
+      throw fail(400, 'err.csv_quote');
     }
     const header = rows.shift().map((h) => h.trim());
     while (header.length && !header.at(-1)) header.pop(); // Excel often adds empty trailing columns
     const cols = header.map((h) => IMPORT_COLS.find((c) => c.toLowerCase() === h.toLowerCase()));
     const unknown = header.filter((h, i) => !cols[i]);
-    if (unknown.length) throw fail(400, `Noma'lum ustun: ${unknown.join(', ')}`);
-    if (new Set(cols).size !== cols.length) throw fail(400, 'Ustun nomi takrorlangan');
+    if (unknown.length) throw fail(400, 'err.csv_unknown', { cols: unknown.join(', ') });
+    if (new Set(cols).size !== cols.length) throw fail(400, 'err.csv_dup_col');
     const data = rows.map((cells, i) => ({ line: i + 2, cells })).filter((r) => r.cells.some((c) => c.trim()));
-    if (!data.length) throw fail(400, "CSV faylda kiyim yo'q");
-    if (data.length > MAX_IMPORT_ROWS) throw fail(400, `Bir faylda ko'pi bilan ${MAX_IMPORT_ROWS} qator`);
+    if (!data.length) throw fail(400, 'err.csv_no_rows');
+    if (data.length > MAX_IMPORT_ROWS) throw fail(400, 'err.csv_too_many', { max: MAX_IMPORT_ROWS });
 
     const errors = [], seenIds = new Set();
     let created = 0, updated = 0;
@@ -273,7 +283,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
       await db.transaction(async (trx) => {
         for (const { line, cells } of data) {
           try {
-            if (cells.slice(cols.length).some((c) => c.trim())) throw fail(400, 'Ustunlar soni sarlavhadan ko\'p');
+            if (cells.slice(cols.length).some((c) => c.trim())) throw fail(400, 'err.csv_extra');
             const body = {}, stock = {};
             let id, storeId;
             cols.forEach((col, j) => {
@@ -292,23 +302,23 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
             } else {
               const n = Number(id);
               const existing = Number.isInteger(n) ? await scoped(req.admin).transacting(trx).where({ id: n }).first() : undefined;
-              if (!existing) throw fail(400, `Kiyim topilmadi: id ${id}`);
-              if (seenIds.has(n)) throw fail(400, `id ${n} faylda takrorlangan`);
+              if (!existing) throw fail(400, 'err.csv_id_missing', { id });
+              if (seenIds.has(n)) throw fail(400, 'err.csv_id_dup', { id: n });
               seenIds.add(n);
               // Update rows: an empty cell keeps the current value, so a stock-only row needs just id + sizes.
               await updateProduct(trx, existing, Object.fromEntries(Object.entries(body).filter(([, v]) => v !== null)));
               updated++;
             }
           } catch (err) {
-            if (!err.publicMessage) throw err; // DB errors are bugs, not bad rows
-            errors.push({ line, error: err.publicMessage });
+            if (!err.publicKey) throw err; // DB errors are bugs, not bad rows
+            errors.push({ line, ...errorBody(langOf(req), err) });
           }
         }
         if (errors.length) throw rollback;
       });
     } catch (err) {
       if (err !== rollback) throw err;
-      return res.status(400).json({ error: `${errors.length} ta qatorda xato. Hech narsa yuklanmadi`, errors: errors.slice(0, 100) });
+      return res.status(400).json({ ...errorBody(langOf(req), fail(400, 'err.csv_rows', { n: errors.length })), errors: errors.slice(0, 100) });
     }
     res.json({ created, updated });
   });
@@ -318,7 +328,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const p = await findProduct(req);
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     const ext = buf.length >= 12 && IMAGE_TYPES.find(([, is]) => is(buf))?.[0];
-    if (!ext) throw fail(400, 'Faqat JPEG, PNG yoki WebP rasm');
+    if (!ext) throw fail(400, 'err.image_type');
     const file = `${p.id}-${randomBytes(8).toString('hex')}.${ext}`;
     await mkdir(imageDir, { recursive: true });
     await writeFile(path.join(imageDir, file), buf);
@@ -363,7 +373,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const q = db('orders').where({ id: Number.isInteger(id) && id > 0 ? id : 0 });
     if (req.admin.role !== 'super') q.where('store_id', req.admin.store_id);
     const o = await q.first();
-    if (!o) throw fail(404, 'Buyurtma topilmadi');
+    if (!o) throw fail(404, 'err.order_not_found');
     return o;
   };
   const adminView = async (o) => ({ ...(await orderView(db, o)), telegram: o.telegram_chat_id != null, next: nextStatuses(o) });
@@ -373,9 +383,9 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   r.post('/orders/:id/status', async (req, res) => {
     const o = await findOrder(req);
     const to = req.body?.status;
-    if (!['new', 'packing', 'shipping', 'delivered', 'cancelled'].includes(to)) throw fail(400, "Holat noto'g'ri");
+    if (!['new', 'packing', 'shipping', 'delivered', 'cancelled'].includes(to)) throw fail(400, 'err.invalid', { field: 'field.status' });
     if (!(await changeStatus(db, o.id, to))) {
-      throw fail(409, o.payment_status === 'pending' && to !== 'cancelled' ? "Avval to'lov olinishi kerak" : "Bu holatga o'tkazib bo'lmaydi. Sahifani yangilang");
+      throw fail(409, o.payment_status === 'pending' && to !== 'cancelled' ? 'err.pay_first' : 'err.status_conflict');
     }
     res.json(await adminView(await db('orders').where({ id: o.id }).first()));
   });
@@ -383,7 +393,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const o = await findOrder(req);
     if (!(await markPaid(db, o.id))) {
       const now = await db('orders').where({ id: o.id }).first('payment_status');
-      throw fail(409, now.payment_status === 'paid' ? "Bu buyurtma allaqachon to'langan" : "Buyurtma bekor qilingan: 15 daqiqada to'lanmadi");
+      throw fail(409, now.payment_status === 'paid' ? 'err.already_paid' : 'err.order_expired');
     }
     res.json(await adminView(await db('orders').where({ id: o.id }).first()));
   });
@@ -420,7 +430,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     }
     const top = [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, 10);
     // Logged products may since have been deleted: they come back with name null.
-    const names = await scoped(req.admin).whereIn('id', top.map(([id]) => id)).select('id', 'name', 'category');
+    const names = await scoped(req.admin).whereIn('id', top.map(([id]) => id)).select('id', 'name', 'name_ru', 'category');
     const fromRec = orders.filter((o) => o.recommendation_id != null);
     const ids = new Set(logs.map((l) => l.id));
     res.json({
@@ -440,7 +450,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
       per_day: keys.map((day) => ({ day, count: perDay[day] })),
       top: top.map(([product_id, count]) => {
         const p = names.find((x) => x.id === product_id);
-        return { product_id, name: p?.name ?? null, category: p?.category ?? null, count };
+        return { product_id, name: p?.name ?? null, name_ru: p?.name_ru ?? null, category: p?.category ?? null, count };
       }),
     });
   });
@@ -474,7 +484,7 @@ export async function createStore(db, { name, city, lat, lon, address, delivery_
   };
   const fee = num(delivery_fee, 0, 1e9, 'delivery_fee');
   const free = free_delivery_threshold === '' || free_delivery_threshold == null ? null : num(free_delivery_threshold, 1, 1e9, 'free_delivery_threshold');
-  if (!Number.isInteger(fee) || (free !== null && !Number.isInteger(free))) throw new Error("Prices are whole so'm");
+  if (!Number.isInteger(fee) || (free !== null && !Number.isInteger(free))) throw new Error('Prices must be whole numbers');
   const [{ id }] = await db('stores').insert({
     name: str(name, 'name'), city: str(city, 'city'), address: str(address, 'address'),
     lat: num(lat, -90, 90, 'lat'), lon: num(lon, -180, 180, 'lon'), delivery_fee: fee, free_delivery_threshold: free,

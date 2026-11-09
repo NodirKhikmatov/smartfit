@@ -15,122 +15,123 @@
 <header class="topbar">
   <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg><span id="storeName">Smart Fit</span></div>
   <button id="cartBtn" hidden aria-live="polite"></button>
-  <button id="home" class="icon-btn ghost" hidden aria-label="Boshiga" title="Boshiga"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#home"></use></svg></button>
+  <button id="home" class="icon-btn ghost" hidden data-i18n-aria-label="kiosk.home" data-i18n-title="kiosk.home"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#home"></use></svg></button>
 </header>
 <main>
   <section data-screen="start">
-    <h1 tabindex="-1">Bugungi ob-havoga mos kiyim tanlaymiz</h1>
-    <div class="weather card loading" id="weather" aria-live="polite" aria-busy="true"><span class="skeleton line short"></span><span class="skeleton block"></span><span class="visually-hidden">Ob-havo yuklanmoqda…</span></div>
+    <h1 tabindex="-1" data-i18n="kiosk.start.title"></h1>
+    <div id="langBox"></div>
+    <div class="weather card loading" id="weather" aria-live="polite" aria-busy="true"><span class="skeleton line short"></span><span class="skeleton block"></span><span class="visually-hidden" data-i18n="kiosk.weather.loading"></span></div>
     <p class="error" id="startError" role="alert"></p>
-    <button class="primary wide" id="start">Boshlash</button>
+    <button class="primary wide" id="start" data-i18n="kiosk.start.go"></button>
   </section>
 
   <section data-screen="form" hidden>
-    <h1 tabindex="-1">O'zingiz haqingizda</h1>
+    <h1 tabindex="-1" data-i18n="kiosk.form.title"></h1>
     <form id="form" novalidate>
       <fieldset>
-        <legend>Jins</legend>
+        <legend data-i18n="kiosk.form.gender"></legend>
         <div class="chips two">
-          <label><input type="radio" name="gender" value="male"><span>Erkak</span></label>
-          <label><input type="radio" name="gender" value="female"><span>Ayol</span></label>
+          <label><input type="radio" name="gender" value="male"><span data-i18n="gender.male"></span></label>
+          <label><input type="radio" name="gender" value="female"><span data-i18n="gender.female"></span></label>
         </div>
       </fieldset>
       <div class="row">
         <label class="field">
-          <span>Bo'y, sm</span>
-          <input name="height" type="number" inputmode="numeric" min="100" max="230" step="1" placeholder="masalan, 175">
+          <span data-i18n="kiosk.form.height"></span>
+          <input name="height" type="number" inputmode="numeric" min="100" max="230" step="1" data-i18n-placeholder="kiosk.form.height_ph">
         </label>
         <label class="field">
-          <span>Vazn, kg <span class="hint">(razmerni aniqroq qiladi)</span></span>
+          <span><span data-i18n="kiosk.form.weight"></span> <span class="hint" data-i18n="kiosk.form.weight_hint"></span></span>
           <input name="weight" type="number" inputmode="numeric" min="30" max="250" step="1">
         </label>
       </div>
       <div class="row">
         <label class="field">
-          <span>Poyabzal razmeri <span class="hint">(ixtiyoriy)</span></span>
-          <select name="shoes"><option value="">Bilmayman</option></select>
+          <span><span data-i18n="kiosk.form.shoes"></span> <span class="hint" data-i18n="kiosk.form.optional"></span></span>
+          <select name="shoes"><option value="" data-i18n="kiosk.form.shoes_unknown"></option></select>
         </label>
         <label class="field">
-          <span>Byudjet, so'm <span class="hint">(ixtiyoriy)</span></span>
-          <input name="budget" type="number" inputmode="numeric" min="1" step="1" placeholder="masalan, 1500000">
+          <span><span data-i18n="kiosk.form.budget"></span> <span class="hint" data-i18n="kiosk.form.optional"></span></span>
+          <input name="budget" type="number" inputmode="numeric" min="1" step="1" data-i18n-placeholder="kiosk.form.budget_ph">
         </label>
       </div>
       <p class="error" id="formError" role="alert"></p>
-      <button class="primary wide">Davom etish</button>
+      <button class="primary wide" data-i18n="kiosk.form.next"></button>
     </form>
   </section>
 
   <section data-screen="camera" hidden>
-    <h1 tabindex="-1">Rasmga tushish</h1>
-    <p>Razmeringizni rasmdan aniqlaymiz. Boshdan oyoqqacha butun tanangiz kadrga tushsin: kameraga to'g'ri qarab turing, qo'llaringizni biroz yonga oching.</p>
-    <p class="muted">Razmer shu qurilmada aniqlanadi. Obraz tanlash uchun rasmning kichik nusxasi sun'iy intellekt stilistiga (Claude) yuboriladi. Rasm hech qayerda saqlanmaydi.</p>
+    <h1 tabindex="-1" data-i18n="kiosk.camera.title"></h1>
+    <p data-i18n="kiosk.camera.intro"></p>
+    <p class="muted" data-i18n="kiosk.camera.privacy"></p>
     <div class="camera" id="preview" hidden>
       <video id="video" playsinline muted></video>
       <div class="count" id="count" aria-live="assertive"></div>
     </div>
     <p class="notice" id="cameraStatus" role="status" hidden></p>
     <div class="row">
-      <button class="primary" id="shoot">Rasmga tushish</button>
-      <button id="galleryBtn" hidden>Galereyadan tanlash</button>
+      <button class="primary" id="shoot" data-i18n="kiosk.camera.shoot"></button>
+      <button id="galleryBtn" hidden data-i18n="kiosk.camera.gallery"></button>
     </div>
     <input type="file" id="gallery" accept="image/*" hidden>
     <div class="row end">
-      <button id="cameraBack">Orqaga</button>
-      <button id="noPhoto">Rasmsiz davom etish</button>
+      <button id="cameraBack" data-i18n="common.back"></button>
+      <button id="noPhoto" data-i18n="kiosk.camera.skip"></button>
     </div>
   </section>
 
   <section data-screen="results" hidden>
-    <h1 tabindex="-1">Siz uchun obrazlar</h1>
+    <h1 tabindex="-1" data-i18n="kiosk.results.title"></h1>
     <p class="muted" id="resultsWeather"></p>
     <div class="sizes card" id="sizeBar"></div>
     <p class="visually-hidden" id="resultsStatus" role="status"></p>
     <div id="results"></div>
     <div class="row">
-      <button id="changeSizes">Ma'lumotlarni o'zgartirish</button>
+      <button id="changeSizes" data-i18n="kiosk.results.change"></button>
     </div>
   </section>
   <section data-screen="cart" hidden>
-    <h1 tabindex="-1">Savat</h1>
+    <h1 tabindex="-1" data-i18n="kiosk.cart"></h1>
     <p class="notice" id="holdNote" hidden></p>
     <p class="error" id="cartError" role="alert"></p>
     <div id="cartBody"></div>
     <form id="checkout" novalidate hidden>
       <fieldset>
-        <legend>Qanday olasiz?</legend>
+        <legend data-i18n="kiosk.checkout.how"></legend>
         <div class="chips two">
-          <label><input type="radio" name="fulfillment" value="pickup" checked><span>Do'kondan olib ketaman</span></label>
-          <label><input type="radio" name="fulfillment" value="delivery"><span>Uyga yetkazib bering</span></label>
+          <label><input type="radio" name="fulfillment" value="pickup" checked><span data-i18n="kiosk.checkout.pickup"></span></label>
+          <label><input type="radio" name="fulfillment" value="delivery"><span data-i18n="kiosk.checkout.delivery"></span></label>
         </div>
       </fieldset>
       <div class="row">
-        <label class="field"><span>Ismingiz</span><input name="fullname" autocomplete="name" maxlength="80"></label>
-        <label class="field"><span>Telefon</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+998 90 123 45 67" maxlength="20"></label>
+        <label class="field"><span data-i18n="kiosk.checkout.name"></span><input name="fullname" autocomplete="name" maxlength="80"></label>
+        <label class="field"><span data-i18n="kiosk.checkout.phone"></span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+998 90 123 45 67" maxlength="20"></label>
       </div>
       <div id="deliveryFields" hidden>
-        <label class="field"><span>Manzil</span><input name="address" autocomplete="street-address" maxlength="200" placeholder="Ko'cha, uy, xonadon"></label>
-        <p class="meta" id="mapHint">Xaritada uyingizni bosib belgilang (ixtiyoriy, kuryerga yordam beradi).</p>
+        <label class="field"><span data-i18n="kiosk.checkout.address"></span><input name="address" autocomplete="street-address" maxlength="200" data-i18n-placeholder="kiosk.checkout.address_ph"></label>
+        <p class="meta" id="mapHint" data-i18n="kiosk.checkout.map_hint"></p>
         <div id="map"></div>
       </div>
       <div class="sum card" id="cartSum"></div>
       <fieldset id="payFields" hidden>
-        <legend>Qanday to'laysiz?</legend>
+        <legend data-i18n="kiosk.checkout.pay_how"></legend>
         <div class="chips" id="payChoices"></div>
       </fieldset>
-      <p class="muted" id="payNote">To'lov: do'kon kassasida. Buyurtma raqamini kassirga ayting.</p>
+      <p class="muted" id="payNote"></p>
       <p class="error" id="checkoutError" role="alert"></p>
-      <button class="primary wide" id="placeOrder">Buyurtma berish</button>
+      <button class="primary wide" id="placeOrder" data-i18n="kiosk.checkout.place"></button>
     </form>
     <div class="row end">
-      <button id="cartBack">Obrazlarga qaytish</button>
+      <button id="cartBack" data-i18n="kiosk.cart.back"></button>
     </div>
   </section>
 
   <section data-screen="done" hidden>
-    <h1 tabindex="-1">Buyurtma qabul qilindi</h1>
+    <h1 tabindex="-1" data-i18n="kiosk.done.title"></h1>
     <div class="order-no" id="orderNo"></div>
     <div id="doneBody"></div>
-    <button class="primary wide" id="doneHome">Boshiga</button>
+    <button class="primary wide" id="doneHome" data-i18n="kiosk.home"></button>
   </section>
 </main>
 <script type="module" src="/app/app.js"></script>

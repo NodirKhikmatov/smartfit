@@ -26,7 +26,7 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
       q.orWhere((w) => w.where('p.category', 'accessory').where('s.size', 'ONE'));
     })
     .orderBy(['p.id', 's.id'])
-    .select('p.id', 'p.name', 'p.category', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.waterproof', 'p.image_url', 'p.shelf_location', 's.size');
+    .select('p.id', 'p.name', 'p.name_ru', 'p.category', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.waterproof', 'p.image_url', 'p.shelf_location', 's.size');
   const byId = new Map();
   for (const r of rows) {
     const known = r.category === 'accessory' || sizes[sizeKey[r.category]];

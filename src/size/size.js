@@ -64,18 +64,18 @@ export function createSizeRouter() {
   const r = express.Router();
   r.post('/', (req, res) => {
     const b = req.body ?? {};
-    if (typeof b !== 'object' || Array.isArray(b) || Object.keys(b).some((k) => !['gender', 'height', 'weight', 'pose'].includes(k))) throw fail(400, "Noto'g'ri so'rov");
-    if (!['male', 'female'].includes(b.gender)) throw fail(400, "Jins noto'g'ri");
-    if (!Number.isInteger(b.height) || b.height < 100 || b.height > 230) throw fail(400, "Bo'y noto'g'ri");
+    if (typeof b !== 'object' || Array.isArray(b) || Object.keys(b).some((k) => !['gender', 'height', 'weight', 'pose'].includes(k))) throw fail(400, 'err.bad_request');
+    if (!['male', 'female'].includes(b.gender)) throw fail(400, 'err.invalid', { field: 'field.gender' });
+    if (!Number.isInteger(b.height) || b.height < 100 || b.height > 230) throw fail(400, 'err.invalid', { field: 'field.height' });
     const weight = b.weight ?? null;
-    if (weight !== null && (!Number.isInteger(weight) || weight < 30 || weight > 250)) throw fail(400, "Vazn noto'g'ri");
+    if (weight !== null && (!Number.isInteger(weight) || weight < 30 || weight > 250)) throw fail(400, 'err.invalid', { field: 'field.weight' });
     const pose = b.pose ?? null;
     if (pose !== null) {
       const keys = typeof pose === 'object' && !Array.isArray(pose) ? Object.keys(pose) : [];
-      if (keys.length !== 2 || !isRatio(pose.shoulder) || !isRatio(pose.hip)) throw fail(400, "O'lchov noto'g'ri");
+      if (keys.length !== 2 || !isRatio(pose.shoulder) || !isRatio(pose.hip)) throw fail(400, 'err.invalid', { field: 'field.pose' });
     }
     const out = estimateSize({ gender: b.gender, height: b.height, weight, pose });
-    if (out.error) throw fail(422, "Rasmdan o'lchab bo'lmadi. Kameraga to'g'ri qarab, butun tanangiz ko'rinadigan qilib qayta urinib ko'ring");
+    if (out.error) throw fail(422, 'err.photo_measure');
     res.json(out);
   });
   return r;

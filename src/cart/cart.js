@@ -44,7 +44,7 @@ async function lockCart(trx, token, now = Date.now()) {
 }
 async function liveCart(trx, token) {
   const cart = await lockCart(trx, token);
-  if (!cart) throw fail(404, "Savat topilmadi yoki band qilish muddati tugadi");
+  if (!cart) throw fail(404, 'err.cart_not_found');
   return cart;
 }
 
@@ -138,7 +138,7 @@ const storeOf = (db, id) => db('stores').where({ id }).first('id', 'name', 'city
 async function cartView(db, cart, payments) {
   const store = await storeOf(db, cart.store_id);
   const rows = await db('cart_items as c').join('products as p', 'p.id', 'c.product_id').where('c.cart_id', cart.id).orderBy('c.id')
-    .select('c.id', 'c.product_id', 'c.size', 'c.quantity', 'p.name', 'p.category', 'p.color', 'p.price', 'p.discount_price', 'p.image_url', 'p.shelf_location');
+    .select('c.id', 'c.product_id', 'c.size', 'c.quantity', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.price', 'p.discount_price', 'p.image_url', 'p.shelf_location');
   const free = await db('product_stock').whereIn('product_id', rows.map((r) => r.product_id)).whereRaw('quantity - reserved > 0').select('product_id', 'size');
   const items = rows.map((r) => ({
     ...r,
@@ -160,7 +160,7 @@ async function cartView(db, cart, payments) {
 
 export async function orderView(db, order) {
   const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').where('i.order_id', order.id).orderBy('i.id')
-    .select('i.product_id', 'p.name', 'p.category', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price');
+    .select('i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price');
   const { id, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total } = order;
   return {
     id, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total,
@@ -174,7 +174,7 @@ const km = (a, b) => {
   return 12742 * Math.asin(Math.sqrt(h));
 };
 const text = (v, min, max, label) => {
-  if (typeof v !== 'string' || v.trim().length < min || v.trim().length > max) throw fail(400, `${label} noto'g'ri`);
+  if (typeof v !== 'string' || v.trim().length < min || v.trim().length > max) throw fail(400, 'err.invalid', { field: label });
   return v.trim();
 };
 
@@ -182,28 +182,28 @@ const text = (v, min, max, label) => {
 export function normalizePhone(v) {
   const d = typeof v === 'string' ? v.replace(/[\s()+-]/g, '') : '';
   const full = /^\d{9}$/.test(d) ? '998' + d : d;
-  if (!/^998\d{9}$/.test(full)) throw fail(400, "Telefon raqami noto'g'ri. Masalan: +998 90 123 45 67");
+  if (!/^998\d{9}$/.test(full)) throw fail(400, 'err.phone');
   return '+' + full;
 }
 
 function customer(b, store) {
-  if (!['pickup', 'delivery'].includes(b.fulfillment)) throw fail(400, "Olish usulini tanlang");
-  const c = { customer_name: text(b.name, 2, 80, 'Ism'), phone: normalizePhone(b.phone), fulfillment: b.fulfillment, address: null, lat: null, lon: null };
+  if (!['pickup', 'delivery'].includes(b.fulfillment)) throw fail(400, 'err.fulfillment');
+  const c = { customer_name: text(b.name, 2, 80, 'field.customer_name'), phone: normalizePhone(b.phone), fulfillment: b.fulfillment, address: null, lat: null, lon: null };
   if (c.fulfillment === 'pickup') return c;
-  c.address = text(b.address, 5, 200, 'Manzil');
+  c.address = text(b.address, 5, 200, 'field.address');
   if (b.lat != null || b.lon != null) {
     const ok = (v, lim) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= lim;
-    if (!ok(b.lat, 90) || !ok(b.lon, 180)) throw fail(400, "Xaritadagi nuqta noto'g'ri");
-    if (km(store, { lat: b.lat, lon: b.lon }) > DELIVERY_RADIUS_KM) throw fail(422, `Yetkazib berish faqat ${store.city} shahri ichida`);
+    if (!ok(b.lat, 90) || !ok(b.lon, 180)) throw fail(400, 'err.invalid', { field: 'field.map_point' });
+    if (km(store, { lat: b.lat, lon: b.lon }) > DELIVERY_RADIUS_KM) throw fail(422, 'err.delivery_city', { city: store.city });
     Object.assign(c, { lat: b.lat, lon: b.lon });
   }
   return c;
 }
 
 function parseItems(items) {
-  if (!Array.isArray(items) || items.length < 1 || items.length > 10) throw fail(400, "Kiyimlar ro'yxati noto'g'ri");
+  if (!Array.isArray(items) || items.length < 1 || items.length > 10) throw fail(400, 'err.invalid', { field: 'field.items' });
   return items.map((i) => {
-    if (!Number.isInteger(i?.product_id) || i.product_id < 1 || typeof i.size !== 'string') throw fail(400, 'Kiyim yoki razmer tanlanmagan');
+    if (!Number.isInteger(i?.product_id) || i.product_id < 1 || typeof i.size !== 'string') throw fail(400, 'err.item_missing');
     return { product_id: i.product_id, size: i.size };
   });
 }
@@ -227,18 +227,18 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
       let cart = await lockCart(trx, b.token);
       if (cart && Number.isInteger(b.store_id) && cart.store_id !== b.store_id) cart = null; // phone scanned another store's QR
       if (!cart) {
-        if (!Number.isInteger(b.store_id) || !(await trx('stores').where({ id: b.store_id }).first('id'))) throw fail(404, "Do'kon topilmadi");
+        if (!Number.isInteger(b.store_id) || !(await trx('stores').where({ id: b.store_id }).first('id'))) throw fail(404, 'err.store_not_found');
         const token = randomBytes(16).toString('hex');
         await trx('carts').insert({ store_id: b.store_id, token, expires_at: iso(Date.now() + HOLD_MS) });
         cart = await trx('carts').where({ token }).first();
       }
       const [{ n }] = await trx('cart_items').where({ cart_id: cart.id }).sum({ n: 'quantity' });
-      if (Number(n ?? 0) + items.length > MAX_UNITS) throw fail(409, `Savatga ko'pi bilan ${MAX_UNITS} ta kiyim sig'adi`);
+      if (Number(n ?? 0) + items.length > MAX_UNITS) throw fail(409, 'err.cart_full', { max: MAX_UNITS });
       for (const { product_id, size } of items) {
-        const p = await trx('products').where({ id: product_id, store_id: cart.store_id }).first('name', 'category');
-        if (!p) throw fail(404, 'Kiyim topilmadi');
-        if (!sizesFor(p.category).includes(size)) throw fail(400, `«${p.name}»: razmer noto'g'ri`);
-        if (!(await hold(trx, product_id, size, 1))) throw fail(409, `«${p.name}» (${size === 'ONE' ? 'yagona razmer' : size}) qolmadi`);
+        const p = await trx('products').where({ id: product_id, store_id: cart.store_id }).first('name', 'name_ru', 'category');
+        if (!p) throw fail(404, 'err.product_not_found');
+        if (!sizesFor(p.category).includes(size)) throw fail(400, 'err.product_size', { product: p });
+        if (!(await hold(trx, product_id, size, 1))) throw fail(409, 'err.out_of_stock', { product: p, size: size === 'ONE' ? 'common.size_one' : size });
         await trx('cart_items').insert({ cart_id: cart.id, product_id, size, quantity: 1 })
           .onConflict(['cart_id', 'product_id', 'size']).merge({ quantity: trx.raw('?? + 1', ['cart_items.quantity']) });
       }
@@ -255,7 +255,7 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
 
   r.get('/:token', async (req, res) => {
     const cart = TOKEN.test(req.params.token) ? await db('carts').where({ token: req.params.token }).first() : null;
-    if (!cart) throw fail(404, "Savat topilmadi yoki band qilish muddati tugadi");
+    if (!cart) throw fail(404, 'err.cart_not_found');
     res.json(await view(cart));
   });
 
@@ -265,12 +265,12 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
     const cart = await db.transaction(async (trx) => {
       const cart = await liveCart(trx, req.params.token);
       const line = await trx('cart_items').where({ id: Number(req.params.id) || 0, cart_id: cart.id }).first();
-      if (!line) throw fail(404, 'Kiyim savatda yo\'q');
+      if (!line) throw fail(404, 'err.not_in_cart');
       if (size === line.size) return cart;
       const p = await trx('products').where({ id: line.product_id }).first('category');
-      if (typeof size !== 'string' || !sizesFor(p.category).includes(size)) throw fail(400, "Razmer noto'g'ri");
-      if (await trx('cart_items').where({ cart_id: cart.id, product_id: line.product_id, size }).first()) throw fail(409, 'Bu razmer savatda bor');
-      if (!(await hold(trx, line.product_id, size, line.quantity))) throw fail(409, `${size} razmer qolmadi`);
+      if (typeof size !== 'string' || !sizesFor(p.category).includes(size)) throw fail(400, 'err.invalid', { field: 'field.size' });
+      if (await trx('cart_items').where({ cart_id: cart.id, product_id: line.product_id, size }).first()) throw fail(409, 'err.size_in_cart');
+      if (!(await hold(trx, line.product_id, size, line.quantity))) throw fail(409, 'err.size_sold_out', { size });
       await release(trx, [line]);
       await trx('cart_items').where({ id: line.id }).update({ size });
       return cart;
@@ -282,7 +282,7 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
     const cart = await db.transaction(async (trx) => {
       const cart = await liveCart(trx, req.params.token);
       const line = await trx('cart_items').where({ id: Number(req.params.id) || 0, cart_id: cart.id }).first();
-      if (!line) throw fail(404, 'Kiyim savatda yo\'q');
+      if (!line) throw fail(404, 'err.not_in_cart');
       await release(trx, [line]);
       await trx('cart_items').where({ id: line.id }).del();
       return cart;
@@ -306,7 +306,7 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
   r.post('/:token/checkout', async (req, res) => {
     const b = req.body ?? {};
     const method = b.payment ?? 'cashier';
-    if (typeof method !== 'string' || !Object.hasOwn(methods, method)) throw fail(400, "To'lov usuli noto'g'ri");
+    if (typeof method !== 'string' || !Object.hasOwn(methods, method)) throw fail(400, 'err.invalid', { field: 'field.payment' });
     const notifyToken = randomBytes(16).toString('hex');
     const id = await db.transaction(async (trx) => {
       const cart = await liveCart(trx, req.params.token);
@@ -314,7 +314,7 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
       const c = customer(b, store);
       const lines = await trx('cart_items as c').join('products as p', 'p.id', 'c.product_id').where('c.cart_id', cart.id)
         .orderBy('c.id').select('c.product_id', 'c.size', 'c.quantity', 'p.price', 'p.discount_price');
-      if (!lines.length) throw fail(400, "Savat bo'sh");
+      if (!lines.length) throw fail(400, 'err.cart_empty');
       const t = totals(store, lines.reduce((s, l) => s + unitPrice(l) * l.quantity, 0), c.fulfillment);
       const [{ id }] = await trx('orders').insert({ store_id: store.id, ...c, ...t, payment_method: method, notify_token: notifyToken, recommendation_id: cart.recommendation_id, expires_at: iso(Date.now() + HOLD_MS) }).returning('id');
       await trx('order_items').insert(lines.map((l) => ({ order_id: id, product_id: l.product_id, size: l.size, quantity: l.quantity, unit_price: unitPrice(l) })));

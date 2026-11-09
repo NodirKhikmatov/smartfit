@@ -201,6 +201,8 @@ legend { padding: 0; }
 .chips input:checked + span, .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .chips input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
 .chip { display: inline-flex; min-height: 2.25rem; border-radius: var(--r-pill); font-size: var(--text-sm); }
+/* Language switch (i18n.js langSwitch): two .chip toggles side by side. */
+.lang-switch { display: inline-flex; gap: var(--s-2); }
 
 /* ---------- Card, notice */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: var(--s-5); box-shadow: var(--shadow-1); }

@@ -8,6 +8,7 @@ import { createSizeRouter } from './size/size.js';
 import { createCartRouter } from './cart/cart.js';
 import { paymentConfig, paymentMethods, createPaymentRouter } from './cart/payments.js';
 import { telegramConfig, telegramLink } from './notify/telegram.js';
+import { fail, langOf, errorBody } from './admin/routes.js';
 
 // uploadDir holds product images only. Customer photos are never written anywhere.
 export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads', weather = createWeather(), stylist = createStylist(), stylistTimeoutMs, payments = paymentConfig(), telegram = telegramConfig(), trustProxy = process.env.TRUST_PROXY, logRequests = false } = {}) {
@@ -39,7 +40,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/stores', createStoreRouter(db, { weather }));
   api.use('/size', createSizeRouter());
   api.use('/cart', createCartRouter(db, { methods: paymentMethods(payments), link: telegramLink(telegram) }));
-  api.use((req, res) => res.status(404).json({ error: 'Topilmadi' }));
+  api.use(() => { throw fail(404, 'err.not_found'); });
   app.use('/api', api);
   // Design system (ui.css, ui.js, icons, fonts) shared by the customer app and admin.
   const shared = fileURLToPath(new URL('../public/shared', import.meta.url));
@@ -54,12 +55,12 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   app.use('/app', express.static(customer, { index: false }));
   app.use('/uploads', express.static(uploadDir, { index: false, setHeaders: (res) => res.set('X-Content-Type-Options', 'nosniff') }));
 
-  // Express 5 forwards async errors here. Never leak stack traces to clients.
+  // Express 5 forwards async errors here. Never leak stack traces to clients. Body: { code, error } in the request's language.
   app.use((err, req, res, next) => {
     const status = err.status || err.statusCode || 500;
     if (status >= 500) console.error(err);
-    const message = err.type === 'entity.too.large' ? 'Fayl juda katta' : err.publicMessage || 'Noto\'g\'ri so\'rov';
-    res.status(status).json({ error: status >= 500 ? 'Server xatosi' : message });
+    const key = status >= 500 ? 'err.server' : err.type === 'entity.too.large' ? 'err.too_large' : err.publicKey || 'err.bad_request';
+    res.status(status).json(errorBody(langOf(req), { publicKey: key, vars: err.vars }));
   });
 
   return app;

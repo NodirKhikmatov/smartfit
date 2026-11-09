@@ -6,7 +6,9 @@ import { ORDER, requiredCategories, rankPool, cheaperAlternative, totalOf } from
 
 export const TIMEOUT_MS = 8000;
 export const DEFAULT_MODEL = 'claude-haiku-5-5'; // fast, takes images, and still accepts a forced tool_choice
-export const PHOTO_MAX = 300_000; // base64 chars (~220 KB JPEG); the app sends ~512 px, usually 30–60 KB
+export const PHOTO_MAX = 300_000;
+// Extra user-message line per customer language (none for uz: the system prompt already asks for Uzbek).
+const LANG_LINE = { ru: "Mijoz rus tilida gaplashadi: title, reason va style_guess rus tilida yozilsin.\n" }; // base64 chars (~220 KB JPEG); the app sends ~512 px, usually 30–60 KB
 
 // System prompt from docs/SPEC.md ("Tavsiya uchun Claude API prompti"), word for word.
 export const SYSTEM_PROMPT = `Sen kiyim do'konidagi stilistsan. Vazifang: mijozga bugungi ob-havoga mos 2-3 ta to'liq obraz tuzish. Qoidalar:
@@ -45,7 +47,7 @@ export const SUBMIT_OUTFITS = {
 export function parsePhoto(v) {
   if (v === undefined || v === null || v === '') return null;
   const m = typeof v === 'string' && v.length <= PHOTO_MAX && /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(v);
-  if (!m || !Buffer.from(m[1].slice(0, 8), 'base64').subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) throw fail(400, "Rasm noto'g'ri");
+  if (!m || !Buffer.from(m[1].slice(0, 8), 'base64').subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) throw fail(400, 'err.invalid', { field: 'field.photo' });
   return m[1];
 }
 
@@ -53,16 +55,17 @@ export function parsePhoto(v) {
 export function createStylist({ client, apiKey = process.env.ANTHROPIC_API_KEY, model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL } = {}) {
   if (!client && !apiKey) return null;
   client ??= new Anthropic({ apiKey });
-  return async ({ photo, weather, sizes, budget, candidates }, signal) => {
+  // lang: the customer's UI language. The spec prompt stays Uzbek; a Russian customer gets one extra line and Russian names.
+  return async ({ photo, weather, sizes, budget, candidates, lang = 'uz' }, signal) => {
     const data = {
       WEATHER: { temperature: weather.temperature, apparent_temperature: weather.apparent_temperature, raining: weather.raining, wind_speed: weather.wind_speed },
       SIZES: sizes,
       BUDGET: budget,
-      CANDIDATES: candidates.map((p) => ({ product_id: p.id, name: p.name, category: p.category, color: p.color, style: p.style, price: p.unit_price, waterproof: p.waterproof })),
+      CANDIDATES: candidates.map((p) => ({ product_id: p.id, name: (lang === 'ru' && p.name_ru) || p.name, category: p.category, color: p.color, style: p.style, price: p.unit_price, waterproof: p.waterproof })),
     };
     const content = [
       ...(photo ? [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: photo } }] : []),
-      { type: 'text', text: (photo ? 'Mijoz rasmi yuqorida.' : "Mijoz rasmi yo'q (rasmsiz rejim).") + '\n' + JSON.stringify(data) },
+      { type: 'text', text: (photo ? 'Mijoz rasmi yuqorida.' : "Mijoz rasmi yo'q (rasmsiz rejim).") + '\n' + (LANG_LINE[lang] ?? '') + JSON.stringify(data) },
     ];
     const msg = await client.messages.create(
       {

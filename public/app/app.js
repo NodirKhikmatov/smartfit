@@ -1,25 +1,26 @@
 import { watchIdle } from './idle.js';
 import { loadPose, measure } from './pose.js';
 import { icon, confirmDialog, showAfter, skeletonCard } from '/shared/ui.js';
+import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName } from '/shared/i18n.js';
 
 // One app: /kiosk (big buttons, idle reset) and /m (phone, opened from the store QR).
 const kiosk = location.pathname.startsWith('/kiosk');
 document.documentElement.classList.add(kiosk ? 'kiosk' : 'mobile');
 const storeId = Number(new URLSearchParams(location.search).get('store'));
 
-const CATS = { outerwear: 'Ustki kiyim', top: "Ko'ylak / futbolka", bottom: 'Shim / yubka', shoes: 'Poyabzal', accessory: 'Aksessuar' };
 const CLOTHES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 const SHOES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
-const som = (n) => n.toLocaleString('ru-RU').replace(/\s/g, '\u00a0') + "\u00a0so'm";
+const som = (n) => fmt.som(n);
+const cat = (c) => t(`cat.${c}`);
 const form = $('form');
 
 // Server cart (task 8): each item holds its stock for 15 min. The phone keeps the token across reloads; the kiosk never stores it.
 const CART_KEY = 'sfCart'; // the only thing the app stores in the browser: the phone's cart token
 let cart = null;
-let syncs = new Set(); // "Savatga qo'shish" buttons on the results screen
+let syncs = new Set(); // add-to-cart buttons on the results screen
 const savedCart = (t) => {
   if (kiosk) return null;
   try {
@@ -35,6 +36,15 @@ let sizeInfo = null; // last /api/size answer: confidence for the results screen
 let store = null;
 
 form.shoes.append(...SHOES.map((s) => el('option', { value: s, textContent: s })));
+initLang();
+// Language switch on the start screen. Whatever is already drawn (weather, cart button, results) is redrawn in place.
+const switcher = langSwitch(() => {
+  for (const id of ['formError', 'cartError', 'checkoutError']) $(id).textContent = '';
+  store ? renderWeather() : loadStore(); // loadStore redraws a start error (no store, offline) in the new language
+  setCart(cart);
+  if (lastResult) renderResults(lastResult);
+});
+$('langBox').replaceChildren(switcher);
 
 function show(name) {
   if (name !== 'camera') stopCamera();
@@ -50,23 +60,25 @@ function setCart(c) {
   savedCart(c?.token ?? null);
   const n = c ? c.items.reduce((s, i) => s + i.quantity, 0) : 0;
   $('cartBtn').hidden = !n;
-  $('cartBtn').replaceChildren(icon('bag'), el('span', { className: 'cart-label', textContent: 'Savat' }), el('span', { className: 'count-pill', textContent: n }));
+  $('cartBtn').replaceChildren(icon('bag'), el('span', { className: 'cart-label', textContent: t('kiosk.cart') }), el('span', { className: 'count-pill', textContent: n }));
   syncs.forEach((f) => f());
   if (current === 'cart') renderCartScreen();
 }
 
 // Start-screen weather: an icon and a one-line outfit hint from the same rules the engine uses (rain, cold, cool, warm).
 const weatherIcon = (w) => (w.raining ? 'rain' : w.temperature < 5 ? 'snow' : w.temperature < 18 ? 'cloud-sun' : 'sun');
-const weatherHint = (w) => (w.raining ? ["umbrella", "Yomg'ir: suv o'tkazmaydigan ustki kiyim tavsiya qilamiz."]
-  : w.temperature < 5 ? ["outerwear", "Sovuq: issiq ustki kiyim tavsiya qilamiz."]
-  : w.temperature < 18 ? ["outerwear", "Salqin: ustki kiyim ham tavsiya qilamiz."]
-  : ["top", "Iliq: bugun yengil kiyim mos keladi."]);
-const weatherLine = (w) => `${Math.round(w.temperature)}°C${w.raining ? ", yomg'ir" : ''}`;
+const weatherHint = (w) => (w.raining ? ['umbrella', 'kiosk.weather.rain']
+  : w.temperature < 5 ? ['outerwear', 'kiosk.weather.cold']
+  : w.temperature < 18 ? ['outerwear', 'kiosk.weather.cool']
+  : ['top', 'kiosk.weather.warm']);
+const weatherLine = (w) => t(w.raining ? 'kiosk.weather.line_rain' : 'kiosk.weather.line', { t: Math.round(w.temperature) });
 
 async function api(path, body, method = body ? 'POST' : 'GET') {
-  const res = await fetch('/api' + path, { method, ...(body && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) });
+  // The server answers errors in this language (Accept-Language is a fetch-settable header).
+  const headers = { 'accept-language': getLang(), ...(body && { 'content-type': 'application/json' }) };
+  const res = await fetch('/api' + path, { method, headers, ...(body && { body: JSON.stringify(body) }) });
   const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || "Xatolik yuz berdi. Qayta urinib ko'ring"), { status: res.status });
+  if (!res.ok) throw Object.assign(new Error(data.error || t('common.error')), { status: res.status, code: data.code });
   return data;
 }
 
@@ -75,33 +87,37 @@ async function loadStore() {
   $('start').disabled = true;
   if (!Number.isInteger(storeId) || storeId < 1) {
     $('weather').hidden = $('start').hidden = true;
-    $('startError').textContent = "Do'kon ko'rsatilmagan. Do'kondagi QR kodni qayta skanerlang.";
+    $('startError').textContent = t('kiosk.start.no_store');
     return;
   }
   try {
     store = await api('/stores/' + storeId);
   } catch (err) {
     $('weather').hidden = true;
-    $('startError').textContent = err.status === 404 ? "Do'kon topilmadi. Do'kondagi QR kodni qayta skanerlang." : "Ulanishda xatolik. Bir ozdan keyin qayta urinib ko'ring.";
+    $('startError').textContent = t(err.status === 404 ? 'kiosk.start.store_404' : 'kiosk.start.offline');
     $('start').hidden = err.status === 404; // a wrong store link won't fix itself
     $('start').disabled = false;
-    $('start').textContent = 'Qayta urinish';
+    $('start').textContent = t('common.retry');
     return;
   }
-  const w = store.weather;
   $('storeName').textContent = store.name;
-  $('start').textContent = 'Boshlash';
+  $('start').textContent = t('kiosk.start.go');
   $('start').disabled = false;
+  renderWeather();
+}
+
+function renderWeather() {
+  const w = store.weather;
   $('weather').hidden = false;
   $('weather').classList.remove('loading');
   $('weather').removeAttribute('aria-busy');
-  const [hintIcon, hint] = weatherHint(w);
+  const [hintIcon, hintKey] = weatherHint(w);
   $('weather').replaceChildren(
     icon(weatherIcon(w)),
-    el('div', { className: 'muted', textContent: `${store.city}, hozir` }),
+    el('div', { className: 'muted', textContent: t('kiosk.weather.now', { city: store.city }) }),
     el('div', { className: 'temp', textContent: weatherLine(w) }),
-    el('div', { className: 'muted feels', textContent: [w.apparent_temperature !== null && `His qilinishi ${Math.round(w.apparent_temperature)}°C`, w.source === 'fallback' && "Taxminiy: shu oyning o'rtacha harorati"].filter(Boolean).join(' · ') }),
-    el('p', { className: 'hint-line' }, icon(hintIcon), hint),
+    el('div', { className: 'muted feels', textContent: [w.apparent_temperature !== null && t('kiosk.weather.feels', { t: Math.round(w.apparent_temperature) }), w.source === 'fallback' && t('kiosk.weather.fallback')].filter(Boolean).join(' · ') }),
+    el('p', { className: 'hint-line' }, icon(hintIcon), t(hintKey)),
   );
 }
 
@@ -113,12 +129,12 @@ form.addEventListener('submit', (e) => {
   const n = (v) => (v.trim() === '' ? null : Number(v));
   const height = n(f.height.value), weight = n(f.weight.value), budget = n(f.budget.value);
   const check = [
-    [!f.gender.value, f.querySelector('[name=gender]'), 'Jinsingizni tanlang'],
-    [!Number.isInteger(height) || height < 100 || height > 230, f.height, "Bo'yingizni 100–230 sm oralig'ida kiriting"],
-    [weight !== null && (!Number.isInteger(weight) || weight < 30 || weight > 250), f.weight, "Vaznni 30–250 kg oralig'ida kiriting yoki bo'sh qoldiring"],
-    [budget !== null && (!Number.isInteger(budget) || budget < 1 || budget > 1e9), f.budget, "Byudjetni butun so'mda kiriting yoki bo'sh qoldiring"],
+    [!f.gender.value, f.querySelector('[name=gender]'), 'kiosk.form.err_gender'],
+    [!Number.isInteger(height) || height < 100 || height > 230, f.height, 'kiosk.form.err_height'],
+    [weight !== null && (!Number.isInteger(weight) || weight < 30 || weight > 250), f.weight, 'kiosk.form.err_weight'],
+    [budget !== null && (!Number.isInteger(budget) || budget < 1 || budget > 1e9), f.budget, 'kiosk.form.err_budget'],
   ].find(([bad]) => bad);
-  $('formError').textContent = check ? check[2] : '';
+  $('formError').textContent = check ? t(check[2]) : '';
   if (check) return check[1].focus();
   body = { gender: f.gender.value, height, weight };
   request = { store_id: storeId, gender: f.gender.value, sizes: { top: null, bottom: null, shoes: f.shoes.value || null }, budget };
@@ -149,7 +165,7 @@ function setBusy(on) {
 
 function showCamera() {
   status('');
-  $('shoot').textContent = 'Rasmga tushish';
+  $('shoot').textContent = t('kiosk.camera.shoot');
   $('galleryBtn').hidden = kiosk;
   show('camera');
   loadPose().catch(() => {}); // start the model download while the customer gets ready
@@ -178,8 +194,8 @@ $('shoot').onclick = async () => {
   } catch (err) {
     // No mediaDevices at all on plain http (not localhost): the camera needs HTTPS.
     stopCamera();
-    const why = err.name === 'NotAllowedError' ? 'Kameraga ruxsat berilmadi.' : 'Kamera ishlamayapti.';
-    return status(kiosk ? `${why} Rasmsiz davom eting.` : `${why} Galereyadan rasm tanlang yoki rasmsiz davom eting.`);
+    const why = t(err.name === 'NotAllowedError' ? 'kiosk.camera.denied' : 'kiosk.camera.broken');
+    return status(t(kiosk ? 'kiosk.camera.then_kiosk' : 'kiosk.camera.then_phone', { why }));
   }
   if (mine !== attempt) return s.getTracks().forEach((t) => t.stop()); // left the screen during the permission prompt
   stream = s;
@@ -213,7 +229,7 @@ $('gallery').onchange = async () => {
     bitmap = await createImageBitmap(file);
   } catch {
     setBusy(false);
-    return status("Bu rasmni ochib bo'lmadi. Boshqa rasm tanlang.");
+    return status(t('kiosk.camera.bad_file'));
   }
   try {
     await analyse(bitmap, bitmap.width, bitmap.height);
@@ -225,19 +241,19 @@ $('gallery').onchange = async () => {
 $('noPhoto').onclick = () => findSizes(null);
 
 async function analyse(source, w, h) {
-  status('Rasm tahlil qilinmoqda…');
+  status(t('kiosk.camera.analysing'));
   let pose;
   try {
     pose = await measure(source, w, h);
   } catch {
     stopCamera();
-    return status("Rasmni tahlil qilib bo'lmadi (internet yo'q bo'lishi mumkin). Qayta urinib ko'ring yoki rasmsiz davom eting.");
+    return status(t('kiosk.camera.failed'));
   }
   stopCamera();
   if (cameraScreen.hidden) return; // kiosk reset or "Orqaga" while the model was working
   if (!pose) {
-    $('shoot').textContent = 'Qayta urinish';
-    return status("Butun tanangiz ko'rinmadi. Oyoqlarni yaqin qo'yib tik turing, boshdan oyoqqacha kadrga tushadigan qilib uzoqroq turing va yorug' joyda qayta urinib ko'ring.");
+    $('shoot').textContent = t('common.retry');
+    return status(t('kiosk.camera.no_body'));
   }
   await findSizes(pose, snapshot(source, w, h));
 }
@@ -260,7 +276,7 @@ async function findSizes(pose, photo = null) {
     sizeInfo = await api('/size', { ...body, pose });
   } catch (err) {
     setBusy(false);
-    $('shoot').textContent = 'Qayta urinish';
+    $('shoot').textContent = t('common.retry');
     return status(err.message);
   }
   setBusy(false);
@@ -271,14 +287,11 @@ async function findSizes(pose, photo = null) {
 }
 
 // --- Screen 4: results, with - / + to correct the estimated size.
-const CONFIDENCE = {
-  high: "Rasm va vazningiz bo'yicha aniqlandi.",
-  medium: 'Taxminiy razmer.',
-  low: "Taxminiy razmer: faqat bo'yingiz bo'yicha.",
-};
+const CONFIDENCE = { high: 'kiosk.conf.high', medium: 'kiosk.conf.medium', low: 'kiosk.conf.low' };
 
 function renderSizes() {
-  const stepper = (key, label) => {
+  const stepper = (key) => {
+    const label = cat(key);
     const i = CLOTHES.indexOf(request.sizes[key]);
     const move = (d) => () => {
       request.sizes[key] = CLOTHES[i + d];
@@ -286,25 +299,27 @@ function renderSizes() {
       loadResults();
     };
     return el('div', { className: 'stepper' }, el('span', { textContent: label }),
-      el('button', { type: 'button', ariaLabel: `${label}: kichikroq razmer`, disabled: i <= 0, onclick: move(-1) }, icon('minus')),
+      el('button', { type: 'button', ariaLabel: t('kiosk.size.smaller', { label }), disabled: i <= 0, onclick: move(-1) }, icon('minus')),
       el('strong', { textContent: request.sizes[key] }),
-      el('button', { type: 'button', ariaLabel: `${label}: kattaroq razmer`, disabled: i >= CLOTHES.length - 1, onclick: move(1) }, icon('plus')));
+      el('button', { type: 'button', ariaLabel: t('kiosk.size.bigger', { label }), disabled: i >= CLOTHES.length - 1, onclick: move(1) }, icon('plus')));
   };
   $('sizeBar').replaceChildren(
-    el('div', { className: 'row' }, stepper('top', 'Ustki'), stepper('bottom', 'Shim')),
-    el('p', { className: 'meta', style: 'margin:var(--s-2) 0 0', textContent: sizeInfo.manual ? "Razmerni o'zingiz tanladingiz." : `${CONFIDENCE[sizeInfo.confidence]} Mos kelmasa, − / + bilan o'zgartiring.` }),
+    el('div', { className: 'row' }, stepper('top'), stepper('bottom')),
+    el('p', { className: 'meta', style: 'margin:var(--s-2) 0 0', textContent: sizeInfo.manual ? t('kiosk.size.manual') : t('kiosk.size.adjust', { conf: t(CONFIDENCE[sizeInfo.confidence]) }) }),
   );
 }
 
 let loadSeq = 0; // only the newest /recommend answer may draw (fast − / + taps)
+let lastResult = null; // kept so a language switch can redraw without asking again
 async function loadResults() {
   const seq = ++loadSeq;
+  lastResult = null;
   syncs = new Set();
   show('results');
   renderSizes();
   $('resultsWeather').textContent = '';
   // Screen readers get one summary line per load (U13), not the whole list again after every − / +.
-  $('resultsStatus').textContent = 'Obrazlar tanlanmoqda…';
+  $('resultsStatus').textContent = t('kiosk.results.loading');
   $('results').replaceChildren();
   const done = showAfter(300, () => seq === loadSeq && $('results').replaceChildren(skeletonCard(4), skeletonCard(4)));
   let r;
@@ -314,21 +329,28 @@ async function loadResults() {
     done();
     if (seq !== loadSeq) return;
     $('resultsStatus').textContent = err.message;
-    $('results').replaceChildren(el('p', { className: 'error', textContent: err.message }), el('button', { className: 'primary', textContent: 'Qayta urinish', onclick: loadResults }));
+    $('results').replaceChildren(el('p', { className: 'error', textContent: err.message }), el('button', { className: 'primary', textContent: t('common.retry'), onclick: loadResults }));
     return;
   }
   done();
   if (seq !== loadSeq) return;
-  $('resultsStatus').textContent = r.outfits.length ? `${r.outfits.length} ta obraz topildi` : "Mos obraz topilmadi";
   request.rec = r.rec; // −/+ re-queries update the same pilot log row
-  $('resultsWeather').textContent = `Ob-havo: ${weatherLine(r.weather)}` + (r.budget ? ` · Byudjet: ${som(r.budget)}` : '');
+  renderResults(r);
+}
+
+function renderResults(r) {
+  lastResult = r;
+  syncs = new Set();
+  renderSizes();
+  $('resultsStatus').textContent = r.outfits.length ? t('kiosk.results.found', { n: r.outfits.length }) : t('kiosk.results.none');
+  $('resultsWeather').textContent = [t('kiosk.results.weather', { weather: weatherLine(r.weather) }), r.budget && t('kiosk.results.budget', { sum: som(r.budget) })].filter(Boolean).join(' · ');
   if (!r.outfits.length) {
-    $('results').replaceChildren(el('div', { className: 'notice warn', textContent: "Hozir sizning razmeringizda bugungi ob-havoga mos to'liq obraz yo'q. − / + bilan boshqa razmerni tanlab ko'ring yoki do'kon xodimidan so'rang." }));
+    $('results').replaceChildren(el('div', { className: 'notice warn', textContent: t('kiosk.results.empty') }));
     return;
   }
   $('results').replaceChildren(
-    ...(r.style_guess ? [el('p', { className: 'muted', textContent: `Uslub: ${r.style_guess}` })] : []),
-    ...(r.over_budget > 0 ? [el('div', { className: 'notice warn', textContent: `Byudjetingizga mos obraz topilmadi. Eng arzon obraz byudjetdan ${som(r.over_budget)} qimmat.` })] : []),
+    ...(r.style_guess ? [el('p', { className: 'muted', textContent: t('kiosk.results.style', { style: r.style_guess }) })] : []),
+    ...(r.over_budget > 0 ? [el('div', { className: 'notice warn', textContent: t('kiosk.results.over_budget', { sum: som(r.over_budget) }) })] : []),
     ...r.outfits.map((o, i) => outfitCard(o, i + 1)),
     triedCard(),
   );
@@ -336,32 +358,32 @@ async function loadResults() {
 
 // Pilot report: the customer says they tried the suggestion on (the shelf numbers are on each item above).
 function triedCard() {
-  const b = el('button', { type: 'button', textContent: "Kiyib ko'rdim" });
+  const b = el('button', { type: 'button', textContent: t('kiosk.tried.btn') });
   b.onclick = async () => {
     b.disabled = true;
     try {
       await api('/recommend/tried', { rec: request.rec });
-      b.replaceChildren(icon('check'), 'Rahmat!');
+      b.replaceChildren(icon('check'), t('kiosk.tried.thanks'));
     } catch {
       b.disabled = false;
     }
   };
-  return el('div', { className: 'notice stack' }, el('p', { style: 'margin:0 0 var(--s-3)', textContent: "Kiyimni kiyib ko'rdingizmi? Belgilab qo'ying — bu bizga tavsiyalarni yaxshilashga yordam beradi." }), b);
+  return el('div', { className: 'notice stack' }, el('p', { style: 'margin:0 0 var(--s-3)', textContent: t('kiosk.tried.ask') }), b);
 }
 
-const sizeName = (s) => (s === 'ONE' ? 'yagona razmer' : s);
+const sizeName = (s) => (s === 'ONE' ? t('common.size_one') : s);
 const thumb = (p) => (p.image_url ? el('img', { className: 'thumb', src: p.image_url, alt: '' }) : el('div', { className: 'thumb' }, icon(p.category)));
 
 function itemRow(p) {
   // Unknown shoe size: the customer picks one of the in-stock sizes before adding (stored on the item as `chosen`).
   const pick = !p.size && p.sizes
-    ? el('div', { className: 'line-actions' }, el('select', { ariaLabel: `${p.name}: razmer`, onchange: (e) => { p.chosen = e.target.value; syncs.forEach((f) => f()); } },
-      el('option', { value: '', textContent: 'Razmerni tanlang' }), ...p.sizes.map((s) => el('option', { value: s, textContent: s, selected: s === p.chosen }))))
+    ? el('div', { className: 'line-actions' }, el('select', { ariaLabel: t('kiosk.size.aria', { name: productName(p) }), onchange: (e) => { p.chosen = e.target.value; syncs.forEach((f) => f()); } },
+      el('option', { value: '', textContent: t('kiosk.size.pick') }), ...p.sizes.map((s) => el('option', { value: s, textContent: s, selected: s === p.chosen }))))
     : '';
-  const size = p.size ? (p.size === 'ONE' ? 'yagona razmer' : `razmer ${p.size}`) : '';
+  const size = p.size ? (p.size === 'ONE' ? t('common.size_one') : t('kiosk.size.value', { size: p.size })) : '';
   return el('li', {},
     thumb(p),
-    el('div', {}, el('div', { textContent: p.name }), el('div', { className: 'meta', textContent: [CATS[p.category], p.color, size, p.shelf_location && `javon ${p.shelf_location}`].filter(Boolean).join(' · ') }), pick),
+    el('div', {}, el('div', { textContent: productName(p) }), el('div', { className: 'meta', textContent: [cat(p.category), colorName(p.color), size, p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }), pick),
     el('div', { className: p.discount_price ? 'price sale' : 'price' }, ...(p.discount_price ? [el('s', { textContent: som(p.price) })] : []), som(p.unit_price)),
   );
 }
@@ -369,12 +391,12 @@ function itemRow(p) {
 function addButton(items) {
   const size = (p) => p.size ?? p.chosen;
   const has = (p) => cart?.items.some((c) => c.product_id === p.id && (!size(p) || c.size === size(p)));
-  const b = el('button', { className: 'primary', textContent: "Savatga qo'shish" });
+  const b = el('button', { className: 'primary', textContent: t('kiosk.add.btn') });
   const msg = el('p', { className: 'error', style: 'margin:0;min-height:0', role: 'alert' });
-  const sync = () => { b.disabled = items.every(has); b.replaceChildren(...(b.disabled ? [icon('check'), "Savatga qo'shildi"] : [icon('bag'), "Savatga qo'shish"])); };
+  const sync = () => { b.disabled = items.every(has); b.replaceChildren(...(b.disabled ? [icon('check'), t('kiosk.add.done')] : [icon('bag'), t('kiosk.add.btn')])); };
   b.onclick = async () => {
     const missing = items.find((p) => !size(p));
-    if (missing) return void (msg.textContent = `«${missing.name}» uchun razmerni tanlang`);
+    if (missing) return void (msg.textContent = t('kiosk.add.pick_size', { name: productName(missing) }));
     msg.textContent = '';
     b.disabled = true;
     try {
@@ -392,26 +414,25 @@ function addButton(items) {
 
 function outfitCard(o, n) {
   const card = el('article', { className: 'outfit card' },
-    el('h2', { textContent: o.title ? `${n}-obraz: ${o.title}` : `${n}-obraz` }),
+    el('h2', { textContent: o.title ? t('kiosk.outfit.n_title', { n, title: o.title }) : t('kiosk.outfit.n', { n }) }),
     ...(o.reason ? [el('p', { className: 'muted', textContent: o.reason })] : []),
     el('ul', { className: 'items' }, ...o.items.map(itemRow)),
-    el('div', { className: 'total' }, el('span', {}, 'Jami: ', el('strong', { textContent: som(o.total) })), addButton(o.items)),
+    el('div', { className: 'total' }, el('span', {}, `${t('common.total')}: `, el('strong', { textContent: som(o.total) })), addButton(o.items)),
   );
   if (o.alternative) {
     const swapped = o.alternative.items.find((p) => !o.items.some((x) => x.id === p.id));
     const old = o.items.find((p) => p.id === o.alternative.replaces);
     card.append(el('div', { className: 'alt' },
-      el('h2', { textContent: 'Arzonroq variant' }),
-      el('p', { className: 'muted', textContent: `«${old.name}» o'rniga — ${som(o.total - o.alternative.total)} tejaysiz` }),
+      el('h2', { textContent: t('kiosk.outfit.alt') }),
+      el('p', { className: 'muted', textContent: t('kiosk.outfit.alt_save', { name: productName(old), sum: som(o.total - o.alternative.total) }) }),
       el('ul', { className: 'items' }, itemRow(swapped)),
-      el('div', { className: 'total' }, el('span', {}, 'Jami: ', el('strong', { textContent: som(o.alternative.total) })), addButton(o.alternative.items)),
+      el('div', { className: 'total' }, el('span', {}, `${t('common.total')}: `, el('strong', { textContent: som(o.alternative.total) })), addButton(o.alternative.items)),
     ));
   }
   return card;
 }
 
 // --- Cart and checkout. Every number shown here comes from the server; the browser sends no prices.
-const hhmm = (iso) => new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 const sumRow = (label, value, className = '') => el('div', { className }, el('span', { textContent: label }), el('span', { textContent: value }));
 const checkout = $('checkout');
 
@@ -425,21 +446,22 @@ async function cartAction(call) {
     setCart(await call());
   } catch (err) {
     if (err.status === 404) setCart(null);
-    $('cartError').textContent = err.status === 404 ? "Band qilish muddati tugadi. Kiyimlarni qaytadan qo'shing." : err.message;
+    $('cartError').textContent = err.status === 404 ? t('kiosk.cart.expired') : err.message;
     renderCartScreen();
   }
 }
 
 function cartLine(i) {
   const url = `/cart/${cart.token}/items/${i.id}`;
-  const sel = el('select', { ariaLabel: `${i.name}: razmer`, disabled: i.sizes.length < 2, onchange: () => cartAction(() => api(url, { size: sel.value }, 'PATCH')) },
+  const name = productName(i);
+  const sel = el('select', { ariaLabel: t('kiosk.size.aria', { name }), disabled: i.sizes.length < 2, onchange: () => cartAction(() => api(url, { size: sel.value }, 'PATCH')) },
     ...i.sizes.map((s) => el('option', { value: s, textContent: sizeName(s), selected: s === i.size })));
   return el('li', {},
     thumb(i),
     el('div', {},
-      el('div', { textContent: i.quantity > 1 ? `${i.name} × ${i.quantity}` : i.name }),
-      el('div', { className: 'meta', textContent: [CATS[i.category], i.color, i.shelf_location && `javon ${i.shelf_location}`].filter(Boolean).join(' · ') }),
-      el('div', { className: 'line-actions' }, sel, el('button', { type: 'button', textContent: "O'chirish", ariaLabel: `${i.name}: savatdan o'chirish`, onclick: () => cartAction(() => api(url, null, 'DELETE')) }))),
+      el('div', { textContent: i.quantity > 1 ? `${name} × ${i.quantity}` : name }),
+      el('div', { className: 'meta', textContent: [cat(i.category), colorName(i.color), i.shelf_location && t('kiosk.shelf', { shelf: i.shelf_location })].filter(Boolean).join(' · ') }),
+      el('div', { className: 'line-actions' }, sel, el('button', { type: 'button', textContent: t('common.delete'), ariaLabel: t('kiosk.cart.remove_aria', { name }), onclick: () => cartAction(() => api(url, null, 'DELETE')) }))),
     el('div', { className: i.discount_price ? 'price sale' : 'price' }, ...(i.discount_price ? [el('s', { textContent: som(i.price * i.quantity) })] : []), som(i.line_total)),
   );
 }
@@ -447,34 +469,34 @@ function cartLine(i) {
 function renderCartScreen() {
   const empty = !cart?.items.length;
   checkout.hidden = $('holdNote').hidden = empty;
-  if (empty) return $('cartBody').replaceChildren(el('p', { className: 'muted', textContent: "Savat bo'sh. Obrazlardan kiyim qo'shing." }));
-  $('holdNote').textContent = `Kiyimlar ${hhmm(cart.expires_at)} gacha siz uchun band qilindi. Shu vaqtgacha buyurtma bering.`;
+  if (empty) return $('cartBody').replaceChildren(el('p', { className: 'muted', textContent: t('kiosk.cart.empty') }));
+  $('holdNote').textContent = t('kiosk.cart.held', { time: fmt.time(cart.expires_at) });
   $('cartBody').replaceChildren(el('ul', { className: 'items' }, ...cart.items.map(cartLine)));
   renderPay();
   renderSum();
 }
 
 // Click/Payme only on the phone (no card entry on a shared kiosk) and only when the server has them configured.
-const PAY = { cashier: "Kassada", click: 'Click', payme: 'Payme' };
+const PAY = { cashier: 'kiosk.checkout.pay_cashier', click: 'Click', payme: 'Payme' }; // brand names stay as they are
 function renderPay() {
   const online = kiosk ? [] : cart.payments.filter((m) => m !== 'cashier' && PAY[m]);
   $('payFields').hidden = !online.length;
+  $('payNote').textContent = t(online.length ? 'kiosk.checkout.note_online' : 'kiosk.checkout.note_cashier');
   if (!online.length) return;
   const picked = checkout.payment?.value || 'cashier';
   $('payChoices').replaceChildren(...['cashier', ...online].map((m) =>
-    el('label', {}, el('input', { type: 'radio', name: 'payment', value: m, checked: m === picked }), el('span', { textContent: PAY[m] }))));
-  $('payNote').textContent = "Onlayn to'lovda buyurtmadan keyin to'lov sahifasi ochiladi.";
+    el('label', {}, el('input', { type: 'radio', name: 'payment', value: m, checked: m === picked }), el('span', { textContent: t(PAY[m]) }))));
 }
 
 function renderSum() {
   const delivery = checkout.fulfillment.value === 'delivery';
-  const t = cart.totals[delivery ? 'delivery' : 'pickup'], d = cart.delivery;
+  const s = cart.totals[delivery ? 'delivery' : 'pickup'], d = cart.delivery;
   $('deliveryFields').hidden = !delivery;
   $('cartSum').replaceChildren(
-    sumRow('Kiyimlar', som(t.subtotal)),
-    ...(delivery ? [sumRow(`Yetkazish (${d.city} ichida)`, t.delivery_fee ? som(t.delivery_fee) : 'bepul')] : []),
-    sumRow('Jami', som(t.total), 'grand'),
-    ...(delivery && t.delivery_fee && d.free_over !== null ? [el('p', { className: 'meta', style: 'margin:.35rem 0 0', textContent: `Xarid ${som(d.free_over)} dan oshsa, yetkazish bepul.` })] : []),
+    sumRow(t('kiosk.checkout.items'), som(s.subtotal)),
+    ...(delivery ? [sumRow(t('kiosk.checkout.delivery_in', { city: d.city }), s.delivery_fee ? som(s.delivery_fee) : t('common.free'))] : []),
+    sumRow(t('common.total'), som(s.total), 'grand'),
+    ...(delivery && s.delivery_fee && d.free_over !== null ? [el('p', { className: 'meta', style: 'margin:.35rem 0 0', textContent: t('kiosk.checkout.free_over', { sum: som(d.free_over) }) })] : []),
   );
   if (delivery) loadMap();
 }
@@ -497,7 +519,7 @@ function loadMap() {
     });
   }, () => {
     $('map').hidden = true;
-    $('mapHint').textContent = "Xarita yuklanmadi. Manzilni aniq yozing.";
+    $('mapHint').textContent = t('kiosk.checkout.map_failed');
   });
 }
 function clearCheckout() {
@@ -512,11 +534,11 @@ checkout.addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = checkout, delivery = f.fulfillment.value === 'delivery';
   const check = [
-    [f.fullname.value.trim().length < 2, f.fullname, 'Ismingizni yozing'],
-    [!/^(\+?998)?\d{9}$/.test(f.phone.value.replace(/[\s()-]/g, '')), f.phone, "Telefon raqamini to'liq yozing: +998 90 123 45 67"],
-    [delivery && f.address.value.trim().length < 5, f.address, 'Manzilni yozing: ko\'cha, uy, xonadon'],
+    [f.fullname.value.trim().length < 2, f.fullname, 'kiosk.checkout.err_name'],
+    [!/^(\+?998)?\d{9}$/.test(f.phone.value.replace(/[\s()-]/g, '')), f.phone, 'kiosk.checkout.err_phone'],
+    [delivery && f.address.value.trim().length < 5, f.address, 'kiosk.checkout.err_address'],
   ].find(([bad]) => bad);
-  $('checkoutError').textContent = check ? check[2] : '';
+  $('checkoutError').textContent = check ? t(check[2]) : '';
   if (check) return check[1].focus();
   $('placeOrder').disabled = true;
   try {
@@ -540,12 +562,12 @@ function showDone(o, pay = { method: 'cashier' }, notify = null) {
   $('orderNo').textContent = `№ ${o.id}`;
   $('doneBody').replaceChildren(
     el('div', { className: 'sum card' },
-      ...o.items.map((i) => sumRow(`${i.name} · ${sizeName(i.size)}${i.quantity > 1 ? ` × ${i.quantity}` : ''}`, som(i.unit_price * i.quantity))),
-      ...(o.fulfillment === 'delivery' ? [sumRow('Yetkazish', o.delivery_fee ? som(o.delivery_fee) : 'bepul')] : []),
-      sumRow('Jami', som(o.total), 'grand')),
-    el('p', { className: 'notice', textContent: `${online ? `${PAY[pay.method]} orqali to'lang` : 'Kassaga boring va buyurtma raqamini ayting'}. ${hhmm(o.expires_at)} gacha to'lanmasa, buyurtma bekor bo'ladi.` }),
-    ...(online ? [el('a', { className: 'button primary wide', href: pay.url, rel: 'noopener', textContent: `${PAY[pay.method]} orqali to'lash` })] : []),
-    el('p', { textContent: o.fulfillment === 'pickup' ? "To'lovdan keyin xodim kiyimlarni tayyorlab beradi." : `To'lovdan keyin kuryer ${o.phone} raqamiga qo'ng'iroq qiladi.` }),
+      ...o.items.map((i) => sumRow(`${productName(i)} · ${sizeName(i.size)}${i.quantity > 1 ? ` × ${i.quantity}` : ''}`, som(i.unit_price * i.quantity))),
+      ...(o.fulfillment === 'delivery' ? [sumRow(t('kiosk.done.delivery'), o.delivery_fee ? som(o.delivery_fee) : t('common.free'))] : []),
+      sumRow(t('common.total'), som(o.total), 'grand')),
+    el('p', { className: 'notice', textContent: t('kiosk.done.pay_note', { what: online ? t('kiosk.done.pay_online', { method: t(PAY[pay.method]) }) : t('kiosk.done.pay_cashier'), time: fmt.time(o.expires_at) }) }),
+    ...(online ? [el('a', { className: 'button primary wide', href: pay.url, rel: 'noopener', textContent: t('kiosk.done.pay_btn', { method: t(PAY[pay.method]) }) })] : []),
+    el('p', { textContent: o.fulfillment === 'pickup' ? t('kiosk.done.next_pickup') : t('kiosk.done.next_delivery', { phone: o.phone }) }),
     ...(notify ? [telegramBlock(notify)] : []),
   );
   show('done');
@@ -554,17 +576,17 @@ function showDone(o, pay = { method: 'cashier' }, notify = null) {
 // The SVG is built by our server from our own t.me link.
 function telegramBlock(n) {
   if (!/^https:\/\/t\.me\//.test(n.url)) return el('div');
-  if (!kiosk) return el('a', { className: 'button wide', href: n.url, rel: 'noopener', textContent: "Holatini Telegram'da kuzatish" });
+  if (!kiosk) return el('a', { className: 'button wide', href: n.url, rel: 'noopener', textContent: t('kiosk.done.tg_track') });
   const qr = el('div', { className: 'tgqr' });
   qr.innerHTML = n.svg;
-  return el('div', { className: 'notice stack' }, el('p', { textContent: "Buyurtma holatini Telegram'da bilish uchun telefoningiz bilan skanerlang va «Start» ni bosing." }), qr);
+  return el('div', { className: 'notice stack' }, el('p', { textContent: t('kiosk.done.tg_scan') }), qr);
 }
 $('doneHome').onclick = () => reset();
 
 // Back to start keeps the cart; only the kiosk idle reset clears it for the next customer.
 // Icon button, so it is not mistaken for the cart (U15); with items in the cart it asks first.
 $('home').onclick = async () => {
-  if (cart?.items.length && !(await confirmDialog({ title: 'Boshiga qaytasizmi?', text: "Savatdagi kiyimlar saqlanib qoladi, lekin tanlangan obrazlar yopiladi.", ok: 'Boshiga qaytish', cancel: 'Shu yerda qolish' }))) return;
+  if (cart?.items.length && !(await confirmDialog({ title: t('kiosk.leave.title'), text: t('kiosk.leave.text'), ok: t('kiosk.leave.ok'), cancel: t('kiosk.leave.stay') }))) return;
   show('start');
   loadStore();
 };
@@ -572,8 +594,12 @@ $('home').onclick = async () => {
 function reset() {
   if (cart) api(`/cart/${cart.token}`, null, 'DELETE').catch(() => {}); // give the held stock back now, not in 15 min
   setCart(null);
-  request = body = sizeInfo = null;
+  request = body = sizeInfo = lastResult = null;
   loadSeq++; // a results request still in flight must not draw for the next customer
+  if (kiosk) {
+    setLang('uz'); // the next customer starts in Uzbek
+    switcher.sync();
+  }
   form.reset();
   clearCheckout();
   $('formError').textContent = '';

@@ -1,17 +1,17 @@
 import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { sizesFor } from '../db/seed.js';
-import { fail } from '../admin/routes.js';
+import { fail, langOf } from '../admin/routes.js';
 import { filterCandidates, buildOutfits } from './engine.js';
 import { parsePhoto, applyStylist, withDeadline, TIMEOUT_MS } from './stylist.js';
 
 const pick = (v, allowed, label, required) => {
   if (v === undefined || v === null || v === '') {
-    if (required) throw fail(400, `${label} majburiy`);
+    if (required) throw fail(400, 'err.required', { field: label });
     return null;
   }
   const s = String(v).toUpperCase();
-  if (!allowed.includes(s)) throw fail(400, `${label} noto'g'ri`);
+  if (!allowed.includes(s)) throw fail(400, 'err.invalid', { field: label });
   return s;
 };
 
@@ -39,19 +39,19 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
 
   r.post('/', async (req, res) => {
     const b = req.body ?? {};
-    if (!Number.isInteger(b.store_id) || b.store_id < 1) throw fail(400, "Do'kon noto'g'ri");
-    if (!['male', 'female'].includes(b.gender)) throw fail(400, "Jins noto'g'ri");
+    if (!Number.isInteger(b.store_id) || b.store_id < 1) throw fail(400, 'err.invalid', { field: 'field.store' });
+    if (!['male', 'female'].includes(b.gender)) throw fail(400, 'err.invalid', { field: 'field.gender' });
     const sizes = {
-      top: pick(b.sizes?.top, sizesFor('top'), 'Ustki razmer', true),
-      bottom: pick(b.sizes?.bottom, sizesFor('bottom'), 'Shim razmeri', true),
-      shoes: pick(b.sizes?.shoes, sizesFor('shoes'), 'Oyoq kiyim razmeri', false),
+      top: pick(b.sizes?.top, sizesFor('top'), 'field.top_size', true),
+      bottom: pick(b.sizes?.bottom, sizesFor('bottom'), 'field.bottom_size', true),
+      shoes: pick(b.sizes?.shoes, sizesFor('shoes'), 'field.shoe_size', false),
     };
     const budget = b.budget === undefined || b.budget === null || b.budget === 0 ? null : b.budget;
-    if (budget !== null && (!Number.isInteger(budget) || budget < 1 || budget > 1e9)) throw fail(400, "Byudjet noto'g'ri");
+    if (budget !== null && (!Number.isInteger(budget) || budget < 1 || budget > 1e9)) throw fail(400, 'err.invalid', { field: 'field.budget' });
     const photo = parsePhoto(b.photo); // memory only: goes to Claude for this request, never stored or logged
 
     const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon');
-    if (!store) throw fail(404, "Do'kon topilmadi");
+    if (!store) throw fail(404, 'err.store_not_found');
     const w = await weather(store);
     const candidates = await filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature });
     const ctx = { temperature: w.temperature, raining: w.raining, budget };
@@ -59,7 +59,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     // No rule outfit means a required category is empty, so Claude could not build one either.
     if (stylist && result.outfits.length && allowAi(req.ip)) {
       try {
-        const answer = await withDeadline((signal) => stylist({ photo, weather: w, sizes, budget, candidates }, signal), stylistTimeoutMs);
+        const answer = await withDeadline((signal) => stylist({ photo, weather: w, sizes, budget, candidates, lang: langOf(req) }, signal), stylistTimeoutMs);
         const ai = applyStylist(answer, candidates, ctx);
         if (ai) result = { ...ai, source: 'ai' };
         else console.warn('stylist: no valid outfit, using rules');
@@ -91,9 +91,9 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
   // Pilot funnel: the customer tapped "Kiyib ko'rdim" (tried the suggestion on). { rec } → 204, once per results screen.
   r.post('/tried', async (req, res) => {
     const rec = req.body?.rec;
-    if (typeof rec !== 'string' || !REC.test(rec)) throw fail(400, "So'rov noto'g'ri");
+    if (typeof rec !== 'string' || !REC.test(rec)) throw fail(400, 'err.bad_request');
     const row = await db('recommendation_logs').where({ token: rec }).first('id', 'tried_at');
-    if (!row) throw fail(404, 'Tavsiya topilmadi');
+    if (!row) throw fail(404, 'err.rec_not_found');
     if (!row.tried_at) await db('recommendation_logs').where({ id: row.id }).whereNull('tried_at').update({ tried_at: new Date().toISOString() });
     res.status(204).end();
   });
@@ -106,7 +106,7 @@ export function createStoreRouter(db, { weather }) {
   r.get('/:id', async (req, res) => {
     const id = Number(req.params.id);
     const store = Number.isInteger(id) && id > 0 ? await db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon') : undefined;
-    if (!store) throw fail(404, "Do'kon topilmadi");
+    if (!store) throw fail(404, 'err.store_not_found');
     res.json({ id: store.id, name: store.name, city: store.city, weather: await weather(store) });
   });
   return r;

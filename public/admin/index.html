@@ -13,83 +13,85 @@
 <body class="ui-compact">
 <form id="login" class="card raised" hidden>
   <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
-  <h1>Do'kon boshqaruviga kirish</h1>
-  <label>Email <input name="email" type="email" autocomplete="username" required></label>
-  <label>Parol <input name="password" type="password" autocomplete="current-password" required></label>
+  <h1 data-i18n="adm.login.title"></h1>
+  <div id="loginLang"></div>
+  <label><span data-i18n="adm.login.email"></span> <input name="email" type="email" autocomplete="username" required></label>
+  <label><span data-i18n="adm.login.password"></span> <input name="password" type="password" autocomplete="current-password" required></label>
   <p class="error" id="loginError" role="alert"></p>
-  <button class="primary">Kirish</button>
+  <button class="primary" data-i18n="adm.login.submit"></button>
 </form>
 
 <div id="app" hidden>
   <header class="appbar">
     <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
-    <nav class="tabs" aria-label="Bo'limlar">
-      <button id="tabProducts" aria-current="page"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg>Kiyimlar</button>
-      <button id="tabOrders"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#receipt"></use></svg>Buyurtmalar</button>
-      <button id="tabStats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg>Statistika</button>
+    <nav class="tabs" data-i18n-aria-label="adm.nav">
+      <button id="tabProducts" aria-current="page"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><span data-i18n="adm.tab.products"></span></button>
+      <button id="tabOrders"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#receipt"></use></svg><span data-i18n="adm.tab.orders"></span></button>
+      <button id="tabStats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.tab.stats"></span></button>
     </nav>
     <span class="spacer"></span>
-    <button id="payBtn" title="Kassa"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#cash"></use></svg><span class="label">Kassa</span></button>
-    <button id="qrBtn" class="icon-btn" aria-label="QR kodlar" title="QR kodlar"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg></button>
+    <button id="payBtn" data-i18n-title="adm.cashier"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#cash"></use></svg><span class="label" data-i18n="adm.cashier"></span></button>
+    <button id="qrBtn" class="icon-btn" data-i18n-aria-label="adm.qr" data-i18n-title="adm.qr"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg></button>
+    <span id="adminLang"></span>
     <span id="who" class="sizes"></span>
-    <button id="logout" class="icon-btn ghost" aria-label="Chiqish" title="Chiqish"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logout"></use></svg></button>
+    <button id="logout" class="icon-btn ghost" data-i18n-aria-label="adm.logout" data-i18n-title="adm.logout"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logout"></use></svg></button>
   </header>
   <main id="products">
     <div class="bar">
-      <label class="grow">Qidiruv <input id="q" type="search" placeholder="Masalan: jinsi"></label>
-      <label>Kategoriya <select id="cat"><option value="">Hammasi</option></select></label>
-      <label id="storeFilterWrap">Do'kon <select id="storeFilter"><option value="">Hammasi</option></select></label>
-      <button id="importBtn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#upload"></use></svg>CSV yuklash</button>
-      <button class="primary" id="add"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg>Kiyim qo'shish</button>
+      <label class="grow"><span data-i18n="adm.products.search"></span> <input id="q" type="search" data-i18n-placeholder="adm.products.search_ph"></label>
+      <label><span data-i18n="adm.products.category"></span> <select id="cat"><option value="" data-i18n="common.all"></option></select></label>
+      <label id="storeFilterWrap"><span data-i18n="common.store"></span> <select id="storeFilter"></select></label>
+      <button id="importBtn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#upload"></use></svg><span data-i18n="adm.products.import"></span></button>
+      <button class="primary" id="add"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="adm.products.add"></span></button>
     </div>
     <p class="error" id="listError" role="alert"></p>
     <div class="table-wrap">
       <table class="table">
-        <thead><tr><th>Nomi</th><th>Kategoriya</th><th>Do'kon</th><th class="num">Narxi, so'm</th><th>Qoldiq (razmer: soni)</th><th></th></tr></thead>
+        <thead><tr><th data-i18n="adm.products.name"></th><th data-i18n="adm.products.category"></th><th data-i18n="common.store"></th><th class="num" data-i18n="adm.products.price"></th><th data-i18n="adm.products.stock"></th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
   </main>
   <main id="orders" hidden>
     <div class="bar">
-      <label>Holati <select id="ordersStatus"><option value="">Hammasi</option></select></label>
-      <label id="ordersStoreWrap">Do'kon <select id="ordersStore"><option value="">Hammasi</option></select></label>
-      <button id="ordersReload"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#refresh"></use></svg>Yangilash</button>
+      <label><span data-i18n="adm.orders.status"></span> <select id="ordersStatus"><option value="" data-i18n="common.all"></option></select></label>
+      <label id="ordersStoreWrap"><span data-i18n="common.store"></span> <select id="ordersStore"></select></label>
+      <button id="ordersReload"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#refresh"></use></svg><span data-i18n="adm.orders.reload"></span></button>
     </div>
     <p class="error" id="ordersError" role="alert"></p>
     <div class="table-wrap">
       <table class="table">
-        <thead><tr><th>№</th><th>Vaqti</th><th>Mijoz</th><th>Olish usuli</th><th class="num">Jami, so'm</th><th>To'lov</th><th>Holati</th><th>Telegram</th></tr></thead>
+        <thead><tr><th>№</th><th data-i18n="adm.orders.time"></th><th data-i18n="adm.orders.customer"></th><th data-i18n="adm.orders.fulfillment"></th><th class="num" data-i18n="adm.orders.total"></th><th data-i18n="adm.orders.payment"></th><th data-i18n="adm.orders.status"></th><th>Telegram</th></tr></thead>
         <tbody id="orderRows"></tbody>
       </table>
     </div>
   </main>
   <main id="stats" hidden>
     <div class="bar">
-      <label>Davr <select id="statsDays"><option value="7">7 kun</option><option value="30" selected>30 kun</option><option value="90">90 kun</option></select></label>
-      <label id="statsStoreWrap">Do'kon <select id="statsStore"><option value="">Hammasi</option></select></label>
+      <label><span data-i18n="adm.stats.period"></span> <select id="statsDays"><option value="7"></option><option value="30" selected></option><option value="90"></option></select></label>
+      <label id="statsStoreWrap"><span data-i18n="common.store"></span> <select id="statsStore"></select></label>
     </div>
     <p class="error" id="statsError" role="alert"></p>
-    <div class="empty card" id="statsEmpty" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><h2>Bu davrda hali tavsiya berilmagan</h2><p>Mijozlar kiosk yoki telefondan foydalana boshlaganda statistika shu yerda paydo bo'ladi.</p></div>
+    <div class="empty card" id="statsEmpty" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><h2 data-i18n="adm.stats.empty_title"></h2><p data-i18n="adm.stats.empty_text"></p></div>
     <div id="statsBody">
       <h2 id="statsTotal"></h2>
-      <h3>Pilot hisoboti</h3>
-      <div class="table-wrap"><table class="table"><thead><tr><th>Bosqich</th><th class="num">Soni</th><th class="num">Ulushi</th></tr></thead><tbody id="pilotRows"></tbody></table></div>
+      <h3 data-i18n="adm.stats.pilot"></h3>
+      <div class="table-wrap"><table class="table"><thead><tr><th data-i18n="adm.stats.stage"></th><th class="num" data-i18n="adm.stats.count"></th><th class="num" data-i18n="adm.stats.share"></th></tr></thead><tbody id="pilotRows"></tbody></table></div>
       <p class="sizes" id="pilotOrders"></p>
-      <h3>Eng ko'p taklif qilingan kiyimlar</h3>
-      <div class="table-wrap"><table class="table"><thead><tr><th>Kiyim</th><th>Kategoriya</th><th class="num">Necha marta</th></tr></thead><tbody id="topRows"></tbody></table></div>
-      <h3>Kunlik tavsiyalar soni</h3>
-      <div class="table-wrap"><table class="table bars"><thead><tr><th>Kun</th><th class="num">Soni</th><th></th></tr></thead><tbody id="dayRows"></tbody></table></div>
+      <h3 data-i18n="adm.stats.top"></h3>
+      <div class="table-wrap"><table class="table"><thead><tr><th data-i18n="adm.stats.item"></th><th data-i18n="adm.products.category"></th><th class="num" data-i18n="adm.stats.times"></th></tr></thead><tbody id="topRows"></tbody></table></div>
+      <h3 data-i18n="adm.stats.daily"></h3>
+      <div class="table-wrap"><table class="table bars"><thead><tr><th data-i18n="adm.stats.day"></th><th class="num" data-i18n="adm.stats.count"></th><th></th></tr></thead><tbody id="dayRows"></tbody></table></div>
     </div>
   </main>
 </div>
 
 <dialog id="qrDlg" aria-labelledby="qrTitle">
-  <h2 id="qrTitle">Do'kon QR kodlari</h2>
-  <p class="sizes">QR kod mijoz telefonida ilovani shu do'kon uchun ochadi. Chop etib, kiosk yoniga qo'ying.</p>
+  <h2 id="qrTitle" data-i18n="adm.qrdlg.title"></h2>
+  <p class="sizes" data-i18n="adm.qrdlg.text"></p>
   <div class="table-wrap"><table class="table"><tbody id="qrRows"></tbody></table></div>
   <p class="error" id="qrError" role="alert"></p>
-  <div class="actions"><button type="button" id="qrClose">Yopish</button></div>
+  <div class="actions"><button type="button" id="qrClose" data-i18n="common.close"></button></div>
 </dialog>
 
 <dialog id="orderDlg" aria-labelledby="orderTitle">
@@ -100,27 +102,27 @@
 </dialog>
 
 <dialog id="payDlg" aria-labelledby="payTitle">
-  <h2 id="payTitle">Kassa: buyurtma to'lovi</h2>
+  <h2 id="payTitle" data-i18n="adm.paydlg.title"></h2>
   <form id="payFind" class="bar">
-    <label class="grow">Buyurtma raqami <input name="no" type="number" inputmode="numeric" min="1" required></label>
-    <button class="primary">Topish</button>
+    <label class="grow"><span data-i18n="adm.paydlg.no"></span> <input name="no" type="number" inputmode="numeric" min="1" required></label>
+    <button class="primary" data-i18n="adm.paydlg.find"></button>
   </form>
   <div id="payOrder"></div>
   <p class="error" id="payError" role="alert"></p>
-  <div class="actions"><button type="button" class="primary" id="payConfirm" hidden>Pul olindi: to'landi</button><button type="button" id="payClose">Yopish</button></div>
+  <div class="actions"><button type="button" class="primary" id="payConfirm" hidden data-i18n="adm.paydlg.confirm"></button><button type="button" id="payClose" data-i18n="common.close"></button></div>
 </dialog>
 
 <dialog id="importDlg" aria-labelledby="importTitle">
   <form id="importForm" method="dialog">
-    <h2 id="importTitle">CSV fayldan yuklash</h2>
-    <p class="sizes">Birinchi qator — ustun nomlari. Har qator bitta kiyim; razmer ustunlariga soni yoziladi. <code>id</code> ustuni to'ldirilsa, o'sha kiyim yangilanadi, bo'sh bo'lsa yangisi qo'shiladi (bosh admin <code>store_id</code> ni ham yozadi). Yangilashda bo'sh katak eski qiymatni saqlaydi. Excel'da "CSV UTF-8" qilib saqlang.</p>
+    <h2 id="importTitle" data-i18n="adm.import.title"></h2>
+    <p class="sizes" data-i18n="adm.import.help"></p>
     <p><code id="importCols"></code></p>
-    <label>CSV fayl <input name="file" type="file" accept=".csv,text/csv" required></label>
+    <label><span data-i18n="adm.import.file"></span> <input name="file" type="file" accept=".csv,text/csv" required></label>
     <p class="error" id="importError" role="alert"></p>
     <ul id="importErrors" class="error"></ul>
     <div class="actions">
-      <button type="button" id="importCancel">Yopish</button>
-      <button class="primary">Yuklash</button>
+      <button type="button" id="importCancel" data-i18n="common.close"></button>
+      <button class="primary" data-i18n="adm.import.submit"></button>
     </div>
   </form>
 </dialog>
@@ -129,49 +131,52 @@
   <form id="form" method="dialog">
     <h2 id="formTitle"></h2>
     <div class="grid">
-      <label>Nomi <input name="name" required maxlength="120"></label>
-      <label>Kategoriya <select name="category" required></select></label>
-      <label>Jins <select name="gender" required>
-        <option value="unisex">Uniseks</option><option value="male">Erkak</option><option value="female">Ayol</option>
+      <label><span data-i18n="field.name"></span> <input name="name" required maxlength="120"></label>
+      <label><span data-i18n="adm.form.name_ru"></span> <input name="name_ru" lang="ru" maxlength="120"></label>
+      <label><span data-i18n="adm.products.category"></span> <select name="category" required></select></label>
+      <label><span data-i18n="adm.form.gender"></span> <select name="gender" required>
+        <option value="unisex" data-i18n="gender.unisex"></option><option value="male" data-i18n="gender.male"></option><option value="female" data-i18n="gender.female"></option>
       </select></label>
-      <label>Rangi <input name="color" required maxlength="40"></label>
-      <label>Uslubi <input name="style" maxlength="40"></label>
-      <label>Narxi, so'm <input name="price" type="number" min="1" step="1" required></label>
-      <label>Chegirmali narx <input name="discount_price" type="number" min="1" step="1"></label>
-      <label>Min harorat, °C <input name="temp_min" type="number" step="1" required></label>
-      <label>Max harorat, °C <input name="temp_max" type="number" step="1" required></label>
-      <label>Javondagi joyi <input name="shelf_location" maxlength="40"></label>
-      <label id="storeWrap">Do'kon <select name="store_id"></select></label>
-      <label class="check"><input name="waterproof" type="checkbox"> Suv o'tkazmaydi</label>
+      <label><span data-i18n="adm.form.color"></span> <input name="color" required maxlength="40"></label>
+      <label><span data-i18n="adm.form.style"></span> <input name="style" maxlength="40"></label>
+      <label><span data-i18n="adm.products.price"></span> <input name="price" type="number" min="1" step="1" required></label>
+      <label><span data-i18n="adm.form.discount"></span> <input name="discount_price" type="number" min="1" step="1"></label>
+      <label><span data-i18n="adm.form.temp_min"></span> <input name="temp_min" type="number" step="1" required></label>
+      <label><span data-i18n="adm.form.temp_max"></span> <input name="temp_max" type="number" step="1" required></label>
+      <label><span data-i18n="adm.form.shelf"></span> <input name="shelf_location" maxlength="40"></label>
+      <label id="storeWrap"><span data-i18n="common.store"></span> <select name="store_id"></select></label>
+      <label class="check"><input name="waterproof" type="checkbox"> <span data-i18n="adm.form.waterproof"></span></label>
     </div>
     <div id="imgWrap">
-      <h3>Rasm</h3>
+      <h3 data-i18n="adm.form.image"></h3>
       <img id="imgPreview" alt="" hidden>
       <div class="bar">
-        <label class="grow">JPEG, PNG yoki WebP, 2 MB gacha <input id="imgFile" type="file" accept="image/jpeg,image/png,image/webp"></label>
-        <button type="button" id="imgUpload"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#upload"></use></svg>Rasmni yuklash</button>
-        <button type="button" class="danger" id="imgRemove"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trash"></use></svg>Rasmni o'chirish</button>
+        <label class="grow"><span data-i18n="adm.form.image_hint"></span> <input id="imgFile" type="file" accept="image/jpeg,image/png,image/webp"></label>
+        <button type="button" id="imgUpload"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#upload"></use></svg><span data-i18n="adm.form.image_upload"></span></button>
+        <button type="button" class="danger" id="imgRemove"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trash"></use></svg><span data-i18n="adm.form.image_remove"></span></button>
       </div>
       <p class="error" id="imgError" role="alert"></p>
     </div>
-    <h3>Razmerlar va soni</h3>
+    <h3 data-i18n="adm.form.sizes"></h3>
     <div class="stock" id="stock"></div>
     <p class="error" id="formError" role="alert"></p>
     <div class="actions">
-      <button type="button" id="cancel">Bekor qilish</button>
-      <button class="primary" id="save">Saqlash</button>
+      <button type="button" id="cancel" data-i18n="common.cancel"></button>
+      <button class="primary" id="save" data-i18n="adm.form.save"></button>
     </div>
   </form>
 </dialog>
 
 <script type="module">
 import { icon, toast, confirmDialog } from '/shared/ui.js';
-const CATS = { outerwear: 'Ustki kiyim', top: 'Ustki (top)', bottom: 'Shim / yubka', shoes: 'Poyabzal', accessory: 'Aksessuar' };
+import { t, fmt, initLang, getLang, langSwitch, productName } from '/shared/i18n.js';
+const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
+const cat = (c) => (c ? t(`cat.${c}`) : '—');
 const SIZES = { shoes: ['36','37','38','39','40','41','42','43','44','45'], accessory: ['ONE'] };
 const sizesFor = (c) => SIZES[c] || ['XS','S','M','L','XL','XXL'];
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
-const som = (n) => n.toLocaleString('ru-RU').replace(/ /g, ' ');
+const som = (n) => fmt.num(n); // bare number: the column header names the currency
 let me = null, stores = [], editing = null;
 
 function token() { try { return localStorage.getItem('sfToken'); } catch { return null; } }
@@ -180,19 +185,25 @@ function setToken(t) { try { t ? localStorage.setItem('sfToken', t) : localStora
 async function call(path, opts = {}) {
   const res = await fetch('/api/admin' + path, {
     method: opts.method || 'GET',
-    headers: { 'content-type': opts.type || 'application/json', authorization: 'Bearer ' + token() },
+    headers: { 'content-type': opts.type || 'application/json', authorization: 'Bearer ' + token(), 'accept-language': getLang() },
     body: opts.raw ?? (opts.body && JSON.stringify(opts.body)),
   });
-  if (res.status === 401 && path !== '/login') { setToken(null); show(); throw new Error('Qayta kiring'); }
+  if (res.status === 401 && path !== '/login') { setToken(null); show(); throw new Error(t('adm.relogin')); }
   const data = res.status === 204 ? null : await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || 'Xatolik yuz berdi, qayta urining'), { data });
+  if (!res.ok) throw Object.assign(new Error(data.error || t('common.error')), { data });
   return data;
 }
 
-for (const [v, t] of Object.entries(CATS)) {
-  $('cat').append(el('option', { value: v, textContent: t }));
-  $('form').category.append(el('option', { value: v, textContent: t }));
+initLang();
+// Language: one switch on the sign-in card, one in the header. A switch reloads the page (admin keeps its token,
+// and every list, select and dialog is drawn again in the new language).
+$('loginLang').replaceChildren(langSwitch(() => location.reload()));
+$('adminLang').replaceChildren(langSwitch(() => location.reload(), { short: true }));
+for (const v of CATEGORIES) {
+  $('cat').append(el('option', { value: v, textContent: cat(v) }));
+  $('form').category.append(el('option', { value: v, textContent: cat(v) }));
 }
+for (const o of $('statsDays').options) o.textContent = t('adm.stats.days', { n: Number(o.value) });
 
 async function show() {
   me = null;
@@ -201,10 +212,10 @@ async function show() {
   $('app').hidden = !me;
   if (!me) return;
   stores = await call('/stores');
-  $('who').textContent = me.email + (me.role === 'super' ? ' · bosh admin' : ' · ' + (stores[0]?.name || ''));
+  $('who').textContent = me.email + ' · ' + (me.role === 'super' ? t('adm.super') : stores[0]?.name || '');
   $('storeFilterWrap').hidden = $('storeWrap').hidden = $('statsStoreWrap').hidden = $('ordersStoreWrap').hidden = me.role !== 'super';
   for (const sel of [$('storeFilter'), $('statsStore'), $('ordersStore'), $('form').store_id]) {
-    sel.replaceChildren(...(sel.id ? [el('option', { value: '', textContent: 'Hammasi' })] : []), ...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
+    sel.replaceChildren(...(sel.id ? [el('option', { value: '', textContent: t('common.all') })] : []), ...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
   }
   load();
 }
@@ -233,15 +244,15 @@ async function load() {
     $('listError').textContent = '';
     const storeName = (id) => stores.find((s) => s.id === id)?.name || id;
     $('rows').replaceChildren(...(list.length ? list.map((x) => el('tr', {},
-      el('td', {}, ...(x.image_url ? [el('img', { className: 'thumb', src: x.image_url, alt: '' })] : []), x.name),
-      el('td', { textContent: CATS[x.category] }),
+      el('td', {}, ...(x.image_url ? [el('img', { className: 'thumb', src: x.image_url, alt: '' })] : []), productName(x)),
+      el('td', { textContent: cat(x.category) }),
       el('td', { textContent: storeName(x.store_id) }),
       el('td', { className: 'num', textContent: x.discount_price ? som(x.discount_price) + ' (' + som(x.price) + ')' : som(x.price) }),
       el('td', { className: 'sizes', textContent: x.stock.map((s) => s.size + ': ' + s.quantity).join(', ') }),
       el('td', { className: 'row-actions' },
-        el('button', { className: 'icon-btn ghost', title: 'Tahrirlash', ariaLabel: `${x.name}: tahrirlash`, onclick: () => openForm(x) }, icon('edit')),
-        el('button', { className: 'icon-btn ghost danger', title: "O'chirish", ariaLabel: `${x.name}: o'chirish`, onclick: () => remove(x) }, icon('trash'))),
-    )) : [el('tr', {}, el('td', { colSpan: 6, className: 'empty-row', textContent: 'Hech narsa topilmadi. Qidiruvni o\'zgartiring yoki yangi kiyim qo\'shing.' }))]));
+        el('button', { className: 'icon-btn ghost', title: t('adm.products.edit'), ariaLabel: t('adm.products.edit_aria', { name: productName(x) }), onclick: () => openForm(x) }, icon('edit')),
+        el('button', { className: 'icon-btn ghost danger', title: t('common.delete'), ariaLabel: t('adm.products.delete_aria', { name: productName(x) }), onclick: () => remove(x) }, icon('trash'))),
+    )) : [el('tr', {}, el('td', { colSpan: 6, className: 'empty-row', textContent: t('adm.products.empty') }))]));
   } catch (err) { $('listError').textContent = err.message; }
 }
 $('q').oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
@@ -261,8 +272,8 @@ function openForm(p) {
   const f = $('form');
   f.reset();
   $('formError').textContent = '';
-  $('formTitle').textContent = p ? 'Kiyimni tahrirlash' : "Yangi kiyim";
-  for (const k of ['name', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'shelf_location']) f[k].value = p?.[k] ?? '';
+  $('formTitle').textContent = t(p ? 'adm.form.edit' : 'adm.form.new');
+  for (const k of ['name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'shelf_location']) f[k].value = p?.[k] ?? '';
   if (!p) { f.category.value = 'top'; f.gender.value = 'unisex'; }
   f.waterproof.checked = !!p?.waterproof;
   f.store_id.value = p?.store_id ?? stores[0]?.id ?? '';
@@ -283,7 +294,7 @@ $('form').addEventListener('submit', async (e) => {
   const f = e.target;
   const num = (v) => (v === '' ? null : Number(v));
   const body = {
-    name: f.name.value, category: f.category.value, gender: f.gender.value, color: f.color.value,
+    name: f.name.value, name_ru: f.name_ru.value || null, category: f.category.value, gender: f.gender.value, color: f.color.value,
     style: f.style.value || null, price: num(f.price.value), discount_price: num(f.discount_price.value),
     temp_min: num(f.temp_min.value), temp_max: num(f.temp_max.value), waterproof: f.waterproof.checked,
     shelf_location: f.shelf_location.value || null,
@@ -293,7 +304,7 @@ $('form').addEventListener('submit', async (e) => {
   try {
     await call(editing ? '/products/' + editing.id : '/products', { method: editing ? 'PATCH' : 'POST', body });
     $('dlg').close();
-    toast(editing ? 'Saqlandi' : "Kiyim qo'shildi");
+    toast(t(editing ? 'adm.form.saved' : 'adm.form.added'));
     load();
   } catch (err) { $('formError').textContent = err.message; }
 });
@@ -306,8 +317,8 @@ function showImage(url) {
 $('imgUpload').onclick = async () => {
   const file = $('imgFile').files[0];
   $('imgError').textContent = '';
-  if (!file) { $('imgError').textContent = 'Avval rasm faylini tanlang'; return; }
-  if (file.size > 2 * 1024 * 1024) { $('imgError').textContent = 'Rasm 2 MB dan katta. Kichikroq rasm tanlang'; return; }
+  if (!file) { $('imgError').textContent = t('adm.form.image_pick'); return; }
+  if (file.size > 2 * 1024 * 1024) { $('imgError').textContent = t('adm.form.image_big'); return; }
   try {
     const r = await call('/products/' + editing.id + '/image', { method: 'POST', raw: file, type: file.type || 'application/octet-stream' });
     editing.image_url = r.image_url;
@@ -325,7 +336,7 @@ $('imgRemove').onclick = async () => {
   } catch (err) { $('imgError').textContent = err.message; }
 };
 
-$('importCols').textContent = 'id, store_id, name, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, shelf_location, XS, S, M, L, XL, XXL, 36 … 45, ONE';
+$('importCols').textContent = 'id, store_id, name, name_ru, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, shelf_location, XS, S, M, L, XL, XXL, 36 … 45, ONE';
 $('importBtn').onclick = () => {
   $('importForm').reset();
   $('importError').textContent = '';
@@ -344,11 +355,11 @@ $('importForm').addEventListener('submit', async (e) => {
     $('importError').textContent = '';
     $('importErrors').replaceChildren();
     $('importDlg').close();
-    toast(`Tayyor: ${r.created} ta qo'shildi, ${r.updated} ta yangilandi.`);
+    toast(t('adm.import.done', { created: r.created, updated: r.updated }));
     load();
   } catch (err) {
     $('importError').textContent = err.message;
-    $('importErrors').replaceChildren(...(err.data?.errors || []).map((x) => el('li', { textContent: `${x.line}-qator: ${x.error}` })));
+    $('importErrors').replaceChildren(...(err.data?.errors || []).map((x) => el('li', { textContent: t('adm.import.line', { line: x.line, error: x.error }) })));
   }
 });
 
@@ -373,18 +384,17 @@ async function loadStats() {
     $('statsError').textContent = '';
     $('statsEmpty').hidden = s.total > 0;
     $('statsBody').hidden = s.total === 0;
-    $('statsTotal').textContent = `${s.days} kunda ${s.total} ta tavsiya`;
+    $('statsTotal').textContent = t('adm.stats.total', { days: s.days, total: s.total });
     const f = s.pilot;
     const pct = (n) => (f.shown ? `${Math.round((n / f.shown) * 100)}%` : '—');
     $('pilotRows').replaceChildren(...[
-      ['Tavsiya ko\'rsatildi', f.shown], ['Taklifni qabul qildi (savatga qo\'shdi)', f.accepted],
-      ['Kiyib ko\'rdi', f.tried], ['Sotib oldi (to\'langan buyurtma)', f.bought],
-    ].map(([label, n]) => el('tr', {}, el('td', { textContent: label }), el('td', { className: 'num', textContent: n }), el('td', { className: 'num', textContent: pct(n) }))));
-    $('pilotOrders').textContent = `To'langan buyurtmalar: ${f.orders} ta, shundan yetkazib berish: ${f.delivery_orders} ta · Tushum: ${som(f.revenue)} so'm · O'rtacha chek: ${som(f.avg_order)} so'm`;
-    $('topRows').replaceChildren(...s.top.map((t) => el('tr', {},
-      el('td', { textContent: t.name ?? `O'chirilgan kiyim (#${t.product_id})` }),
-      el('td', { textContent: CATS[t.category] || '—' }),
-      el('td', { className: 'num', textContent: t.count }))));
+      ['adm.stats.shown', f.shown], ['adm.stats.accepted', f.accepted], ['adm.stats.tried', f.tried], ['adm.stats.bought', f.bought],
+    ].map(([label, n]) => el('tr', {}, el('td', { textContent: t(label) }), el('td', { className: 'num', textContent: n }), el('td', { className: 'num', textContent: pct(n) }))));
+    $('pilotOrders').textContent = t('adm.stats.orders', { orders: f.orders, delivery: f.delivery_orders, revenue: fmt.som(f.revenue), avg: fmt.som(f.avg_order) });
+    $('topRows').replaceChildren(...s.top.map((x) => el('tr', {},
+      el('td', { textContent: x.name ? productName(x) : t('adm.stats.deleted', { id: x.product_id }) }),
+      el('td', { textContent: cat(x.category) }),
+      el('td', { className: 'num', textContent: x.count }))));
     const max = Math.max(1, ...s.per_day.map((d) => d.count));
     $('dayRows').replaceChildren(...s.per_day.slice().reverse().map((d) => el('tr', {},
       el('td', { textContent: d.day }),
@@ -395,7 +405,7 @@ async function loadStats() {
 $('statsDays').onchange = $('statsStore').onchange = loadStats;
 
 // Cashier: find an order by its number, take the money, mark it paid (stock goes down on the server).
-const PAY = { pending: "to'lanmagan", paid: "to'langan", cancelled: 'bekor qilingan' };
+const pay = (o) => t(`adm.pay.${o.payment_status}`);
 let payOrder = null;
 $('payBtn').onclick = () => {
   payOrder = null;
@@ -412,13 +422,13 @@ function renderPay(o) {
   $('payOrder').replaceChildren(...orderInfo(o));
 }
 function orderInfo(o) {
-  const until = o.expires_at ? ` · ${new Date(o.expires_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} gacha` : '';
+  const until = o.expires_at ? ` · ${t('adm.order.until', { time: fmt.time(o.expires_at) })}` : '';
   return [
-    el('p', { textContent: `№ ${o.id} · ${o.customer_name} · ${o.phone} · ${o.fulfillment === 'pickup' ? "do'kondan olib ketadi" : 'yetkazish: ' + o.address}` }),
+    el('p', { textContent: `№ ${o.id} · ${o.customer_name} · ${o.phone} · ${o.fulfillment === 'pickup' ? t('adm.order.pickup') : t('adm.order.delivery_to', { address: o.address })}` }),
     el('div', { className: 'table-wrap' }, el('table', { className: 'table' }, el('tbody', {}, ...o.items.map((i) => el('tr', {},
-      el('td', { textContent: i.name }), el('td', { textContent: i.size }), el('td', { textContent: i.shelf_location || '' }),
+      el('td', { textContent: productName(i) }), el('td', { textContent: i.size }), el('td', { textContent: i.shelf_location || '' }),
       el('td', { className: 'num', textContent: `${i.quantity} × ${som(i.unit_price)}` })))))),
-    el('p', {}, el('strong', { textContent: `Jami: ${som(o.total)} so'm` }), ` (shundan yetkazish ${som(o.delivery_fee)}) · ${PAY[o.payment_status]}${o.payment_status === 'pending' ? until : ''}`),
+    el('p', {}, el('strong', { textContent: t('adm.order.total', { sum: fmt.som(o.total) }) }), ` ${t('adm.order.fee', { fee: som(o.delivery_fee) })} · ${pay(o)}${o.payment_status === 'pending' ? until : ''}`),
   ];
 }
 $('payFind').onsubmit = async (e) => {
@@ -437,7 +447,7 @@ $('payConfirm').onclick = async () => {
   $('payConfirm').disabled = true;
   try {
     renderPay(await call(`/orders/${payOrder.id}/pay`, { method: 'POST' }));
-    toast(`№ ${payOrder.id} to'landi`);
+    toast(t('adm.paydlg.done', { id: payOrder.id }));
     load(); // stock changed
   } catch (err) {
     $('payError').textContent = err.message;
@@ -447,12 +457,13 @@ $('payConfirm').onclick = async () => {
 };
 
 // Orders: list with filters, details with one button per allowed next status (the server decides which).
-const STATUS = { new: 'Yangi', packing: "Yig'ilmoqda", shipping: "Yo'lda", delivered: 'Yetkazildi', cancelled: 'Bekor qilindi' };
-const statusName = (o) => (o.status === 'delivered' && o.fulfillment === 'pickup' ? 'Topshirildi' : STATUS[o.status]);
-const STEP = { packing: "Yig'ishni boshlash", shipping: "Yo'lga chiqarish", delivered: (o) => (o.fulfillment === 'pickup' ? 'Mijozga topshirildi' : 'Yetkazildi'), cancelled: 'Bekor qilish' };
+const STATUSES = ['new', 'packing', 'shipping', 'delivered', 'cancelled'];
+const handed = (o, s) => s === 'delivered' && o.fulfillment === 'pickup'; // a pickup order is handed over, not delivered
+const statusName = (o) => t(handed(o, o.status) ? 'adm.status.handed' : `adm.status.${o.status}`);
+const stepName = (o, s) => t(handed(o, s) ? 'adm.step.handed' : `adm.step.${s}`);
 const badge = (o) => el('span', { className: 'badge ' + ({ new: 'warn', packing: 'accent', shipping: 'accent', delivered: 'ok', cancelled: 'off' }[o.status] || ''), textContent: statusName(o) });
-const when = (iso) => new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-for (const [v, t] of Object.entries(STATUS)) $('ordersStatus').append(el('option', { value: v, textContent: t }));
+const when = (iso) => fmt.dateTime(iso);
+for (const v of STATUSES) $('ordersStatus').append(el('option', { value: v, textContent: t(`adm.status.${v}`) }));
 
 async function loadOrders() {
   const p = new URLSearchParams();
@@ -466,13 +477,13 @@ async function loadOrders() {
         el('td', { textContent: o.id }),
         el('td', { textContent: when(o.created_at) }),
         el('td', {}, o.customer_name, el('div', { className: 'sizes', textContent: o.phone + (me.role === 'super' ? ' · ' + o.store_name : '') })),
-        el('td', { textContent: o.fulfillment === 'pickup' ? 'Olib ketadi' : 'Yetkazish' }),
+        el('td', { textContent: t(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery') }),
         el('td', { className: 'num', textContent: som(o.total) }),
-        el('td', { textContent: PAY[o.payment_status] }),
+        el('td', { textContent: pay(o) }),
         el('td', {}, badge(o)),
-        el('td', { textContent: o.telegram ? 'ulangan' : '—' }));
+        el('td', { textContent: o.telegram ? t('adm.orders.tg_linked') : '—' }));
       return tr;
-    }) : [el('tr', {}, el('td', { colSpan: 8, className: 'empty-row', textContent: "Buyurtmalar yo'q. Mijoz kiosk yoki telefondan buyurtma berganda shu yerda chiqadi." }))]));
+    }) : [el('tr', {}, el('td', { colSpan: 8, className: 'empty-row', textContent: t('adm.orders.empty') }))]));
   } catch (err) { $('ordersError').textContent = err.message; }
 }
 $('ordersStatus').onchange = $('ordersStore').onchange = $('ordersReload').onclick = loadOrders;
@@ -485,22 +496,22 @@ async function openOrder(id) {
   catch (err) { $('ordersError').textContent = err.message; }
 }
 function renderOrder(o) {
-  $('orderTitle').replaceChildren(`Buyurtma № ${o.id} `, badge(o));
+  $('orderTitle').replaceChildren(t('adm.order.title', { id: o.id }), ' ', badge(o));
   $('orderInfo').replaceChildren(...orderInfo(o),
-    el('p', { className: 'sizes', textContent: `${when(o.created_at)} · ${{ cashier: 'kassada', click: 'Click', payme: 'Payme' }[o.payment_method] || o.payment_method} · Telegram: ${o.telegram ? 'xabar boradi' : 'ulanmagan'}` }),
-    ...(o.status === 'cancelled' && o.payment_status === 'paid' ? [el('p', { className: 'error', textContent: "Buyurtma to'langan edi: pulni mijozga qaytaring." })] : []));
+    el('p', { className: 'sizes', textContent: `${when(o.created_at)} · ${o.payment_method === 'cashier' ? t('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] || o.payment_method} · ${t(o.telegram ? 'adm.order.tg_on' : 'adm.order.tg_off')}` }),
+    ...(o.status === 'cancelled' && o.payment_status === 'paid' ? [el('p', { className: 'error', textContent: t('adm.order.refund') })] : []));
   $('orderActions').replaceChildren(
-    ...o.next.map((s) => el('button', { type: 'button', className: s === 'cancelled' ? 'danger' : 'primary', textContent: typeof STEP[s] === 'function' ? STEP[s](o) : STEP[s], onclick: (e) => setStatus(o, s, e.target) })),
-    el('button', { type: 'button', textContent: 'Yopish', onclick: () => $('orderDlg').close() }));
+    ...o.next.map((s) => el('button', { type: 'button', className: s === 'cancelled' ? 'danger' : 'primary', textContent: stepName(o, s), onclick: (e) => setStatus(o, s, e.target) })),
+    el('button', { type: 'button', textContent: t('common.close'), onclick: () => $('orderDlg').close() }));
 }
 async function setStatus(o, s, btn) {
-  if (s === 'cancelled' && !(await confirmDialog({ title: `№ ${o.id} buyurtma bekor qilinsinmi?`, text: o.payment_status === 'paid' ? "Kiyimlar qoldiqqa qaytadi, pulni mijozga qaytarish kerak bo'ladi." : 'Kiyimlar qoldiqqa qaytadi.', ok: 'Bekor qilish', cancel: 'Ortga', danger: true }))) return;
+  if (s === 'cancelled' && !(await confirmDialog({ title: t('adm.order.cancel_title', { id: o.id }), text: t(o.payment_status === 'paid' ? 'adm.order.cancel_paid' : 'adm.order.cancel_unpaid'), ok: t('adm.step.cancelled'), cancel: t('common.back'), danger: true }))) return;
   $('orderError').textContent = '';
   btn.disabled = true;
   try {
     const next = await call(`/orders/${o.id}/status`, { method: 'POST', body: { status: s } });
     renderOrder(next);
-    toast(`№ ${o.id}: ${statusName(next)}`);
+    toast(t('adm.order.changed', { id: o.id, status: statusName(next) }));
     loadOrders();
   } catch (err) {
     $('orderError').textContent = err.message;
@@ -512,7 +523,7 @@ $('qrBtn').onclick = () => {
   $('qrError').textContent = '';
   $('qrRows').replaceChildren(...stores.map((s) => el('tr', {},
     el('td', { textContent: s.name }),
-    el('td', { className: 'num' }, el('button', { className: 'primary', onclick: () => printQr(s.id) }, icon('qr'), 'QR chop etish')))));
+    el('td', { className: 'num' }, el('button', { className: 'primary', onclick: () => printQr(s.id) }, icon('qr'), t('adm.qrdlg.print'))))));
   $('qrDlg').showModal();
 };
 $('qrClose').onclick = () => $('qrDlg').close();
@@ -535,7 +546,7 @@ async function printQr(id) {
     h.textContent = q.name;
     const p1 = d.createElement('p');
     p1.style.fontSize = '20px';
-    p1.textContent = "Telefoningiz kamerasi bilan skanerlang va o'zingizga mos kiyim tanlang";
+    p1.textContent = t('adm.qrdlg.scan');
     const p2 = d.createElement('p');
     p2.style.color = '#666';
     p2.textContent = q.url;
@@ -546,8 +557,8 @@ async function printQr(id) {
 }
 
 async function remove(p) {
-  if (!(await confirmDialog({ title: `«${p.name}» o'chirilsinmi?`, text: "Buni qaytarib bo'lmaydi. Vaqtincha sotmaslik uchun qoldiqni 0 qiling.", ok: "O'chirish", danger: true }))) return;
-  try { await call('/products/' + p.id, { method: 'DELETE' }); load(); toast("Kiyim o'chirildi"); }
+  if (!(await confirmDialog({ title: t('adm.products.delete_title', { name: productName(p) }), text: t('adm.products.delete_text'), ok: t('common.delete'), danger: true }))) return;
+  try { await call('/products/' + p.id, { method: 'DELETE' }); load(); toast(t('adm.products.deleted')); }
   catch (err) { $('listError').textContent = err.message; }
 }
 

@@ -63,7 +63,7 @@ test('phone numbers are normalised to +998XXXXXXXXX', () => {
   assert.equal(normalizePhone('+998 90 123-45-67'), '+998901234567');
   assert.equal(normalizePhone('90 123 45 67'), '+998901234567');
   assert.equal(normalizePhone('(998) 901234567'), '+998901234567');
-  for (const bad of ['', '12345', '+7 901 234 56 78', '998 90 123 45 6a', 901234567]) assert.throws(() => normalizePhone(bad), /Telefon/);
+  for (const bad of ['', '12345', '+7 901 234 56 78', '998 90 123 45 6a', 901234567]) assert.throws(() => normalizePhone(bad), { publicKey: 'err.phone' });
 });
 
 test('adding holds stock, the cart totals come from the DB and ignore browser prices', async () => {

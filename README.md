@@ -7,7 +7,10 @@ outfit in the cart, pick it up and pay at the cashier, or order delivery and pay
 
 - Customer app: `/kiosk?store=<id>` (kiosk, big buttons, resets after 90 s idle) and `/m?store=<id>` (phone)
 - Admin: `/admin` (products, stock, CSV import, orders, cashier, QR codes, stats and the pilot report)
-- API: `/api/...`, health check `GET /api/health`
+- API: `/api/...`, health check `GET /api/health`. Errors are `{ code, error }`: a stable `code` and the message in the
+  request's language (`?lang=uz|ru` or `Accept-Language`, default Uzbek)
+- Languages: Uzbek (Latin, default) and Russian, one dictionary in `public/shared/i18n.js`; switch on the start screen
+  and in the admin header (the kiosk goes back to Uzbek after 90 s idle)
 - Full spec: [`docs/SPEC.md`](docs/SPEC.md), build log and decisions: [`TASKS.md`](TASKS.md)
 
 Stack: Node.js 22 + Express 5, Knex with PostgreSQL in production (SQLite file in development), vanilla JS frontend,
@@ -97,8 +100,8 @@ migrates the database on start. Check it: `curl https://fit.example.uz/api/healt
 2. Create the store manager, who sees and changes only this store: `npm run admin:create -- manager@example.uz <store_id>`.
    No store id → super-admin (sees all stores). The password is asked on stdin, or taken from `ADMIN_PASSWORD`.
 3. Add products in `/admin` → "Kiyimlar" (form, or "CSV yuklash" for a whole catalogue), set stock per size, upload photos.
-   CSV columns (`,` or `;`, UTF-8, header row): `id, store_id, name, category, gender, color, style, price, discount_price,
-   temp_min, temp_max, waterproof, shelf_location` plus one stock column per size (`XS…XXL`, `36…45`, `ONE`). Empty `id`
+   CSV columns (`,` or `;`, UTF-8, header row): `id, store_id, name, name_ru, category, gender, color, style, price,
+   discount_price, temp_min, temp_max, waterproof, shelf_location` plus one stock column per size (`XS…XXL`, `36…45`, `ONE`). Empty `id`
    creates a product, a filled one updates it; categories `outerwear/top/bottom/shoes/accessory`, genders
    `male/female/unisex`, prices in whole so'm. Any bad row rejects the whole file with the line numbers.
 4. Kiosk: open `https://<domain>/kiosk?store=<id>` full screen in the kiosk browser (Chrome kiosk mode), allow the camera.
