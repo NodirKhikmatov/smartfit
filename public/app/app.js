@@ -1,5 +1,6 @@
 import { watchIdle } from './idle.js';
 import { loadPose, measure } from './pose.js';
+import { icon, confirmDialog, showAfter, skeletonCard } from '/shared/ui.js';
 
 // One app: /kiosk (big buttons, idle reset) and /m (phone, opened from the store QR).
 const kiosk = location.pathname.startsWith('/kiosk');
@@ -49,11 +50,17 @@ function setCart(c) {
   savedCart(c?.token ?? null);
   const n = c ? c.items.reduce((s, i) => s + i.quantity, 0) : 0;
   $('cartBtn').hidden = !n;
-  $('cartBtn').textContent = `Savat: ${n}`;
+  $('cartBtn').replaceChildren(icon('bag'), el('span', { className: 'cart-label', textContent: 'Savat' }), el('span', { className: 'count-pill', textContent: n }));
   syncs.forEach((f) => f());
   if (current === 'cart') renderCartScreen();
 }
 
+// Start-screen weather: an icon and a one-line outfit hint from the same rules the engine uses (rain, cold, cool, warm).
+const weatherIcon = (w) => (w.raining ? 'rain' : w.temperature < 5 ? 'snow' : w.temperature < 18 ? 'cloud-sun' : 'sun');
+const weatherHint = (w) => (w.raining ? ["umbrella", "Yomg'ir: suv o'tkazmaydigan ustki kiyim tavsiya qilamiz."]
+  : w.temperature < 5 ? ["outerwear", "Sovuq: issiq ustki kiyim tavsiya qilamiz."]
+  : w.temperature < 18 ? ["outerwear", "Salqin: ustki kiyim ham tavsiya qilamiz."]
+  : ["top", "Iliq: bugun yengil kiyim mos keladi."]);
 const weatherLine = (w) => `${Math.round(w.temperature)}°C${w.raining ? ", yomg'ir" : ''}`;
 
 async function api(path, body, method = body ? 'POST' : 'GET') {
@@ -86,12 +93,15 @@ async function loadStore() {
   $('start').textContent = 'Boshlash';
   $('start').disabled = false;
   $('weather').hidden = false;
+  $('weather').classList.remove('loading');
+  $('weather').removeAttribute('aria-busy');
+  const [hintIcon, hint] = weatherHint(w);
   $('weather').replaceChildren(
+    icon(weatherIcon(w)),
     el('div', { className: 'muted', textContent: `${store.city}, hozir` }),
     el('div', { className: 'temp', textContent: weatherLine(w) }),
-    ...(w.apparent_temperature !== null ? [el('div', { className: 'muted', textContent: `His qilinishi ${Math.round(w.apparent_temperature)}°C` })] : []),
-    ...(w.source === 'fallback' ? [el('div', { className: 'muted', textContent: "Taxminiy: shu oyning o'rtacha harorati" })] : []),
-    el('p', { style: 'margin:.5rem 0 0', textContent: w.temperature < 18 || w.raining ? 'Bugun ustki kiyim ham tavsiya qilamiz.' : 'Bugun yengil kiyim mos keladi.' }),
+    el('div', { className: 'muted feels', textContent: [w.apparent_temperature !== null && `His qilinishi ${Math.round(w.apparent_temperature)}°C`, w.source === 'fallback' && "Taxminiy: shu oyning o'rtacha harorati"].filter(Boolean).join(' · ') }),
+    el('p', { className: 'hint-line' }, icon(hintIcon), hint),
   );
 }
 
@@ -276,29 +286,40 @@ function renderSizes() {
       loadResults();
     };
     return el('div', { className: 'stepper' }, el('span', { textContent: label }),
-      el('button', { type: 'button', textContent: '−', ariaLabel: `${label}: kichikroq razmer`, disabled: i <= 0, onclick: move(-1) }),
+      el('button', { type: 'button', ariaLabel: `${label}: kichikroq razmer`, disabled: i <= 0, onclick: move(-1) }, icon('minus')),
       el('strong', { textContent: request.sizes[key] }),
-      el('button', { type: 'button', textContent: '+', ariaLabel: `${label}: kattaroq razmer`, disabled: i >= CLOTHES.length - 1, onclick: move(1) }));
+      el('button', { type: 'button', ariaLabel: `${label}: kattaroq razmer`, disabled: i >= CLOTHES.length - 1, onclick: move(1) }, icon('plus')));
   };
   $('sizeBar').replaceChildren(
     el('div', { className: 'row' }, stepper('top', 'Ustki'), stepper('bottom', 'Shim')),
-    el('p', { className: 'meta', style: 'margin:.5rem 0 0', textContent: sizeInfo.manual ? "Razmerni o'zingiz tanladingiz." : `${CONFIDENCE[sizeInfo.confidence]} Mos kelmasa, − / + bilan o'zgartiring.` }),
+    el('p', { className: 'meta', style: 'margin:var(--s-2) 0 0', textContent: sizeInfo.manual ? "Razmerni o'zingiz tanladingiz." : `${CONFIDENCE[sizeInfo.confidence]} Mos kelmasa, − / + bilan o'zgartiring.` }),
   );
 }
 
+let loadSeq = 0; // only the newest /recommend answer may draw (fast − / + taps)
 async function loadResults() {
+  const seq = ++loadSeq;
   syncs = new Set();
   show('results');
   renderSizes();
   $('resultsWeather').textContent = '';
-  $('results').replaceChildren(el('p', { className: 'muted', textContent: 'Obrazlar tanlanmoqda…' }));
+  // Screen readers get one summary line per load (U13), not the whole list again after every − / +.
+  $('resultsStatus').textContent = 'Obrazlar tanlanmoqda…';
+  $('results').replaceChildren();
+  const done = showAfter(300, () => seq === loadSeq && $('results').replaceChildren(skeletonCard(4), skeletonCard(4)));
   let r;
   try {
     r = await api('/recommend', request);
   } catch (err) {
+    done();
+    if (seq !== loadSeq) return;
+    $('resultsStatus').textContent = err.message;
     $('results').replaceChildren(el('p', { className: 'error', textContent: err.message }), el('button', { className: 'primary', textContent: 'Qayta urinish', onclick: loadResults }));
     return;
   }
+  done();
+  if (seq !== loadSeq) return;
+  $('resultsStatus').textContent = r.outfits.length ? `${r.outfits.length} ta obraz topildi` : "Mos obraz topilmadi";
   request.rec = r.rec; // −/+ re-queries update the same pilot log row
   $('resultsWeather').textContent = `Ob-havo: ${weatherLine(r.weather)}` + (r.budget ? ` · Byudjet: ${som(r.budget)}` : '');
   if (!r.outfits.length) {
@@ -320,16 +341,16 @@ function triedCard() {
     b.disabled = true;
     try {
       await api('/recommend/tried', { rec: request.rec });
-      b.textContent = "Rahmat! ✓";
+      b.replaceChildren(icon('check'), 'Rahmat!');
     } catch {
       b.disabled = false;
     }
   };
-  return el('div', { className: 'notice' }, el('p', { style: 'margin:0 0 .5rem', textContent: "Kiyimni kiyib ko'rdingizmi? Belgilab qo'ying — bu bizga tavsiyalarni yaxshilashga yordam beradi." }), b);
+  return el('div', { className: 'notice stack' }, el('p', { style: 'margin:0 0 var(--s-3)', textContent: "Kiyimni kiyib ko'rdingizmi? Belgilab qo'ying — bu bizga tavsiyalarni yaxshilashga yordam beradi." }), b);
 }
 
 const sizeName = (s) => (s === 'ONE' ? 'yagona razmer' : s);
-const thumb = (p) => (p.image_url ? el('img', { className: 'thumb', src: p.image_url, alt: '' }) : el('div', { className: 'thumb' }));
+const thumb = (p) => (p.image_url ? el('img', { className: 'thumb', src: p.image_url, alt: '' }) : el('div', { className: 'thumb' }, icon(p.category)));
 
 function itemRow(p) {
   // Unknown shoe size: the customer picks one of the in-stock sizes before adding (stored on the item as `chosen`).
@@ -341,7 +362,7 @@ function itemRow(p) {
   return el('li', {},
     thumb(p),
     el('div', {}, el('div', { textContent: p.name }), el('div', { className: 'meta', textContent: [CATS[p.category], p.color, size, p.shelf_location && `javon ${p.shelf_location}`].filter(Boolean).join(' · ') }), pick),
-    el('div', { className: 'price' }, ...(p.discount_price ? [el('s', { textContent: som(p.price) })] : []), som(p.unit_price)),
+    el('div', { className: p.discount_price ? 'price sale' : 'price' }, ...(p.discount_price ? [el('s', { textContent: som(p.price) })] : []), som(p.unit_price)),
   );
 }
 
@@ -350,7 +371,7 @@ function addButton(items) {
   const has = (p) => cart?.items.some((c) => c.product_id === p.id && (!size(p) || c.size === size(p)));
   const b = el('button', { className: 'primary', textContent: "Savatga qo'shish" });
   const msg = el('p', { className: 'error', style: 'margin:0;min-height:0', role: 'alert' });
-  const sync = () => { b.disabled = items.every(has); b.textContent = b.disabled ? "Savatga qo'shildi ✓" : "Savatga qo'shish"; };
+  const sync = () => { b.disabled = items.every(has); b.replaceChildren(...(b.disabled ? [icon('check'), "Savatga qo'shildi"] : [icon('bag'), "Savatga qo'shish"])); };
   b.onclick = async () => {
     const missing = items.find((p) => !size(p));
     if (missing) return void (msg.textContent = `«${missing.name}» uchun razmerni tanlang`);
@@ -370,7 +391,7 @@ function addButton(items) {
 }
 
 function outfitCard(o, n) {
-  const card = el('article', { className: 'outfit' },
+  const card = el('article', { className: 'outfit card' },
     el('h2', { textContent: o.title ? `${n}-obraz: ${o.title}` : `${n}-obraz` }),
     ...(o.reason ? [el('p', { className: 'muted', textContent: o.reason })] : []),
     el('ul', { className: 'items' }, ...o.items.map(itemRow)),
@@ -419,7 +440,7 @@ function cartLine(i) {
       el('div', { textContent: i.quantity > 1 ? `${i.name} × ${i.quantity}` : i.name }),
       el('div', { className: 'meta', textContent: [CATS[i.category], i.color, i.shelf_location && `javon ${i.shelf_location}`].filter(Boolean).join(' · ') }),
       el('div', { className: 'line-actions' }, sel, el('button', { type: 'button', textContent: "O'chirish", ariaLabel: `${i.name}: savatdan o'chirish`, onclick: () => cartAction(() => api(url, null, 'DELETE')) }))),
-    el('div', { className: 'price' }, ...(i.discount_price ? [el('s', { textContent: som(i.price * i.quantity) })] : []), som(i.line_total)),
+    el('div', { className: i.discount_price ? 'price sale' : 'price' }, ...(i.discount_price ? [el('s', { textContent: som(i.price * i.quantity) })] : []), som(i.line_total)),
   );
 }
 
@@ -518,7 +539,7 @@ function showDone(o, pay = { method: 'cashier' }, notify = null) {
   const online = pay.url && /^https:\/\//.test(pay.url);
   $('orderNo').textContent = `№ ${o.id}`;
   $('doneBody').replaceChildren(
-    el('div', { className: 'sum' },
+    el('div', { className: 'sum card' },
       ...o.items.map((i) => sumRow(`${i.name} · ${sizeName(i.size)}${i.quantity > 1 ? ` × ${i.quantity}` : ''}`, som(i.unit_price * i.quantity))),
       ...(o.fulfillment === 'delivery' ? [sumRow('Yetkazish', o.delivery_fee ? som(o.delivery_fee) : 'bepul')] : []),
       sumRow('Jami', som(o.total), 'grand')),
@@ -536,17 +557,23 @@ function telegramBlock(n) {
   if (!kiosk) return el('a', { className: 'button wide', href: n.url, rel: 'noopener', textContent: "Holatini Telegram'da kuzatish" });
   const qr = el('div', { className: 'tgqr' });
   qr.innerHTML = n.svg;
-  return el('div', { className: 'notice' }, el('p', { textContent: "Buyurtma holatini Telegram'da bilish uchun telefoningiz bilan skanerlang va «Start» ni bosing." }), qr);
+  return el('div', { className: 'notice stack' }, el('p', { textContent: "Buyurtma holatini Telegram'da bilish uchun telefoningiz bilan skanerlang va «Start» ni bosing." }), qr);
 }
 $('doneHome').onclick = () => reset();
 
 // Back to start keeps the cart; only the kiosk idle reset clears it for the next customer.
-$('home').onclick = () => { show('start'); loadStore(); };
+// Icon button, so it is not mistaken for the cart (U15); with items in the cart it asks first.
+$('home').onclick = async () => {
+  if (cart?.items.length && !(await confirmDialog({ title: 'Boshiga qaytasizmi?', text: "Savatdagi kiyimlar saqlanib qoladi, lekin tanlangan obrazlar yopiladi.", ok: 'Boshiga qaytish', cancel: 'Shu yerda qolish' }))) return;
+  show('start');
+  loadStore();
+};
 
 function reset() {
   if (cart) api(`/cart/${cart.token}`, null, 'DELETE').catch(() => {}); // give the held stock back now, not in 15 min
   setCart(null);
   request = body = sizeInfo = null;
+  loadSeq++; // a results request still in flight must not draw for the next customer
   form.reset();
   clearCheckout();
   $('formError').textContent = '';

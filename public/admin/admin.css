@@ -1,0 +1,54 @@
+/* Admin layout. Tokens and components come from /shared/ui.css (body.ui-compact = denser controls); this file only places them. */
+label { display: grid; gap: var(--s-1); font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--ink-2); }
+label.check { display: inline-flex; font-size: var(--text-md); color: var(--ink); }
+.sizes { font-size: var(--text-sm); color: var(--ink-2); }
+
+/* Sign-in */
+#login { width: min(24rem, calc(100% - 2rem)); margin: 12vh auto; display: grid; gap: var(--s-4); padding: var(--s-6); }
+#login .wordmark { margin-bottom: var(--s-2); }
+#login h1 { font: var(--weight-strong) var(--text-lg)/var(--leading-snug) var(--font-ui); }
+
+/* Header */
+.appbar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4); align-items: center; padding: var(--s-2) var(--s-5); background: var(--surface); border-bottom: 1px solid var(--line); }
+.appbar .wordmark { margin-right: var(--s-3); }
+.appbar .spacer { flex: 1; }
+.tabs { display: flex; gap: var(--s-1); }
+.tabs button { border-color: transparent; background: transparent; color: var(--ink-2); }
+.tabs button:hover { background: var(--sunken); color: var(--ink); }
+.tabs button[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: var(--weight-strong); }
+#who { max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 47.5em) {
+  .appbar { padding: var(--s-2) var(--s-4); }
+  .appbar .spacer { display: none; }
+  .appbar .wordmark { flex: 1; }
+  .tabs { order: 5; width: 100%; }
+  .tabs button { flex: 1; padding: 0 var(--s-2); }
+  .tabs .icon { display: none; }
+  #who { display: none; }
+  /* Kassa keeps its accessible name; only the visible word goes. */
+  #payBtn { width: var(--control-h); padding: 0; }
+  #payBtn .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+
+main { max-width: 75rem; margin: 0 auto; padding: var(--s-5); }
+@media (max-width: 47.5em) { main { padding: var(--s-4); } }
+.bar { display: flex; flex-wrap: wrap; gap: var(--s-3); margin-bottom: var(--s-4); align-items: end; }
+.bar .grow { flex: 1; min-width: 11rem; }
+main h2 { margin: var(--s-6) 0 var(--s-3); }
+main h3 { margin: var(--s-6) 0 var(--s-3); }
+main > h2:first-child, #statsBody > h2:first-child { margin-top: 0; }
+
+/* Tables */
+.table .thumb { width: 2.5rem; height: 2.5rem; object-fit: cover; border-radius: var(--r-sm); vertical-align: middle; margin-right: var(--s-2); }
+.table .row-actions { white-space: nowrap; text-align: right; }
+.table .row-actions button { width: 2.25rem; min-height: 2.25rem; }
+.bars td:last-child { width: 60%; }
+.bar-fill { height: .75rem; background: var(--accent); border-radius: var(--r-pill); min-width: 2px; }
+
+/* Dialog forms */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: var(--s-3); }
+.grid .check { align-self: end; min-height: var(--control-h); }
+.stock { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr)); gap: var(--s-2); }
+#imgPreview { max-width: 10rem; max-height: 10rem; border-radius: var(--r-md); display: block; margin: var(--s-2) 0; }
+#importErrors { max-height: 15rem; overflow: auto; font-size: var(--text-sm); padding-left: var(--s-5); }
+dialog h3 { margin: var(--s-5) 0 var(--s-2); }

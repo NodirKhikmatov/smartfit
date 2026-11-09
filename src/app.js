@@ -41,6 +41,12 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/cart', createCartRouter(db, { methods: paymentMethods(payments), link: telegramLink(telegram) }));
   api.use((req, res) => res.status(404).json({ error: 'Topilmadi' }));
   app.use('/api', api);
+  // Design system (ui.css, ui.js, icons, fonts) shared by the customer app and admin.
+  const shared = fileURLToPath(new URL('../public/shared', import.meta.url));
+  app.use('/shared', express.static(shared, { index: false }));
+  app.get('/favicon.ico', (req, res) => res.sendFile('favicon.ico', { root: shared, maxAge: '7d' }));
+  // Dev page showing every component; not part of the product, so not served in production.
+  if (process.env.NODE_ENV !== 'production') app.get('/styleguide', (req, res) => res.sendFile('styleguide.html', { root: shared }));
   app.use('/admin', express.static(fileURLToPath(new URL('../public/admin', import.meta.url))));
   // Customer app: one page for the kiosk and the phone; app.js picks the mode from the path.
   const customer = fileURLToPath(new URL('../public/app', import.meta.url));

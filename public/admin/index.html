@@ -4,54 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Smart Fit — Admin</title>
-<style>
-  :root { --bg: #f6f6f4; --fg: #1d1d1b; --muted: #6b6b66; --line: #dcdcd6; --accent: #1f5f4a; --danger: #a33; }
-  * { box-sizing: border-box; }
-  body { margin: 0; font: 15px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
-  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); background: #fff; }
-  header h1 { font-size: 18px; margin: 0; flex: 1; }
-  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
-  label { display: block; font-size: 13px; color: var(--muted); }
-  input, select, button { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--fg); }
-  label input, label select { display: block; width: 100%; margin-top: 4px; }
-  button { cursor: pointer; }
-  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-  button.danger { color: var(--danger); }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: end; }
-  .bar .grow { flex: 1; min-width: 180px; }
-  table { width: 100%; border-collapse: collapse; background: #fff; }
-  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { font-size: 13px; color: var(--muted); font-weight: 500; }
-  .scroll { overflow-x: auto; }
-  .num { text-align: right; white-space: nowrap; }
-  .sizes { font-size: 13px; color: var(--muted); }
-  .error { color: var(--danger); min-height: 1.4em; }
-  #login { max-width: 340px; margin: 10vh auto; background: #fff; padding: 24px; border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 12px; }
-  dialog { border: 1px solid var(--line); border-radius: 8px; max-width: 640px; width: calc(100% - 32px); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
-  .stock { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 8px; margin-top: 8px; }
-  .stock input { width: 100%; }
-  .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
-  nav button[aria-current="page"] { background: var(--fg); color: #fff; border-color: var(--fg); }
-  .thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; vertical-align: middle; margin-right: 8px; }
-  #imgPreview { max-width: 160px; max-height: 160px; border-radius: 6px; display: block; margin: 8px 0; }
-  .bars td:last-child { width: 60%; }
-  .bar-fill { height: 14px; background: var(--accent); border-radius: 3px; min-width: 2px; }
-  code { font-size: 13px; background: var(--bg); padding: 2px 4px; border-radius: 4px; word-break: break-all; }
-  #importErrors { max-height: 240px; overflow: auto; font-size: 14px; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 13px; background: var(--bg); border: 1px solid var(--line); white-space: nowrap; }
-  .badge.new { background: #fff4d6; border-color: #e8cf83; }
-  .badge.done { background: #e3f1ea; border-color: #9cc9b2; }
-  .badge.off { color: var(--muted); }
-  #orderRows tr { cursor: pointer; }
-  #orderRows tr:hover { background: var(--bg); }
-  [hidden] { display: none !important; }
-</style>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/shared/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="/shared/fonts/onest-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/shared/ui.css">
+<link rel="stylesheet" href="/admin/admin.css">
 </head>
-<body>
-<form id="login" hidden>
-  <h1>Smart Fit admin</h1>
+<body class="ui-compact">
+<form id="login" class="card raised" hidden>
+  <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
+  <h1>Do'kon boshqaruviga kirish</h1>
   <label>Email <input name="email" type="email" autocomplete="username" required></label>
   <label>Parol <input name="password" type="password" autocomplete="current-password" required></label>
   <p class="error" id="loginError" role="alert"></p>
@@ -59,29 +21,30 @@
 </form>
 
 <div id="app" hidden>
-  <header>
-    <h1>Smart Fit admin</h1>
-    <nav class="bar" style="margin:0">
-      <button id="tabProducts" aria-current="page">Kiyimlar</button>
-      <button id="tabOrders">Buyurtmalar</button>
-      <button id="tabStats">Statistika</button>
+  <header class="appbar">
+    <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
+    <nav class="tabs" aria-label="Bo'limlar">
+      <button id="tabProducts" aria-current="page"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg>Kiyimlar</button>
+      <button id="tabOrders"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#receipt"></use></svg>Buyurtmalar</button>
+      <button id="tabStats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg>Statistika</button>
     </nav>
-    <button id="payBtn">Kassa</button>
-    <button id="qrBtn">QR kodlar</button>
+    <span class="spacer"></span>
+    <button id="payBtn" title="Kassa"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#cash"></use></svg><span class="label">Kassa</span></button>
+    <button id="qrBtn" class="icon-btn" aria-label="QR kodlar" title="QR kodlar"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg></button>
     <span id="who" class="sizes"></span>
-    <button id="logout">Chiqish</button>
+    <button id="logout" class="icon-btn ghost" aria-label="Chiqish" title="Chiqish"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logout"></use></svg></button>
   </header>
   <main id="products">
     <div class="bar">
       <label class="grow">Qidiruv <input id="q" type="search" placeholder="Masalan: jinsi"></label>
       <label>Kategoriya <select id="cat"><option value="">Hammasi</option></select></label>
       <label id="storeFilterWrap">Do'kon <select id="storeFilter"><option value="">Hammasi</option></select></label>
-      <button id="importBtn">CSV yuklash</button>
-      <button class="primary" id="add">Kiyim qo'shish</button>
+      <button id="importBtn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#upload"></use></svg>CSV yuklash</button>
+      <button class="primary" id="add"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg>Kiyim qo'shish</button>
     </div>
     <p class="error" id="listError" role="alert"></p>
-    <div class="scroll">
-      <table>
+    <div class="table-wrap">
+      <table class="table">
         <thead><tr><th>Nomi</th><th>Kategoriya</th><th>Do'kon</th><th class="num">Narxi, so'm</th><th>Qoldiq (razmer: soni)</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
@@ -91,11 +54,11 @@
     <div class="bar">
       <label>Holati <select id="ordersStatus"><option value="">Hammasi</option></select></label>
       <label id="ordersStoreWrap">Do'kon <select id="ordersStore"><option value="">Hammasi</option></select></label>
-      <button id="ordersReload">Yangilash</button>
+      <button id="ordersReload"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#refresh"></use></svg>Yangilash</button>
     </div>
     <p class="error" id="ordersError" role="alert"></p>
-    <div class="scroll">
-      <table>
+    <div class="table-wrap">
+      <table class="table">
         <thead><tr><th>№</th><th>Vaqti</th><th>Mijoz</th><th>Olish usuli</th><th class="num">Jami, so'm</th><th>To'lov</th><th>Holati</th><th>Telegram</th></tr></thead>
         <tbody id="orderRows"></tbody>
       </table>
@@ -107,37 +70,37 @@
       <label id="statsStoreWrap">Do'kon <select id="statsStore"><option value="">Hammasi</option></select></label>
     </div>
     <p class="error" id="statsError" role="alert"></p>
-    <p id="statsEmpty" hidden>Bu davrda hali tavsiya berilmagan. Mijozlar kioskdan foydalana boshlaganda bu yerda statistika paydo bo'ladi.</p>
+    <div class="empty card" id="statsEmpty" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><h2>Bu davrda hali tavsiya berilmagan</h2><p>Mijozlar kiosk yoki telefondan foydalana boshlaganda statistika shu yerda paydo bo'ladi.</p></div>
     <div id="statsBody">
       <h2 id="statsTotal"></h2>
       <h3>Pilot hisoboti</h3>
-      <div class="scroll"><table><thead><tr><th>Bosqich</th><th class="num">Soni</th><th class="num">Ulushi</th></tr></thead><tbody id="pilotRows"></tbody></table></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>Bosqich</th><th class="num">Soni</th><th class="num">Ulushi</th></tr></thead><tbody id="pilotRows"></tbody></table></div>
       <p class="sizes" id="pilotOrders"></p>
       <h3>Eng ko'p taklif qilingan kiyimlar</h3>
-      <div class="scroll"><table><thead><tr><th>Kiyim</th><th>Kategoriya</th><th class="num">Necha marta</th></tr></thead><tbody id="topRows"></tbody></table></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>Kiyim</th><th>Kategoriya</th><th class="num">Necha marta</th></tr></thead><tbody id="topRows"></tbody></table></div>
       <h3>Kunlik tavsiyalar soni</h3>
-      <div class="scroll"><table class="bars"><thead><tr><th>Kun</th><th class="num">Soni</th><th></th></tr></thead><tbody id="dayRows"></tbody></table></div>
+      <div class="table-wrap"><table class="table bars"><thead><tr><th>Kun</th><th class="num">Soni</th><th></th></tr></thead><tbody id="dayRows"></tbody></table></div>
     </div>
   </main>
 </div>
 
-<dialog id="qrDlg">
-  <h2>Do'kon QR kodlari</h2>
+<dialog id="qrDlg" aria-labelledby="qrTitle">
+  <h2 id="qrTitle">Do'kon QR kodlari</h2>
   <p class="sizes">QR kod mijoz telefonida ilovani shu do'kon uchun ochadi. Chop etib, kiosk yoniga qo'ying.</p>
-  <table><tbody id="qrRows"></tbody></table>
+  <div class="table-wrap"><table class="table"><tbody id="qrRows"></tbody></table></div>
   <p class="error" id="qrError" role="alert"></p>
   <div class="actions"><button type="button" id="qrClose">Yopish</button></div>
 </dialog>
 
-<dialog id="orderDlg">
+<dialog id="orderDlg" aria-labelledby="orderTitle">
   <h2 id="orderTitle"></h2>
   <div id="orderInfo"></div>
   <p class="error" id="orderError" role="alert"></p>
   <div class="actions" id="orderActions"></div>
 </dialog>
 
-<dialog id="payDlg">
-  <h2>Kassa: buyurtma to'lovi</h2>
+<dialog id="payDlg" aria-labelledby="payTitle">
+  <h2 id="payTitle">Kassa: buyurtma to'lovi</h2>
   <form id="payFind" class="bar">
     <label class="grow">Buyurtma raqami <input name="no" type="number" inputmode="numeric" min="1" required></label>
     <button class="primary">Topish</button>
@@ -147,9 +110,9 @@
   <div class="actions"><button type="button" class="primary" id="payConfirm" hidden>Pul olindi: to'landi</button><button type="button" id="payClose">Yopish</button></div>
 </dialog>
 
-<dialog id="importDlg">
+<dialog id="importDlg" aria-labelledby="importTitle">
   <form id="importForm" method="dialog">
-    <h2>CSV fayldan yuklash</h2>
+    <h2 id="importTitle">CSV fayldan yuklash</h2>
     <p class="sizes">Birinchi qator — ustun nomlari. Har qator bitta kiyim; razmer ustunlariga soni yoziladi. <code>id</code> ustuni to'ldirilsa, o'sha kiyim yangilanadi, bo'sh bo'lsa yangisi qo'shiladi (bosh admin <code>store_id</code> ni ham yozadi). Yangilashda bo'sh katak eski qiymatni saqlaydi. Excel'da "CSV UTF-8" qilib saqlang.</p>
     <p><code id="importCols"></code></p>
     <label>CSV fayl <input name="file" type="file" accept=".csv,text/csv" required></label>
@@ -162,7 +125,7 @@
   </form>
 </dialog>
 
-<dialog id="dlg">
+<dialog id="dlg" aria-labelledby="formTitle">
   <form id="form" method="dialog">
     <h2 id="formTitle"></h2>
     <div class="grid">
@@ -179,15 +142,15 @@
       <label>Max harorat, °C <input name="temp_max" type="number" step="1" required></label>
       <label>Javondagi joyi <input name="shelf_location" maxlength="40"></label>
       <label id="storeWrap">Do'kon <select name="store_id"></select></label>
-      <label><input name="waterproof" type="checkbox" style="display:inline;width:auto"> Suv o'tkazmaydi</label>
+      <label class="check"><input name="waterproof" type="checkbox"> Suv o'tkazmaydi</label>
     </div>
     <div id="imgWrap">
       <h3>Rasm</h3>
       <img id="imgPreview" alt="" hidden>
       <div class="bar">
         <label class="grow">JPEG, PNG yoki WebP, 2 MB gacha <input id="imgFile" type="file" accept="image/jpeg,image/png,image/webp"></label>
-        <button type="button" id="imgUpload">Rasmni yuklash</button>
-        <button type="button" class="danger" id="imgRemove">Rasmni o'chirish</button>
+        <button type="button" id="imgUpload"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#upload"></use></svg>Rasmni yuklash</button>
+        <button type="button" class="danger" id="imgRemove"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trash"></use></svg>Rasmni o'chirish</button>
       </div>
       <p class="error" id="imgError" role="alert"></p>
     </div>
@@ -201,7 +164,8 @@
   </form>
 </dialog>
 
-<script>
+<script type="module">
+import { icon, toast, confirmDialog } from '/shared/ui.js';
 const CATS = { outerwear: 'Ustki kiyim', top: 'Ustki (top)', bottom: 'Shim / yubka', shoes: 'Poyabzal', accessory: 'Aksessuar' };
 const SIZES = { shoes: ['36','37','38','39','40','41','42','43','44','45'], accessory: ['ONE'] };
 const sizesFor = (c) => SIZES[c] || ['XS','S','M','L','XL','XXL'];
@@ -274,10 +238,10 @@ async function load() {
       el('td', { textContent: storeName(x.store_id) }),
       el('td', { className: 'num', textContent: x.discount_price ? som(x.discount_price) + ' (' + som(x.price) + ')' : som(x.price) }),
       el('td', { className: 'sizes', textContent: x.stock.map((s) => s.size + ': ' + s.quantity).join(', ') }),
-      el('td', { className: 'num' },
-        el('button', { textContent: 'Tahrirlash', onclick: () => openForm(x) }), ' ',
-        el('button', { className: 'danger', textContent: "O'chirish", onclick: () => remove(x) })),
-    )) : [el('tr', {}, el('td', { colSpan: 6, textContent: 'Hech narsa topilmadi. Qidiruvni o\'zgartiring yoki yangi kiyim qo\'shing.' }))]));
+      el('td', { className: 'row-actions' },
+        el('button', { className: 'icon-btn ghost', title: 'Tahrirlash', ariaLabel: `${x.name}: tahrirlash`, onclick: () => openForm(x) }, icon('edit')),
+        el('button', { className: 'icon-btn ghost danger', title: "O'chirish", ariaLabel: `${x.name}: o'chirish`, onclick: () => remove(x) }, icon('trash'))),
+    )) : [el('tr', {}, el('td', { colSpan: 6, className: 'empty-row', textContent: 'Hech narsa topilmadi. Qidiruvni o\'zgartiring yoki yangi kiyim qo\'shing.' }))]));
   } catch (err) { $('listError').textContent = err.message; }
 }
 $('q').oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
@@ -329,6 +293,7 @@ $('form').addEventListener('submit', async (e) => {
   try {
     await call(editing ? '/products/' + editing.id : '/products', { method: editing ? 'PATCH' : 'POST', body });
     $('dlg').close();
+    toast(editing ? 'Saqlandi' : "Kiyim qo'shildi");
     load();
   } catch (err) { $('formError').textContent = err.message; }
 });
@@ -377,7 +342,9 @@ $('importForm').addEventListener('submit', async (e) => {
   try {
     const r = await call('/products/import', { method: 'POST', raw: await file.text(), type: 'text/csv' });
     $('importError').textContent = '';
-    $('importErrors').replaceChildren(el('li', { style: 'color:var(--accent)', textContent: `Tayyor: ${r.created} ta qo'shildi, ${r.updated} ta yangilandi.` }));
+    $('importErrors').replaceChildren();
+    $('importDlg').close();
+    toast(`Tayyor: ${r.created} ta qo'shildi, ${r.updated} ta yangilandi.`);
     load();
   } catch (err) {
     $('importError').textContent = err.message;
@@ -448,7 +415,7 @@ function orderInfo(o) {
   const until = o.expires_at ? ` · ${new Date(o.expires_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} gacha` : '';
   return [
     el('p', { textContent: `№ ${o.id} · ${o.customer_name} · ${o.phone} · ${o.fulfillment === 'pickup' ? "do'kondan olib ketadi" : 'yetkazish: ' + o.address}` }),
-    el('div', { className: 'scroll' }, el('table', {}, el('tbody', {}, ...o.items.map((i) => el('tr', {},
+    el('div', { className: 'table-wrap' }, el('table', { className: 'table' }, el('tbody', {}, ...o.items.map((i) => el('tr', {},
       el('td', { textContent: i.name }), el('td', { textContent: i.size }), el('td', { textContent: i.shelf_location || '' }),
       el('td', { className: 'num', textContent: `${i.quantity} × ${som(i.unit_price)}` })))))),
     el('p', {}, el('strong', { textContent: `Jami: ${som(o.total)} so'm` }), ` (shundan yetkazish ${som(o.delivery_fee)}) · ${PAY[o.payment_status]}${o.payment_status === 'pending' ? until : ''}`),
@@ -470,6 +437,7 @@ $('payConfirm').onclick = async () => {
   $('payConfirm').disabled = true;
   try {
     renderPay(await call(`/orders/${payOrder.id}/pay`, { method: 'POST' }));
+    toast(`№ ${payOrder.id} to'landi`);
     load(); // stock changed
   } catch (err) {
     $('payError').textContent = err.message;
@@ -482,7 +450,7 @@ $('payConfirm').onclick = async () => {
 const STATUS = { new: 'Yangi', packing: "Yig'ilmoqda", shipping: "Yo'lda", delivered: 'Yetkazildi', cancelled: 'Bekor qilindi' };
 const statusName = (o) => (o.status === 'delivered' && o.fulfillment === 'pickup' ? 'Topshirildi' : STATUS[o.status]);
 const STEP = { packing: "Yig'ishni boshlash", shipping: "Yo'lga chiqarish", delivered: (o) => (o.fulfillment === 'pickup' ? 'Mijozga topshirildi' : 'Yetkazildi'), cancelled: 'Bekor qilish' };
-const badge = (o) => el('span', { className: 'badge ' + (o.status === 'new' ? 'new' : o.status === 'delivered' ? 'done' : o.status === 'cancelled' ? 'off' : ''), textContent: statusName(o) });
+const badge = (o) => el('span', { className: 'badge ' + ({ new: 'warn', packing: 'accent', shipping: 'accent', delivered: 'ok', cancelled: 'off' }[o.status] || ''), textContent: statusName(o) });
 const when = (iso) => new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 for (const [v, t] of Object.entries(STATUS)) $('ordersStatus').append(el('option', { value: v, textContent: t }));
 
@@ -504,7 +472,7 @@ async function loadOrders() {
         el('td', {}, badge(o)),
         el('td', { textContent: o.telegram ? 'ulangan' : '—' }));
       return tr;
-    }) : [el('tr', {}, el('td', { colSpan: 8, textContent: "Buyurtmalar yo'q. Mijoz kiosk yoki telefondan buyurtma berganda shu yerda chiqadi." }))]));
+    }) : [el('tr', {}, el('td', { colSpan: 8, className: 'empty-row', textContent: "Buyurtmalar yo'q. Mijoz kiosk yoki telefondan buyurtma berganda shu yerda chiqadi." }))]));
   } catch (err) { $('ordersError').textContent = err.message; }
 }
 $('ordersStatus').onchange = $('ordersStore').onchange = $('ordersReload').onclick = loadOrders;
@@ -526,11 +494,13 @@ function renderOrder(o) {
     el('button', { type: 'button', textContent: 'Yopish', onclick: () => $('orderDlg').close() }));
 }
 async function setStatus(o, s, btn) {
-  if (s === 'cancelled' && !confirm(`№ ${o.id} buyurtma bekor qilinsinmi?` + (o.payment_status === 'paid' ? " Kiyimlar qoldiqqa qaytadi, pulni mijozga qaytarish kerak bo'ladi." : ''))) return;
+  if (s === 'cancelled' && !(await confirmDialog({ title: `№ ${o.id} buyurtma bekor qilinsinmi?`, text: o.payment_status === 'paid' ? "Kiyimlar qoldiqqa qaytadi, pulni mijozga qaytarish kerak bo'ladi." : 'Kiyimlar qoldiqqa qaytadi.', ok: 'Bekor qilish', cancel: 'Ortga', danger: true }))) return;
   $('orderError').textContent = '';
   btn.disabled = true;
   try {
-    renderOrder(await call(`/orders/${o.id}/status`, { method: 'POST', body: { status: s } }));
+    const next = await call(`/orders/${o.id}/status`, { method: 'POST', body: { status: s } });
+    renderOrder(next);
+    toast(`№ ${o.id}: ${statusName(next)}`);
     loadOrders();
   } catch (err) {
     $('orderError').textContent = err.message;
@@ -542,7 +512,7 @@ $('qrBtn').onclick = () => {
   $('qrError').textContent = '';
   $('qrRows').replaceChildren(...stores.map((s) => el('tr', {},
     el('td', { textContent: s.name }),
-    el('td', { className: 'num' }, el('button', { className: 'primary', textContent: 'QR chop etish', onclick: () => printQr(s.id) })))));
+    el('td', { className: 'num' }, el('button', { className: 'primary', onclick: () => printQr(s.id) }, icon('qr'), 'QR chop etish')))));
   $('qrDlg').showModal();
 };
 $('qrClose').onclick = () => $('qrDlg').close();
@@ -576,8 +546,8 @@ async function printQr(id) {
 }
 
 async function remove(p) {
-  if (!confirm(`"${p.name}" o'chirilsinmi? Buni qaytarib bo'lmaydi.`)) return;
-  try { await call('/products/' + p.id, { method: 'DELETE' }); load(); }
+  if (!(await confirmDialog({ title: `«${p.name}» o'chirilsinmi?`, text: "Buni qaytarib bo'lmaydi. Vaqtincha sotmaslik uchun qoldiqni 0 qiling.", ok: "O'chirish", danger: true }))) return;
+  try { await call('/products/' + p.id, { method: 'DELETE' }); load(); toast("Kiyim o'chirildi"); }
   catch (err) { $('listError').textContent = err.message; }
 }
 

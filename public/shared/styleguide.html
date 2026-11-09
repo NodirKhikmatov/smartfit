@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Fit — dizayn tizimi</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/shared/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/shared/ui.css">
+<style>
+  /* Layout of this dev page only. */
+  body { padding-bottom: var(--s-8); }
+  .sg-head { display: flex; align-items: center; gap: var(--s-4); flex-wrap: wrap; padding: var(--s-4) var(--s-5); background: var(--surface); border-bottom: 1px solid var(--line); }
+  .sg-head p { margin: 0; }
+  .sg { max-width: 68rem; margin: 0 auto; padding: 0 var(--s-5); }
+  .sg > section { padding: var(--s-7) 0 0; }
+  .sg > section > h2 { font: var(--weight-strong) var(--text-2xl)/var(--leading-tight) var(--font-display); margin-bottom: var(--s-2); }
+  .sg > section > p { color: var(--ink-2); max-width: var(--measure); }
+  .sg-row { display: flex; flex-wrap: wrap; gap: var(--s-3); align-items: center; margin-bottom: var(--s-4); }
+  .sg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--s-4); }
+  .swatch { border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; background: var(--surface); font-size: var(--text-sm); }
+  .swatch i { display: block; height: 3.5rem; border-bottom: 1px solid var(--line); }
+  .swatch div { padding: var(--s-2) var(--s-3); }
+  .swatch code { background: none; padding: 0; }
+  .type-row { display: grid; grid-template-columns: 7rem 1fr; gap: var(--s-4); align-items: baseline; padding: var(--s-3) 0; border-bottom: 1px solid var(--line); }
+  .space-row { display: flex; align-items: center; gap: var(--s-4); font-size: var(--text-sm); margin-bottom: var(--s-2); }
+  .space-row i { display: block; height: .75rem; background: var(--accent); border-radius: 2px; }
+  .icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: var(--s-2); }
+  .icon-grid div { display: grid; justify-items: center; gap: var(--s-2); padding: var(--s-4) var(--s-2); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); font-size: var(--text-xs); color: var(--ink-2); }
+  .icon-grid .icon { width: 1.75rem; height: 1.75rem; color: var(--ink); }
+  .elev { display: grid; place-items: center; height: 6rem; background: var(--surface); border-radius: var(--r-lg); font-size: var(--text-sm); color: var(--ink-2); }
+</style>
+</head>
+<body>
+<header class="sg-head">
+  <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
+  <p class="muted">Dizayn tizimi · <code>/shared/ui.css</code>, <code>/shared/ui.js</code>, <code>/shared/icons.svg</code>. Faqat ishlab chiqish uchun sahifa.</p>
+</header>
+<main class="sg">
+  <section>
+    <h2>Ranglar</h2>
+    <p>60-30-10: zig'ir qog'oz va oq yuzalar (60), siyoh matn va chiziqlar (30), qarag'ay yashili faqat amallar va tanlov uchun (10). Loy rangi faqat chegirma narxida. Kontrast juftliklari testda tekshiriladi.</p>
+    <div class="sg-grid" id="swatches"></div>
+  </section>
+
+  <section>
+    <h2>Shriftlar</h2>
+    <p>Onest — interfeys va matn; Cormorant — sarlavhalar. Ikkalasi ham lotin, o'zbek va kirill harflari bilan, serverning o'zidan yuklanadi.</p>
+    <div class="type-row"><code>--text-4xl</code><span class="display" style="font-size:var(--text-4xl);line-height:1">Bugungi obraz</span></div>
+    <div class="type-row"><code>h1 · 3xl</code><h1>Siz uchun obrazlar</h1></div>
+    <div class="type-row"><code>h2 · xl</code><h2>Buyurtmalar</h2></div>
+    <div class="type-row"><code>h3 · lg</code><h3>Razmerlar va soni</h3></div>
+    <div class="type-row"><code>md</code><p style="margin:0">Oʻzbekcha: gʻoʻza, oʻrik, qoʻylak. Ўзбекча: ўрик, қовун, ғишт, ҳаво. Русский: Подберём одежду по погоде и размеру.</p></div>
+    <div class="type-row"><code>sm · muted</code><span class="muted" style="font-size:var(--text-sm)">Ixtiyoriy. Razmerni aniqroq qiladi.</span></div>
+    <div class="type-row"><code>xs</code><span style="font-size:var(--text-xs)">15 daqiqa band qilinadi</span></div>
+    <div class="type-row"><code>tabular</code><span class="price">1 250 000 so'm</span></div>
+  </section>
+
+  <section>
+    <h2>Oraliqlar, burchaklar, soyalar</h2>
+    <p>4/8 tizimi. Avval chiziq, keyin yumshoq soya.</p>
+    <div id="spaces"></div>
+    <div class="sg-grid" style="margin-top:var(--s-5)">
+      <div class="elev" style="border:1px solid var(--line)">chiziq</div>
+      <div class="elev" style="box-shadow:var(--shadow-1);border:1px solid var(--line)">--shadow-1</div>
+      <div class="elev" style="box-shadow:var(--shadow-2)">--shadow-2</div>
+      <div class="elev" style="box-shadow:var(--shadow-3)">--shadow-3 (dialog)</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Tugmalar</h2>
+    <div class="sg-row">
+      <button class="primary">Boshlash</button>
+      <button>Orqaga</button>
+      <button class="ghost">Bekor qilish</button>
+      <button class="danger">O'chirish</button>
+      <button class="danger solid">Bekor qilish</button>
+      <button class="icon-btn" aria-label="Boshiga" title="Boshiga"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#home"></use></svg></button>
+      <button class="icon-btn ghost" aria-label="Tahrirlash" title="Tahrirlash"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#edit"></use></svg></button>
+    </div>
+    <div class="sg-row">
+      <button class="primary"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#bag"></use></svg>Savatga qo'shish</button>
+      <button><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#bag"></use></svg>Savat <span class="count-pill">3</span></button>
+      <button class="primary" disabled>O'chirilgan</button>
+      <button disabled>O'chirilgan</button>
+    </div>
+    <div class="ui-compact sg-row"><button class="primary">Ixcham (admin)</button><button>Ixcham</button><button class="icon-btn" aria-label="QR kodlar" title="QR kodlar"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg></button></div>
+  </section>
+
+  <section>
+    <h2>Chiplar</h2>
+    <fieldset>
+      <legend>Jins</legend>
+      <div class="chips two">
+        <label><input type="radio" name="sg-g" value="m" checked><span>Erkak</span></label>
+        <label><input type="radio" name="sg-g" value="f"><span>Ayol</span></label>
+      </div>
+    </fieldset>
+    <div class="sg-row">
+      <button type="button" class="chip" aria-pressed="true">Hammasi</button>
+      <button type="button" class="chip" aria-pressed="false">Kam qolgan</button>
+      <button type="button" class="chip" aria-pressed="false">Rasmsiz</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Maydonlar</h2>
+    <div class="sg-grid">
+      <label class="field"><span>Bo'y, sm</span><input type="number" inputmode="numeric" placeholder="masalan, 175"><span class="hint">100–230 sm</span></label>
+      <label class="field"><span>Telefon</span><input type="tel" value="+998 90" aria-invalid="true" aria-describedby="sg-err"><span class="field-error" id="sg-err">Telefon raqamini to'liq kiriting</span></label>
+      <label class="field"><span>Kategoriya</span><select><option>Ustki kiyim</option><option>Shim / yubka</option></select></label>
+      <label class="field"><span>O'chirilgan</span><input value="Toshkent" disabled></label>
+    </div>
+    <label class="check"><input type="checkbox" checked> Suv o'tkazmaydi</label>
+  </section>
+
+  <section>
+    <h2>Karta, eslatma, nishon</h2>
+    <div class="sg-grid">
+      <div class="card"><h3>Karta</h3><p class="muted" style="margin:0">Chiziq va eng yengil soya.</p></div>
+      <div class="card raised"><h3>Ko'tarilgan karta</h3><p class="muted" style="margin:0">Kirish oynasi kabi asosiy blok.</p></div>
+    </div>
+    <div style="margin-top:var(--s-4)">
+      <p class="notice"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#info"></use></svg>Kiyimlar 22:40 gacha siz uchun band qilindi.</p>
+      <p class="notice warn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#alert"></use></svg>Byudjetingizga mos obraz topilmadi.</p>
+      <p class="notice danger"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#alert"></use></svg>Buyurtma to'langan edi: pulni mijozga qaytaring.</p>
+    </div>
+    <div class="sg-row">
+      <span class="badge warn">Yangi</span><span class="badge accent">Yig'ilmoqda</span><span class="badge ok">Yetkazildi</span><span class="badge danger">Tugagan</span><span class="badge off">Bekor qilindi</span><span class="badge">Oddiy</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Jadval</h2>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>№</th><th>Mijoz</th><th>Holati</th><th class="num">Jami, so'm</th></tr></thead>
+        <tbody>
+          <tr tabindex="0"><td>1042</td><td>Dilnoza</td><td><span class="badge warn">Yangi</span></td><td class="num">1 180 000</td></tr>
+          <tr tabindex="0"><td>1041</td><td>Sardor</td><td><span class="badge ok">Topshirildi</span></td><td class="num">645 000</td></tr>
+          <tr><td colspan="4" class="empty-row">Bo'sh qator matni</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Dialog va bildirishnoma</h2>
+    <div class="sg-row">
+      <button id="sgConfirm">Tasdiqlash dialogi</button>
+      <button id="sgDanger" class="danger">Xavfli amal dialogi</button>
+      <button id="sgToast">Bildirishnoma</button>
+      <button id="sgToastErr">Xato bildirishnomasi</button>
+    </div>
+    <p class="muted" id="sgResult" role="status"></p>
+  </section>
+
+  <section>
+    <h2>Yuklanish (skelet)</h2>
+    <p>300 ms dan uzoq yuklansa ko'rsatiladi (<code>showAfter</code>).</p>
+    <div class="sg-grid" id="skeletons"></div>
+  </section>
+
+  <section>
+    <h2>Bo'sh holat</h2>
+    <div class="card empty">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#receipt"></use></svg>
+      <h3>Buyurtmalar yo'q</h3>
+      <p>Mijoz kiosk yoki telefondan buyurtma berganda shu yerda chiqadi.</p>
+      <button class="primary"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg>QR kodni chop etish</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Bosqichlar</h2>
+    <ol class="steps" aria-label="Bosqichlar">
+      <li>Boshlash</li><li>Siz haqingizda</li><li aria-current="step">Rasm</li><li>Obrazlar</li><li>Savat</li><li>Tayyor</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Ikonkalar</h2>
+    <p>24×24 to'r, bir xil chiziq qalinligi, <code>currentColor</code>. <code>icon(nom)</code> bilan chaqiriladi.</p>
+    <div class="icon-grid" id="icons"></div>
+  </section>
+
+  <section>
+    <h2>Belgi va favicon</h2>
+    <div class="sg-row">
+      <div class="wordmark" style="font-size:var(--text-3xl)"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
+      <img src="/shared/favicon.svg" width="48" height="48" alt="Favicon">
+      <img src="/favicon.ico" width="32" height="32" alt="favicon.ico">
+    </div>
+  </section>
+</main>
+<script type="module">
+import { icon, toast, confirmDialog, skeletonCard } from '/shared/ui.js';
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+
+// Swatches read the live token values, so this page can't drift from ui.css.
+const css = getComputedStyle(document.documentElement);
+for (const name of ['paper', 'surface', 'sunken', 'ink', 'ink-2', 'ink-3', 'line', 'line-strong', 'field-border', 'accent', 'accent-hover', 'accent-soft', 'clay', 'danger', 'danger-soft', 'warn-ink', 'warn-soft']) {
+  const value = css.getPropertyValue('--' + name).trim();
+  $('swatches').append(el('div', { className: 'swatch' }, el('i', { style: `background:var(--${name})` }), el('div', {}, el('code', { textContent: '--' + name }), el('div', { className: 'muted', textContent: value }))));
+}
+for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) $('spaces').append(el('div', { className: 'space-row' }, el('code', { textContent: `--s-${n}` }), el('i', { style: `width:var(--s-${n})` }), el('span', { className: 'muted', textContent: css.getPropertyValue(`--s-${n}`).trim() })));
+$('skeletons').append(skeletonCard(3), skeletonCard(4));
+
+const sprite = new DOMParser().parseFromString(await (await fetch('/shared/icons.svg')).text(), 'image/svg+xml');
+for (const s of sprite.querySelectorAll('symbol')) $('icons').append(el('div', {}, icon(s.id), s.id));
+
+$('sgConfirm').onclick = async () => { $('sgResult').textContent = (await confirmDialog({ title: 'Boshiga qaytasizmi?', text: 'Savatdagi kiyimlar saqlanib qoladi.', ok: 'Boshiga qaytish', cancel: 'Shu yerda qolish' })) ? 'Tasdiqlandi' : 'Bekor qilindi'; };
+$('sgDanger').onclick = async () => { $('sgResult').textContent = (await confirmDialog({ title: '«Klassik jinsi» o\'chirilsinmi?', text: 'Buni qaytarib bo\'lmaydi.', ok: 'O\'chirish', danger: true })) ? 'O\'chirildi' : 'Bekor qilindi'; };
+$('sgToast').onclick = () => toast('Saqlandi');
+$('sgToastErr').onclick = () => toast('Ulanishda xatolik. Qayta urinib ko\'ring', { tone: 'danger' });
+</script>
+</body>
+</html>
