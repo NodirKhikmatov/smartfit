@@ -178,8 +178,8 @@ legend { padding: 0; }
 
 /* .field = label + control + hint + inline error. Label text is the first <span>. */
 .field { display: grid; gap: var(--s-2); margin-bottom: var(--s-5); min-width: 0; }
-.field > span:first-child, legend { display: block; font-weight: var(--weight-medium); color: var(--ink); margin-bottom: var(--s-2); }
-.field > span:first-child { margin-bottom: 0; }
+.field > span:first-child, .field > label:first-child, legend { display: block; font-weight: var(--weight-medium); color: var(--ink); margin-bottom: var(--s-2); }
+.field > span:first-child, .field > label:first-child { margin-bottom: 0; }
 .hint { font-weight: var(--weight-regular); font-size: var(--text-sm); color: var(--ink-2); }
 .field-error, .error { color: var(--danger); font-size: var(--text-sm); font-weight: var(--weight-medium); }
 .error { min-height: 1.5em; margin: 0 0 var(--s-3); }
@@ -199,6 +199,7 @@ legend { padding: 0; }
 }
 .chips label:hover span, .chip:hover { border-color: var(--field-border); }
 .chips input:checked + span, .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.chips input[aria-invalid="true"] + span { border-color: var(--danger); }
 .chips input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
 .chip { display: inline-flex; min-height: 2.25rem; border-radius: var(--r-pill); font-size: var(--text-sm); }
 /* Language switch (i18n.js langSwitch): two .chip toggles side by side. */

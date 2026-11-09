@@ -82,11 +82,38 @@ test('/kiosk and /m serve the same customer app and its scripts', async () => {
   assert.equal((await get('/app/')).status, 404, 'no directory index');
 });
 
-test('GET /api/stores/:id gives the start screen its store name and weather', async () => {
+test('GET /api/stores/:id gives the start screen its store name, weather and in-stock look photos', async () => {
   const r = await get(`/api/stores/${tashkent}`);
   assert.equal(r.status, 200);
-  assert.deepEqual(JSON.parse(r.text), { id: tashkent, name: 'Smart Fit Toshkent', city: 'Toshkent', weather });
+  const { looks, ...rest } = JSON.parse(r.text);
+  assert.deepEqual(rest, { id: tashkent, name: 'Smart Fit Toshkent', city: 'Toshkent', weather });
+  assert.deepEqual(looks.map((l) => l.category), ['outerwear', 'top', 'bottom', 'shoes'], 'one photo per main category');
+  for (const l of looks) {
+    const p = await db('products').where({ store_id: tashkent, image_url: l.image_url }).first();
+    assert.ok(p.temp_min <= weather.temperature && p.temp_max >= weather.temperature, `${p.name} suits ${weather.temperature} °C`);
+    const free = await db('product_stock').where({ product_id: p.id }).sum({ n: db.raw('quantity - reserved') }).first();
+    assert.ok(Number(free.n) > 0, `${p.name} is in stock`);
+  }
+  // Sold out (or fully held by carts): never on the attract screen.
+  const coat = await db('products').where({ store_id: tashkent, image_url: looks[0].image_url }).first();
+  const saved = await db('product_stock').where({ product_id: coat.id }).select('id', 'reserved');
+  await db('product_stock').where({ product_id: coat.id }).update({ reserved: db.ref('quantity') });
+  try {
+    const again = JSON.parse((await get(`/api/stores/${tashkent}`)).text).looks;
+    assert.ok(!again.some((l) => l.image_url === coat.image_url), 'a fully reserved item is not shown');
+  } finally {
+    for (const s of saved) await db('product_stock').where({ id: s.id }).update({ reserved: s.reserved });
+  }
   for (const bad of ['999999', 'abc', '0', '-1', '1.5']) assert.equal((await get(`/api/stores/${bad}`)).status, 404, bad);
+});
+
+test('GET /api/stores lists every store for the picker: id, name and city only', async () => {
+  const r = await get('/api/stores');
+  assert.equal(r.status, 200);
+  assert.deepEqual(JSON.parse(r.text), [
+    { id: tashkent, name: 'Smart Fit Toshkent', city: 'Toshkent' },
+    { id: samarkand, name: 'Smart Fit Samarqand', city: 'Samarqand' },
+  ]);
 });
 
 test('admin QR: SVG that opens /m for the store, scoped to the manager store', async () => {

@@ -1,5 +1,7 @@
 import { watchIdle } from './idle.js';
 import { loadPose, measure } from './pose.js';
+import { keypad } from './keypad.js';
+import { CLOTHES, SHOES, nextError, toRequest, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
 import { icon, confirmDialog, showAfter, skeletonCard } from '/shared/ui.js';
 import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName } from '/shared/i18n.js';
 
@@ -7,9 +9,6 @@ import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName 
 const kiosk = location.pathname.startsWith('/kiosk');
 document.documentElement.classList.add(kiosk ? 'kiosk' : 'mobile');
 const storeId = Number(new URLSearchParams(location.search).get('store'));
-
-const CLOTHES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
-const SHOES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
@@ -34,36 +33,87 @@ let request = null; // POST /api/recommend body
 let body = null; // { gender, height, weight } for POST /api/size
 let sizeInfo = null; // last /api/size answer: confidence for the results screen
 let store = null;
+let lastOrder = null; // the done screen's order, in memory only
 
-form.shoes.append(...SHOES.map((s) => el('option', { value: s, textContent: s })));
+// Shoe size chips (U11: chips, not a <select>) and budget shortcuts.
+$('shoeChips').append(...SHOES.map((s) => el('label', {}, el('input', { type: 'radio', name: 'shoes', value: s }), el('span', { textContent: s }))));
+const BUDGETS = [500_000, 1_000_000, 2_000_000];
+function budgetChips() {
+  const now = form.budget.value.replace(/\s/g, '');
+  $('budgetQuick').replaceChildren(...[...BUDGETS.map((b) => [String(b), fmt.num(b)]), ['', t('kiosk.form.budget_any')]].map(([v, label]) => {
+    const b = el('button', { type: 'button', className: 'chip', textContent: label });
+    b.setAttribute('aria-pressed', String(now === v));
+    b.onclick = () => {
+      form.budget.value = v;
+      form.budget.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    return b;
+  }));
+}
+form.budget.addEventListener('input', budgetChips);
 initLang();
+if (kiosk) keypad();
 // Language switch on the start screen. Whatever is already drawn (weather, cart button, results) is redrawn in place.
 const switcher = langSwitch(() => {
-  for (const id of ['formError', 'cartError', 'checkoutError']) $(id).textContent = '';
+  for (const id of ['cartError', 'checkoutError']) $(id).textContent = '';
   store ? renderWeather() : loadStore(); // loadStore redraws a start error (no store, offline) in the new language
   setCart(cart);
+  budgetChips();
   if (lastResult) renderResults(lastResult);
-});
+}, { short: !kiosk }); // the phone's topbar has room for "UZ / RU" only
 $('langBox').replaceChildren(switcher);
 
-function show(name) {
+// History routing (U2): one entry per screen, so the phone's back button steps back inside the app.
+const formValues = () => ({ gender: form.gender.value, height: form.height.value, weight: form.weight.value, shoes: form.shoes.value, budget: form.budget.value });
+const appState = () => ({ formOk: !!request, sizesOk: !!(request?.sizes.top && request?.sizes.bottom), orderOk: !!lastOrder });
+const remember = () => saveRoute({ screen: current, form: formValues(), sizes: request?.sizes, manual: sizeInfo?.manual });
+const ENTER = {
+  camera: () => showCamera(),
+  results: () => (lastResult ? renderResults(lastResult) : loadResults()),
+  cart: () => renderCartScreen(),
+};
+const PARENT = { form: 'start', camera: 'form', results: 'form', cart: () => (request ? 'results' : 'start'), done: 'start' };
+function render(name) {
   if (name !== 'camera') stopCamera();
   current = name;
   for (const s of document.querySelectorAll('[data-screen]')) s.hidden = s.dataset.screen !== name;
   $('home').hidden = name === 'start';
+  $('back').hidden = name === 'start' || name === 'done';
+  $('langBox').hidden = name !== 'start'; // the language is picked before starting
+  $('steps').hidden = name === 'start' || name === 'done';
+  for (const li of $('steps').children) li.dataset.step === name ? li.setAttribute('aria-current', 'step') : li.removeAttribute('aria-current');
   window.scrollTo(0, 0);
   document.querySelector(`[data-screen="${name}"] h1`).focus({ preventScroll: true });
+  ENTER[name]?.();
+  syncCartUi();
+  remember();
 }
+const router = createRouter(window, { render, allowed: (s) => allowedScreen(s, appState()) });
+const go = (name, opts) => router.go(name, opts);
+$('back').onclick = () => router.back(typeof PARENT[current] === 'function' ? PARENT[current]() : PARENT[current] ?? 'start');
+form.addEventListener('input', () => remember());
+form.addEventListener('change', () => remember());
 
 function setCart(c) {
   cart = c;
   savedCart(c?.token ?? null);
-  const n = c ? c.items.reduce((s, i) => s + i.quantity, 0) : 0;
-  $('cartBtn').hidden = !n;
-  $('cartBtn').replaceChildren(icon('bag'), el('span', { className: 'cart-label', textContent: t('kiosk.cart') }), el('span', { className: 'count-pill', textContent: n }));
+  syncCartUi();
   syncs.forEach((f) => f());
   if (current === 'cart') renderCartScreen();
 }
+// Topbar bag button, or on the results screen a sticky bar with the count and the running total (D2).
+function syncCartUi() {
+  const n = cart ? cart.items.reduce((s, i) => s + i.quantity, 0) : 0;
+  const bar = n > 0 && current === 'results';
+  $('cartBar').hidden = !bar;
+  document.documentElement.classList.toggle('has-bar', bar);
+  $('cartBtn').hidden = !n || bar || current === 'cart';
+  $('cartBtn').replaceChildren(icon('bag'), el('span', { className: 'cart-label', textContent: t('kiosk.cart') }), el('span', { className: 'count-pill', textContent: n }));
+  if (!n) return;
+  $('barCount').textContent = t('kiosk.bar.count', { n });
+  $('barTotal').textContent = som(cart.totals.pickup.subtotal);
+}
+$('barGo').onclick = () => go('cart');
 
 // Start-screen weather: an icon and a one-line outfit hint from the same rules the engine uses (rain, cold, cool, warm).
 const weatherIcon = (w) => (w.raining ? 'rain' : w.temperature < 5 ? 'snow' : w.temperature < 18 ? 'cloud-sun' : 'sun');
@@ -84,31 +134,53 @@ async function api(path, body, method = body ? 'POST' : 'GET') {
 
 async function loadStore() {
   $('startError').textContent = '';
+  $('storePicker').hidden = true;
   $('start').disabled = true;
-  if (!Number.isInteger(storeId) || storeId < 1) {
-    $('weather').hidden = $('start').hidden = true;
-    $('startError').textContent = t('kiosk.start.no_store');
-    return;
-  }
+  if (!Number.isInteger(storeId) || storeId < 1) return showPicker('kiosk.start.no_store');
   try {
     store = await api('/stores/' + storeId);
   } catch (err) {
-    $('weather').hidden = true;
-    $('startError').textContent = t(err.status === 404 ? 'kiosk.start.store_404' : 'kiosk.start.offline');
-    $('start').hidden = err.status === 404; // a wrong store link won't fix itself
+    if (err.status === 404) return showPicker('kiosk.start.store_404');
+    $('weather').hidden = $('lookbook').hidden = true;
+    $('startError').textContent = t('kiosk.start.offline');
     $('start').disabled = false;
-    $('start').textContent = t('common.retry');
+    $('startLabel').textContent = t('common.retry');
     return;
   }
   $('storeName').textContent = store.name;
-  $('start').textContent = t('kiosk.start.go');
+  $('startLabel').textContent = t('kiosk.start.go');
   $('start').disabled = false;
   renderWeather();
+  $('lookbook').replaceChildren(...store.looks.map((l) => el('img', { src: l.image_url, alt: '' })));
+  $('lookbook').hidden = store.looks.length < 2;
+}
+
+// U10: a missing or wrong store in the link is not a dead end: list the stores (public, names only).
+async function showPicker(why) {
+  if (current !== 'start') go('start', { replace: true }); // a saved route for a store that no longer exists
+  $('weather').hidden = $('start').hidden = $('lookbook').hidden = true;
+  let stores;
+  try {
+    stores = await api('/stores');
+  } catch {
+    $('start').hidden = $('start').disabled = false;
+    $('startLabel').textContent = t('common.retry');
+    $('startError').textContent = t('kiosk.start.offline');
+    return;
+  }
+  $('storePicker').hidden = false;
+  $('storePicker').replaceChildren(
+    el('h2', { textContent: t('kiosk.picker.title') }),
+    el('p', { className: 'muted', textContent: t(why) }),
+    el('ul', { className: 'store-list', ariaLabel: t('kiosk.picker.aria') }, ...stores.map((s) => el('li', {},
+      el('a', { className: 'button store-link', href: `${location.pathname}?store=${s.id}` }, icon('store'),
+        el('span', {}, el('strong', { textContent: s.name }), el('span', { className: 'meta', textContent: s.city })), icon('chevron-right'))))),
+  );
 }
 
 function renderWeather() {
   const w = store.weather;
-  $('weather').hidden = false;
+  $('weather').hidden = $('start').hidden = false;
   $('weather').classList.remove('loading');
   $('weather').removeAttribute('aria-busy');
   const [hintIcon, hintKey] = weatherHint(w);
@@ -121,28 +193,49 @@ function renderWeather() {
   );
 }
 
-$('start').onclick = () => (store ? show('form') : loadStore());
+$('start').onclick = () => (store ? go('form') : loadStore());
+
+// Inline validation (U3): a field is checked when it is left with a value, and its error clears as soon as it is fine.
+// The error keeps its key in data-i18n, so a language switch translates it too.
+function showError(name, key) {
+  const box = $(`${name}Err`);
+  key ? (box.dataset.i18n = key) : delete box.dataset.i18n;
+  box.textContent = key ? t(key) : '';
+  for (const i of document.getElementsByName(name)) i.setAttribute('aria-invalid', String(!!key));
+}
+function inline(f, names) {
+  const on = (event) => (e) => {
+    const n = e.target.name;
+    if (!names.includes(n)) return;
+    const key = nextError(event, n, f.elements[n].value, $(`${n}Err`).textContent);
+    if (key !== undefined) showError(n, key);
+  };
+  f.addEventListener('focusout', on('blur'));
+  f.addEventListener('input', on('input'));
+  f.addEventListener('change', on('input'));
+}
+// On submit: every error at once, focus on the first one.
+function checkAll(f, names) {
+  const bad = names.filter((n) => {
+    const key = nextError('submit', n, f.elements[n].value);
+    showError(n, key);
+    return key;
+  });
+  if (bad.length) (f.elements[bad[0]][0] ?? f.elements[bad[0]]).focus();
+  return !bad.length;
+}
+const FORM_FIELDS = ['gender', 'height', 'weight', 'budget'];
+inline(form, FORM_FIELDS);
 
 form.addEventListener('submit', (e) => {
   e.preventDefault();
-  const f = form;
-  const n = (v) => (v.trim() === '' ? null : Number(v));
-  const height = n(f.height.value), weight = n(f.weight.value), budget = n(f.budget.value);
-  const check = [
-    [!f.gender.value, f.querySelector('[name=gender]'), 'kiosk.form.err_gender'],
-    [!Number.isInteger(height) || height < 100 || height > 230, f.height, 'kiosk.form.err_height'],
-    [weight !== null && (!Number.isInteger(weight) || weight < 30 || weight > 250), f.weight, 'kiosk.form.err_weight'],
-    [budget !== null && (!Number.isInteger(budget) || budget < 1 || budget > 1e9), f.budget, 'kiosk.form.err_budget'],
-  ].find(([bad]) => bad);
-  $('formError').textContent = check ? t(check[2]) : '';
-  if (check) return check[1].focus();
-  body = { gender: f.gender.value, height, weight };
-  request = { store_id: storeId, gender: f.gender.value, sizes: { top: null, bottom: null, shoes: f.shoes.value || null }, budget };
-  showCamera();
+  if (!checkAll(form, FORM_FIELDS)) return;
+  ({ body, request } = toRequest(formValues(), storeId));
+  sizeInfo = lastResult = null;
+  go('camera');
 });
 
-$('cameraBack').onclick = () => show('form');
-$('changeSizes').onclick = () => show('form');
+$('changeSizes').onclick = () => go('form');
 
 // --- Screen 3: size from photo. Kiosk: 3 s countdown. Phone: 10 s timer (to step back) or a gallery photo.
 const COUNTDOWN = kiosk ? 3 : 10;
@@ -165,9 +258,8 @@ function setBusy(on) {
 
 function showCamera() {
   status('');
-  $('shoot').textContent = t('kiosk.camera.shoot');
+  $('shootLabel').textContent = t('kiosk.camera.shoot');
   $('galleryBtn').hidden = kiosk;
-  show('camera');
   loadPose().catch(() => {}); // start the model download while the customer gets ready
 }
 
@@ -178,7 +270,8 @@ function stopCamera() {
   stream?.getTracks().forEach((t) => t.stop());
   stream = null;
   video.srcObject = null;
-  $('preview').hidden = true;
+  video.hidden = true;
+  $('frame').classList.remove('live');
   $('count').textContent = '';
   setBusy(false);
 }
@@ -200,7 +293,8 @@ $('shoot').onclick = async () => {
   if (mine !== attempt) return s.getTracks().forEach((t) => t.stop()); // left the screen during the permission prompt
   stream = s;
   video.srcObject = stream;
-  $('preview').hidden = false;
+  video.hidden = false;
+  $('frame').classList.add('live'); // the pose figure becomes a guide line over the live picture (U6)
   await video.play().catch(() => {});
   let left = COUNTDOWN;
   $('count').textContent = left;
@@ -252,7 +346,7 @@ async function analyse(source, w, h) {
   stopCamera();
   if (cameraScreen.hidden) return; // kiosk reset or "Orqaga" while the model was working
   if (!pose) {
-    $('shoot').textContent = t('common.retry');
+    $('shootLabel').textContent = t('common.retry');
     return status(t('kiosk.camera.no_body'));
   }
   await findSizes(pose, snapshot(source, w, h));
@@ -276,14 +370,15 @@ async function findSizes(pose, photo = null) {
     sizeInfo = await api('/size', { ...body, pose });
   } catch (err) {
     setBusy(false);
-    $('shoot').textContent = t('common.retry');
+    $('shootLabel').textContent = t('common.retry');
     return status(err.message);
   }
   setBusy(false);
   if (cameraScreen.hidden) return;
   Object.assign(request.sizes, sizeInfo.sizes);
   request.photo = photo ?? undefined; // undefined is left out of the JSON
-  loadResults();
+  lastResult = null;
+  go('results', { replace: true }); // back from the outfits goes to the form, not to the camera
 }
 
 // --- Screen 4: results, with - / + to correct the estimated size.
@@ -295,7 +390,7 @@ function renderSizes() {
     const i = CLOTHES.indexOf(request.sizes[key]);
     const move = (d) => () => {
       request.sizes[key] = CLOTHES[i + d];
-      sizeInfo.manual = true;
+      sizeInfo = { ...sizeInfo, manual: true };
       loadResults();
     };
     return el('div', { className: 'stepper' }, el('span', { textContent: label }),
@@ -305,7 +400,8 @@ function renderSizes() {
   };
   $('sizeBar').replaceChildren(
     el('div', { className: 'row' }, stepper('top'), stepper('bottom')),
-    el('p', { className: 'meta', style: 'margin:var(--s-2) 0 0', textContent: sizeInfo.manual ? t('kiosk.size.manual') : t('kiosk.size.adjust', { conf: t(CONFIDENCE[sizeInfo.confidence]) }) }),
+    // After a refresh the confidence is gone (it is not stored), so only the − / + hint is left.
+    el('p', { className: 'meta', textContent: sizeInfo?.manual ? t('kiosk.size.manual') : t('kiosk.size.adjust', { conf: CONFIDENCE[sizeInfo?.confidence] ? t(CONFIDENCE[sizeInfo.confidence]) : '' }).trim() }),
   );
 }
 
@@ -315,13 +411,14 @@ async function loadResults() {
   const seq = ++loadSeq;
   lastResult = null;
   syncs = new Set();
-  show('results');
+  chosen.clear();
+  remember();
   renderSizes();
   $('resultsWeather').textContent = '';
   // Screen readers get one summary line per load (U13), not the whole list again after every − / +.
   $('resultsStatus').textContent = t('kiosk.results.loading');
   $('results').replaceChildren();
-  const done = showAfter(300, () => seq === loadSeq && $('results').replaceChildren(skeletonCard(4), skeletonCard(4)));
+  const done = showAfter(300, () => seq === loadSeq && $('results').replaceChildren(el('div', { className: 'outfits' }, skeletonCard(5), skeletonCard(5), skeletonCard(5))));
   let r;
   try {
     r = await api('/recommend', request);
@@ -345,16 +442,16 @@ function renderResults(r) {
   $('resultsStatus').textContent = r.outfits.length ? t('kiosk.results.found', { n: r.outfits.length }) : t('kiosk.results.none');
   $('resultsWeather').textContent = [t('kiosk.results.weather', { weather: weatherLine(r.weather) }), r.budget && t('kiosk.results.budget', { sum: som(r.budget) })].filter(Boolean).join(' · ');
   if (!r.outfits.length) {
-    $('results').replaceChildren(el('div', { className: 'notice warn', textContent: t('kiosk.results.empty') }));
+    $('results').replaceChildren(el('div', { className: 'empty' }, icon('hanger'), el('p', { textContent: t('kiosk.results.empty') })));
     return;
   }
+  const warn = (key, vars) => el('div', { className: 'notice warn' }, icon('info'), el('p', { textContent: t(key, vars) }));
   $('results').replaceChildren(
     ...(r.style_guess ? [el('p', { className: 'muted', textContent: t('kiosk.results.style', { style: r.style_guess }) })] : []),
-    ...(r.notice === 'no_outerwear' ? [el('div', { className: 'notice warn', textContent: t('kiosk.results.no_outerwear') })] : []),
+    ...(r.notice === 'no_outerwear' ? [warn('kiosk.results.no_outerwear')] : []),
     ...(r.relaxed ? [el('p', { className: 'muted', textContent: t('kiosk.results.relaxed', { n: r.relaxed }) })] : []),
-    ...(r.over_budget > 0 ? [el('div', { className: 'notice warn', textContent: t('kiosk.results.over_budget', { sum: som(r.over_budget) }) })] : []),
-    ...(r.partial ? [partialCard(r.partial)] : []),
-    ...r.outfits.map((o, i) => outfitCard(o, i + 1)),
+    ...(r.over_budget > 0 ? [warn('kiosk.results.over_budget', { sum: som(r.over_budget) })] : []),
+    el('div', { className: 'outfits' }, ...(r.partial ? [partialCard(r.partial)] : []), ...r.outfits.map((o, i) => outfitCard(o, i + 1))),
     triedCard(),
   );
 }
@@ -376,30 +473,72 @@ function triedCard() {
 
 const sizeName = (s) => (s === 'ONE' ? t('common.size_one') : s);
 const thumb = (p) => (p.image_url ? el('img', { className: 'thumb', src: p.image_url, alt: '' }) : el('div', { className: 'thumb' }, icon(p.category)));
+const chosen = new Map(); // product id → shoe size picked on the results screen (shared by an outfit and its cheaper variant)
+
+// Size chips (U11): one pressed chip per group; onPick gets the size.
+function sizeChips(sizes, current, label, onPick) {
+  const group = el('div', { className: 'size-chips', role: 'group', ariaLabel: label });
+  group.append(...sizes.map((s) => {
+    const b = el('button', { type: 'button', className: 'chip', textContent: sizeName(s) });
+    b.setAttribute('aria-pressed', String(s === current));
+    b.onclick = () => {
+      group.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(c === b)));
+      onPick(s);
+    };
+    return b;
+  }));
+  return group;
+}
+
+// Photo collage of an outfit (D2): the clothes, not the accessory, up to four.
+function look(items) {
+  const pics = items.filter((p) => p.category !== 'accessory').slice(0, 4);
+  return el('div', { className: `look n${pics.length}` }, ...pics.map((p) => (p.image_url ? el('img', { src: p.image_url, alt: '' }) : el('div', { className: 'ph' }, icon(p.category)))));
+}
+
+// Unknown shoe size: the customer picks one of the in-stock sizes before adding (addButton finds it by data-pick).
+function picker(p) {
+  if (p.size || !p.sizes) return '';
+  const err = el('p', { className: 'field-error' });
+  const box = el('div', { className: 'pick' }, el('div', { className: 'meta', textContent: t('kiosk.size.pick') }),
+    sizeChips(p.sizes, chosen.get(p.id), t('kiosk.size.aria', { name: productName(p) }), (s) => {
+      chosen.set(p.id, s);
+      err.textContent = '';
+      syncs.forEach((f) => f());
+    }), err);
+  box.dataset.pick = p.id;
+  return box;
+}
 
 function itemRow(p) {
-  // Unknown shoe size: the customer picks one of the in-stock sizes before adding (stored on the item as `chosen`).
-  const pick = !p.size && p.sizes
-    ? el('div', { className: 'line-actions' }, el('select', { ariaLabel: t('kiosk.size.aria', { name: productName(p) }), onchange: (e) => { p.chosen = e.target.value; syncs.forEach((f) => f()); } },
-      el('option', { value: '', textContent: t('kiosk.size.pick') }), ...p.sizes.map((s) => el('option', { value: s, textContent: s, selected: s === p.chosen }))))
-    : '';
   const size = p.size ? (p.size === 'ONE' ? t('common.size_one') : t('kiosk.size.value', { size: p.size })) : '';
+  // The photo above shows the category, so the line says colour, size and shelf.
   return el('li', {},
-    thumb(p),
-    el('div', {}, el('div', { textContent: productName(p) }), el('div', { className: 'meta', textContent: [cat(p.category), colorName(p.color), size, p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }), pick),
+    el('div', { className: 'name', textContent: productName(p) }),
     el('div', { className: p.discount_price ? 'price sale' : 'price' }, ...(p.discount_price ? [el('s', { textContent: som(p.price) })] : []), som(p.unit_price)),
+    el('div', { className: 'meta', textContent: [colorName(p.color), size, p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }),
+    picker(p),
   );
 }
 
-function addButton(items) {
-  const size = (p) => p.size ?? p.chosen;
+// card: the outfit card, where a missing size picker is looked up.
+function addButton(items, card, className = 'primary wide', label = 'kiosk.add.btn') {
+  const size = (p) => p.size ?? chosen.get(p.id);
   const has = (p) => cart?.items.some((c) => c.product_id === p.id && (!size(p) || c.size === size(p)));
-  const b = el('button', { className: 'primary', textContent: t('kiosk.add.btn') });
-  const msg = el('p', { className: 'error', style: 'margin:0;min-height:0', role: 'alert' });
-  const sync = () => { b.disabled = items.every(has); b.replaceChildren(...(b.disabled ? [icon('check'), t('kiosk.add.done')] : [icon('bag'), t('kiosk.add.btn')])); };
+  const b = el('button', { className });
+  const msg = el('p', { className: 'field-error', role: 'alert' });
+  const sync = () => { b.disabled = items.every(has); b.replaceChildren(...(b.disabled ? [icon('check'), t('kiosk.add.done')] : [icon('bag'), t(label)])); };
   b.onclick = async () => {
     const missing = items.find((p) => !size(p));
-    if (missing) return void (msg.textContent = t('kiosk.add.pick_size', { name: productName(missing) }));
+    if (missing) {
+      // U11: take the customer to the picker instead of an error under the button.
+      const pick = card.querySelector(`[data-pick="${missing.id}"]`);
+      const text = t('kiosk.add.pick_size', { name: productName(missing) });
+      if (!pick) return void (msg.textContent = text);
+      pick.querySelector('.field-error').textContent = text;
+      pick.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      return pick.querySelector('.chip').focus({ preventScroll: true });
+    }
     msg.textContent = '';
     b.disabled = true;
     try {
@@ -412,46 +551,48 @@ function addButton(items) {
   };
   syncs.add(sync);
   sync();
-  return el('div', {}, b, msg);
+  return el('div', { className: 'add' }, b, msg);
+}
+
+function card(heading, items, total, reason) {
+  const c = el('article', { className: 'outfit card' });
+  const body = el('div', { className: 'outfit-body' },
+    el('h2', { textContent: heading }),
+    ...(reason ? [el('p', { className: 'muted reason', textContent: reason })] : []),
+    el('ul', { className: 'items' }, ...items.map(itemRow)),
+    el('div', { className: 'outfit-foot' }, el('div', { className: 'total' }, el('span', { textContent: t('common.total') }), el('strong', { textContent: som(total) })), addButton(items, c)));
+  c.append(look(items), body);
+  return c;
 }
 
 function outfitCard(o, n) {
-  const card = el('article', { className: 'outfit card' },
-    el('h2', { textContent: o.title ? t('kiosk.outfit.n_title', { n, title: o.title }) : t('kiosk.outfit.n', { n }) }),
-    ...(o.reason ? [el('p', { className: 'muted', textContent: o.reason })] : []),
-    el('ul', { className: 'items' }, ...o.items.map(itemRow)),
-    el('div', { className: 'total' }, el('span', {}, `${t('common.total')}: `, el('strong', { textContent: som(o.total) })), addButton(o.items)),
-  );
+  const c = card(o.title ? t('kiosk.outfit.n_title', { n, title: o.title }) : t('kiosk.outfit.n', { n }), o.items, o.total, o.reason);
   // R5: the cheaper variant is one compact "swap X for Y, save N" row, not a second outfit.
   if (o.alternative) {
     const swap = o.alternative.items.find((p) => !o.items.some((x) => x.id === p.id));
     const old = o.items.find((p) => p.id === o.alternative.replaces);
-    card.append(el('div', { className: 'alt' },
+    c.querySelector('.outfit-body').append(el('div', { className: 'alt' },
       thumb(swap),
       el('div', {}, el('strong', { textContent: t('kiosk.outfit.alt') }),
         el('div', { className: 'meta', textContent: t('kiosk.outfit.alt_save', { name: productName(old), swap: productName(swap), sum: som(o.total - o.alternative.total) }) })),
-      addButton(o.alternative.items),
+      picker(swap),
+      addButton(o.alternative.items, c, '', 'kiosk.outfit.alt_add'),
     ));
   }
-  return card;
+  return c;
 }
 
 // Nothing fits the budget: the required items that do fit, cheapest first (the full cheapest outfit follows).
 function partialCard(p) {
-  return el('article', { className: 'outfit card' },
-    el('h2', { textContent: t('kiosk.partial.title') }),
-    ...(p.missing.length ? [el('p', { className: 'muted', textContent: t('kiosk.partial.missing', { cats: p.missing.map(cat).join(', ') }) })] : []),
-    el('ul', { className: 'items' }, ...p.items.map(itemRow)),
-    el('div', { className: 'total' }, el('span', {}, `${t('common.total')}: `, el('strong', { textContent: som(p.total) })), addButton(p.items)),
-  );
+  return card(t('kiosk.partial.title'), p.items, p.total, p.missing.length ? t('kiosk.partial.missing', { cats: p.missing.map(cat).join(', ') }) : '');
 }
 
 // --- Cart and checkout. Every number shown here comes from the server; the browser sends no prices.
 const sumRow = (label, value, className = '') => el('div', { className }, el('span', { textContent: label }), el('span', { textContent: value }));
 const checkout = $('checkout');
 
-$('cartBtn').onclick = () => { show('cart'); renderCartScreen(); };
-$('cartBack').onclick = () => show(request ? 'results' : 'start');
+$('cartBtn').onclick = () => go('cart');
+$('cartBack').onclick = () => go(request ? 'results' : 'start');
 checkout.addEventListener('change', (e) => e.target.name === 'fulfillment' && renderSum());
 
 async function cartAction(call) {
@@ -468,24 +609,22 @@ async function cartAction(call) {
 function cartLine(i) {
   const url = `/cart/${cart.token}/items/${i.id}`;
   const name = productName(i);
-  const sel = el('select', { ariaLabel: t('kiosk.size.aria', { name }), disabled: i.sizes.length < 2, onchange: () => cartAction(() => api(url, { size: sel.value }, 'PATCH')) },
-    ...i.sizes.map((s) => el('option', { value: s, textContent: sizeName(s), selected: s === i.size })));
   return el('li', {},
     thumb(i),
-    el('div', {},
-      el('div', { textContent: i.quantity > 1 ? `${name} × ${i.quantity}` : name }),
-      el('div', { className: 'meta', textContent: [cat(i.category), colorName(i.color), i.shelf_location && t('kiosk.shelf', { shelf: i.shelf_location })].filter(Boolean).join(' · ') }),
-      el('div', { className: 'line-actions' }, sel, el('button', { type: 'button', textContent: t('common.delete'), ariaLabel: t('kiosk.cart.remove_aria', { name }), onclick: () => cartAction(() => api(url, null, 'DELETE')) }))),
+    el('div', { className: 'name', textContent: i.quantity > 1 ? `${name} × ${i.quantity}` : name }),
     el('div', { className: i.discount_price ? 'price sale' : 'price' }, ...(i.discount_price ? [el('s', { textContent: som(i.price * i.quantity) })] : []), som(i.line_total)),
+    el('div', { className: 'meta', textContent: [cat(i.category), colorName(i.color), i.sizes.length < 2 && sizeName(i.size), i.shelf_location && t('kiosk.shelf', { shelf: i.shelf_location })].filter(Boolean).join(' · ') }),
+    ...(i.sizes.length > 1 ? [sizeChips(i.sizes, i.size, t('kiosk.size.aria', { name }), (s) => cartAction(() => api(url, { size: s }, 'PATCH')))] : []),
+    el('button', { type: 'button', className: 'ghost danger remove', ariaLabel: t('kiosk.cart.remove_aria', { name }), onclick: () => cartAction(() => api(url, null, 'DELETE')) }, icon('trash'), t('common.delete')),
   );
 }
 
 function renderCartScreen() {
   const empty = !cart?.items.length;
   checkout.hidden = $('holdNote').hidden = empty;
-  if (empty) return $('cartBody').replaceChildren(el('p', { className: 'muted', textContent: t('kiosk.cart.empty') }));
+  if (empty) return $('cartBody').replaceChildren(el('div', { className: 'empty' }, icon('bag'), el('p', { textContent: t('kiosk.cart.empty') })));
   $('holdNote').textContent = t('kiosk.cart.held', { time: fmt.time(cart.expires_at) });
-  $('cartBody').replaceChildren(el('ul', { className: 'items' }, ...cart.items.map(cartLine)));
+  $('cartBody').replaceChildren(el('ul', { className: 'items lines' }, ...cart.items.map(cartLine)));
   renderPay();
   renderSum();
 }
@@ -542,18 +681,17 @@ function clearCheckout() {
   marker?.remove();
   marker = null;
   $('cartError').textContent = $('checkoutError').textContent = '';
+  for (const n of CHECKOUT_FIELDS) showError(n, '');
 }
+const CHECKOUT_FIELDS = ['fullname', 'phone', 'address'];
+inline(checkout, CHECKOUT_FIELDS);
 
 checkout.addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = checkout, delivery = f.fulfillment.value === 'delivery';
-  const check = [
-    [f.fullname.value.trim().length < 2, f.fullname, 'kiosk.checkout.err_name'],
-    [!/^(\+?998)?\d{9}$/.test(f.phone.value.replace(/[\s()-]/g, '')), f.phone, 'kiosk.checkout.err_phone'],
-    [delivery && f.address.value.trim().length < 5, f.address, 'kiosk.checkout.err_address'],
-  ].find(([bad]) => bad);
-  $('checkoutError').textContent = check ? t(check[2]) : '';
-  if (check) return check[1].focus();
+  $('checkoutError').textContent = '';
+  if (!delivery) showError('address', '');
+  if (!checkAll(f, delivery ? CHECKOUT_FIELDS : ['fullname', 'phone'])) return;
   $('placeOrder').disabled = true;
   try {
     const r = await api(`/cart/${cart.token}/checkout`, {
@@ -573,6 +711,7 @@ checkout.addEventListener('submit', async (e) => {
 
 function showDone(o, pay = { method: 'cashier' }, notify = null) {
   const online = pay.url && /^https:\/\//.test(pay.url);
+  lastOrder = o;
   $('orderNo').textContent = `№ ${o.id}`;
   $('doneBody').replaceChildren(
     el('div', { className: 'sum card' },
@@ -584,7 +723,7 @@ function showDone(o, pay = { method: 'cashier' }, notify = null) {
     el('p', { textContent: o.fulfillment === 'pickup' ? t('kiosk.done.next_pickup') : t('kiosk.done.next_delivery', { phone: o.phone }) }),
     ...(notify ? [telegramBlock(notify)] : []),
   );
-  show('done');
+  go('done', { replace: true }); // back from here goes to the outfits, not to a spent checkout
 }
 // Order status by Telegram: the phone opens the bot link; the kiosk shows it as a QR to scan with the customer's phone.
 // The SVG is built by our server from our own t.me link.
@@ -601,28 +740,48 @@ $('doneHome').onclick = () => reset();
 // Icon button, so it is not mistaken for the cart (U15); with items in the cart it asks first.
 $('home').onclick = async () => {
   if (cart?.items.length && !(await confirmDialog({ title: t('kiosk.leave.title'), text: t('kiosk.leave.text'), ok: t('kiosk.leave.ok'), cancel: t('kiosk.leave.stay') }))) return;
-  show('start');
+  go('start');
   loadStore();
 };
 
 function reset() {
   if (cart) api(`/cart/${cart.token}`, null, 'DELETE').catch(() => {}); // give the held stock back now, not in 15 min
   setCart(null);
-  request = body = sizeInfo = lastResult = null;
+  request = body = sizeInfo = lastResult = lastOrder = null;
   loadSeq++; // a results request still in flight must not draw for the next customer
   if (kiosk) {
     setLang('uz'); // the next customer starts in Uzbek
     switcher.sync();
   }
   form.reset();
+  budgetChips();
   clearCheckout();
-  $('formError').textContent = '';
+  for (const n of FORM_FIELDS) showError(n, '');
   $('results').replaceChildren();
-  show('start');
+  clearRoute();
+  go('start', { replace: true });
   loadStore();
 }
 if (kiosk) watchIdle(document, { onIdle: reset });
 
-show('start');
+// Refresh: restore the saved screen and the form's numbers (never a photo, name or phone), then ask the server again.
+const saved = loadRoute();
+if (saved) {
+  for (const [k, v] of Object.entries(saved.form)) {
+    const f = form.elements[k];
+    if (f instanceof RadioNodeList) for (const r of f) r.checked = r.value === v;
+    else f.value = v;
+  }
+  const r = toRequest(saved.form, storeId);
+  if (r) {
+    ({ body, request } = r);
+    if (saved.sizes.top && saved.sizes.bottom) {
+      request.sizes = { ...request.sizes, top: saved.sizes.top, bottom: saved.sizes.bottom };
+      sizeInfo = { manual: saved.manual };
+    }
+  }
+}
+budgetChips();
+go(storeId > 0 ? allowedScreen(saved?.screen ?? 'start', appState()) : 'start', { replace: true });
 loadStore();
 if (savedCart()) api('/cart/' + savedCart()).then((c) => setCart(c.store_id === storeId ? c : null), () => setCart(null));

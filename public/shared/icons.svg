@@ -50,4 +50,7 @@
 <symbol id="alert" viewBox="0 0 24 24"><path d="M10.3 4.6 2.9 17.5c-.8 1.3.2 3 1.7 3h14.8c1.5 0 2.5-1.7 1.7-3L13.7 4.6c-.8-1.3-2.6-1.3-3.4 0Z"/><path d="M12 9.5v4.5M12 17.2v.1"/></symbol>
 <symbol id="hanger" viewBox="0 0 24 24"><path d="M9.6 5.6a2.4 2.4 0 1 1 2.4 2.4v1.2"/><path d="M12 9.2 3.6 15.4c-.8.6-.4 1.9.6 1.9h15.6c1 0 1.4-1.3.6-1.9L12 9.2Z"/></symbol>
 <symbol id="sparkle" viewBox="0 0 24 24"><path d="M12 3.5c.5 4.4 4.1 8 8.5 8.5-4.4.5-8 4.1-8.5 8.5-.5-4.4-4.1-8-8.5-8.5 4.4-.5 8-4.1 8.5-8.5Z"/></symbol>
+<symbol id="backspace" viewBox="0 0 24 24"><path d="M8.5 5.5h11a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5h-11L3 12l5.5-6.5Z"/><path d="m11 9.5 5 5M16 9.5l-5 5"/></symbol>
+<!-- Pose guide (task 16): a standing figure, arms a little out, feet together. Drawn on a 120×240 grid, shown over the camera preview. -->
+<symbol id="pose" viewBox="0 0 120 240"><circle cx="60" cy="21" r="13"/><path d="M54 35v6c-8 1-15 3-19 8l-13 60c-1 5 4 7 6 3l11-41 1 47 2 105c0 6 13 6 13 0l3-84h4l3 84c0 6 13 6 13 0l2-105 1-47 11 41c2 4 7 2 6-3L85 49c-4-5-11-7-19-8v-6"/></symbol>
 </svg>

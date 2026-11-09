@@ -1,22 +1,43 @@
-/* Customer app layout. Tokens and components come from /shared/ui.css; this file only places them. */
-html { scroll-padding-top: 5rem; }
-html.kiosk { font-size: 137.5%; } /* 22px: read at arm's length on the kiosk */
+/* Customer app layout. Tokens and components come from /shared/ui.css; this file only places them.
+   Two modes: html.mobile (phone, 16 px root) and html.kiosk (22 px root, so every rem token scales up for arm's length). */
+html { scroll-padding-top: 6rem; scroll-padding-bottom: 7rem; }
+html.kiosk { font-size: 137.5%; }
 html.kiosk body { user-select: none; -webkit-user-select: none; }
+body { min-height: 100dvh; }
 
-.topbar { position: sticky; top: 0; z-index: 2; display: flex; gap: var(--s-3); align-items: center; padding: var(--s-3) var(--s-4); background: var(--surface); border-bottom: 1px solid var(--line); }
+.topbar { position: sticky; top: 0; z-index: 3; display: flex; gap: var(--s-2); align-items: center; padding: var(--s-2) var(--s-4); min-height: 4rem; background: var(--surface); border-bottom: 1px solid var(--line); }
 .topbar .wordmark { flex: 1; min-width: 0; }
 .topbar .wordmark span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#back { margin-left: calc(-1 * var(--s-2)); }
 #cartBtn { white-space: nowrap; }
 
 main { max-width: 47.5rem; margin: 0 auto; padding: var(--s-5) var(--s-4) var(--s-7); }
-section > h1 { margin: var(--s-2) 0 var(--s-5); }
-#langBox { margin: calc(-1 * var(--s-2)) 0 var(--s-5); }
-html.kiosk section > h1 { font-size: var(--text-4xl); }
+html.kiosk main { max-width: 60rem; padding-inline: var(--s-6); }
+html.has-bar main { padding-bottom: 8rem; }
+html.keypad-open main { padding-bottom: 20rem; }
+html.keypad-open input:focus { border-color: var(--accent); box-shadow: var(--ring); } /* the field the keypad types into */
+[data-screen] h1 { margin: var(--s-2) 0 var(--s-5); }
+html.kiosk [data-screen] h1 { font-size: var(--text-4xl); }
 .row { display: flex; gap: var(--s-3); flex-wrap: wrap; }
 .row > * { flex: 1; }
-.row.end { margin-top: var(--s-3); }
+.meta { font-size: var(--text-sm); color: var(--ink-2); }
+button.go { min-height: 3.5rem; font-size: var(--text-lg); }
+button.go .icon { transition: transform var(--dur-2) var(--ease-out); }
+button.go:hover .icon:last-child { transform: translateX(3px); }
 
-/* Start: weather */
+/* ---------- Start: attract screen (D2). Copy and weather on the left, today's in-stock clothes on the right. */
+.attract { display: flex; flex-direction: column; }
+.attract h1 { font-size: var(--text-4xl); }
+.lookbook { order: -1; display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-2); margin-bottom: var(--s-4); }
+.lookbook img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--r-md); background: var(--sunken); }
+html.kiosk .attract { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: var(--s-7); align-items: center; min-height: calc(100dvh - 4rem - var(--s-5) - var(--s-7) - 2px); }
+html.kiosk .attract h1 { font-size: var(--text-4xl); line-height: 1.05; letter-spacing: -.02em; }
+.attract .weather .temp { font-size: var(--text-3xl); }
+html.kiosk .lookbook { order: 0; grid-template-columns: 1fr 1fr; gap: var(--s-4); margin: 0; padding-bottom: var(--s-6); }
+html.kiosk .lookbook img { border-radius: var(--r-lg); box-shadow: var(--shadow-2); }
+html.kiosk .lookbook img:nth-child(even) { transform: translateY(var(--s-6)); }
+html.kiosk .attract .go { min-height: 4.5rem; font-size: var(--text-xl); }
+
 .weather { display: grid; grid-template-columns: auto 1fr; gap: var(--s-1) var(--s-5); align-items: center; margin-bottom: var(--s-5); }
 .weather > .icon { grid-row: span 3; width: 4.5rem; height: 4.5rem; color: var(--accent); stroke-width: 1.2; }
 .weather .temp { font: var(--weight-strong) var(--text-4xl)/1 var(--font-display); font-variant-numeric: lining-nums; }
@@ -25,56 +46,147 @@ html.kiosk section > h1 { font-size: var(--text-4xl); }
 .weather .hint-line .icon { color: var(--accent); }
 .weather.loading { grid-template-columns: 1fr; }
 
-/* Camera */
-.camera { position: relative; background: var(--ink); border-radius: var(--r-lg); overflow: hidden; margin-bottom: var(--s-4); }
-.camera video { display: block; width: 100%; max-height: 70vh; object-fit: contain; transform: scaleX(-1); }
+/* Store picker (U10) */
+#storePicker h2 { margin-bottom: var(--s-2); }
+.store-list { list-style: none; margin: var(--s-4) 0 0; padding: 0; display: grid; gap: var(--s-2); }
+.store-link { width: 100%; min-height: 4rem; justify-content: flex-start; text-align: left; }
+.store-link > span { flex: 1; display: grid; }
+.store-link > .icon:first-child { color: var(--accent); }
+
+/* ---------- Form */
+html.kiosk [data-screen="done"] { max-width: 44rem; margin-inline: auto; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: var(--s-4); align-items: start; }
+.form-grid .span { grid-column: 1 / -1; }
+.form-grid .field-error { margin: 0; }
+.form-grid .field-error:empty { display: none; }
+fieldset .field-error:not(:empty) { margin-top: var(--s-2); }
+.chips.sizes-chips { grid-template-columns: repeat(auto-fill, minmax(3.5rem, 1fr)); }
+.chips .wide-chip { grid-column: span 2; }
+.quick { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+html.kiosk .quick .chip { min-height: var(--control-h); padding-inline: var(--s-4); font-size: var(--text-md); }
+
+/* Kiosk keyboard dock (keypad.js) */
+.keypad { position: fixed; z-index: 6; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; gap: var(--s-3); padding: var(--s-3) var(--s-4) max(var(--s-3), env(safe-area-inset-bottom)); background: var(--sunken); border-top: 1px solid var(--line-strong); box-shadow: var(--shadow-3); animation: keypad-in var(--dur-3) var(--ease-out); }
+.keypad[data-kind="letters"] { flex-direction: column; align-items: center; gap: var(--s-2); }
+.key-grid { display: grid; grid-template-columns: repeat(3, 4.5rem); gap: var(--s-2); }
+.key-row { display: flex; justify-content: center; gap: var(--s-2); }
+.key { min-height: 2.75rem; min-width: 2.75rem; padding: 0 var(--s-2); font-size: var(--text-lg); box-shadow: var(--shadow-1); }
+.key.blank { visibility: hidden; }
+.key.space { min-width: 12rem; font-size: var(--text-sm); }
+.key.fn, .key.done { font-size: var(--text-md); }
+.keypad > .done { min-width: 7rem; }
+.key-row .done { min-width: 7rem; }
+@keyframes keypad-in { from { transform: translateY(100%); } }
+
+/* ---------- Camera: the pose figure is the example before the camera starts and a guide line over the live picture (U6). */
+.camera-screen { display: grid; gap: var(--s-5); }
+html.kiosk .camera-screen { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--s-7); align-items: start; }
+.frame { position: relative; width: min(100%, calc(62dvh * 3 / 4)); aspect-ratio: 3 / 4; margin-inline: auto; border-radius: var(--r-lg); overflow: hidden; background: var(--sunken); border: 1px solid var(--line); }
+html.kiosk .frame { width: min(100%, calc(72dvh * 3 / 4)); }
+.frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+.frame .pose { position: absolute; inset: 6% 0; width: 100%; height: 88%; fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.4; stroke-linejoin: round; transition: fill var(--dur-3) var(--ease-out); }
+.frame.live { background: var(--ink); border-color: var(--ink); }
+.frame.live .pose { fill: none; stroke: var(--accent-ink); stroke-dasharray: 3 3; opacity: .9; }
 .count { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: var(--weight-strong) 5rem/1 var(--font-ui); color: var(--accent-ink); text-shadow: 0 2px 12px rgb(0 0 0 / .6); pointer-events: none; }
+.tips { list-style: none; margin: 0 0 var(--s-5); padding: 0; display: grid; gap: var(--s-3); }
+.tips li { display: flex; align-items: center; gap: var(--s-3); font-weight: var(--weight-medium); }
+.tips .icon { width: 2.25rem; height: 2.25rem; padding: .45rem; border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); }
+.stack-actions { display: grid; gap: var(--s-2); margin-bottom: var(--s-4); }
+.privacy { margin: 0; }
 
-/* Results */
-.sizes { margin-bottom: var(--s-4); padding: var(--s-3) var(--s-4); }
-.sizes .row { align-items: center; }
+/* ---------- Results: a grid of outfit cards with large photos */
+.results-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--s-3) var(--s-5); margin-bottom: var(--s-5); }
+.results-head > div:first-child { flex: 1 1 auto; }
+.results-head h1 { margin-bottom: var(--s-1); }
+.results-head p { margin: 0; }
+.sizes { flex: 0 1 auto; display: grid; gap: var(--s-1); padding: var(--s-2) var(--s-4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.sizes .row { align-items: center; gap: var(--s-4); }
+.sizes .meta { margin: 0; max-width: 28rem; }
 .stepper { display: flex; align-items: center; gap: var(--s-2); }
-.stepper > span { min-width: 3.5rem; color: var(--ink-2); }
-.stepper button { width: var(--control-h); padding: 0; }
+.stepper > span { color: var(--ink-2); font-size: var(--text-sm); white-space: nowrap; }
+.stepper button { width: 2.5rem; min-height: 2.5rem; padding: 0; }
 .stepper strong { min-width: 2.5rem; text-align: center; font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
-.meta { font-size: var(--text-sm); color: var(--ink-2); }
-.tgqr { width: 220px; max-width: 100%; margin: var(--s-2) auto 0; background: var(--surface); }
-.outfit { margin-bottom: var(--s-4); }
-.outfit > h2 { font: var(--weight-strong) var(--text-2xl)/var(--leading-tight) var(--font-display); margin-bottom: var(--s-2); }
-.items { list-style: none; margin: var(--s-2) 0 var(--s-4); padding: 0; }
-.items li { display: grid; grid-template-columns: 4rem 1fr auto; gap: var(--s-3); align-items: center; padding: var(--s-3) 0; border-bottom: 1px solid var(--line); }
-.thumb { display: grid; place-items: center; width: 4rem; height: 4rem; border-radius: var(--r-md); object-fit: cover; background: var(--sunken); color: var(--ink-3); }
-.thumb .icon { width: 1.75rem; height: 1.75rem; stroke-width: 1.3; }
-.price { text-align: right; }
-.total { display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); flex-wrap: wrap; font-size: var(--text-lg); }
-.total strong { font-variant-numeric: tabular-nums; }
-.alt { display: grid; grid-template-columns: 3rem 1fr auto; gap: var(--s-3); align-items: center; margin-top: var(--s-4); padding-top: var(--s-3); border-top: 1px dashed var(--line-strong); }
-.alt .thumb { width: 3rem; height: 3rem; }
-.alt button { min-height: 2.5rem; padding: 0 var(--s-3); font-size: var(--text-sm); }
-.items select { display: inline-block; width: auto; min-height: 2.5rem; }
-.line-actions { display: flex; gap: var(--s-2); align-items: center; margin-top: var(--s-2); flex-wrap: wrap; }
-.line-actions button { min-height: 2.5rem; padding: 0 var(--s-3); }
 
-/* Cart and checkout */
+.outfits { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: var(--s-4); margin-bottom: var(--s-5); }
+html.kiosk .outfits { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+.outfit { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.look { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 1px; grid-template-rows: 1fr 1fr; aspect-ratio: 4 / 3; min-height: 0; overflow: hidden; background: var(--line); }
+.look.n1 { grid-template-columns: 1fr; }
+.look.n2 { grid-template-rows: 1fr; }
+.look.n3 > :first-child { grid-row: span 2; }
+.look img, .look .ph { display: grid; place-items: center; width: 100%; height: 100%; min-height: 0; object-fit: cover; background: var(--sunken); color: var(--ink-3); }
+.look .ph .icon { width: 2.5rem; height: 2.5rem; stroke-width: 1.2; }
+.outfit-body { flex: 1; display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-4) var(--s-5) var(--s-5); }
+.outfit-body > h2 { font: var(--weight-strong) var(--text-2xl)/var(--leading-tight) var(--font-display); }
+.outfit-body > .reason { margin: 0; font-size: var(--text-sm); }
+.outfit-foot { margin-top: auto; display: grid; gap: var(--s-3); }
+.total { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-3); font-size: var(--text-lg); }
+.total strong { font-variant-numeric: tabular-nums; }
+.add { display: grid; gap: var(--s-1); }
+.add .field-error:empty { display: none; }
+
+.items { list-style: none; margin: 0; padding: 0; }
+.items li { display: grid; grid-template-columns: 1fr auto; gap: var(--s-1) var(--s-3); align-items: baseline; padding: var(--s-2) 0; border-bottom: 1px solid var(--line); }
+.items li:last-child { border-bottom: 0; }
+.items .name { font-weight: var(--weight-medium); line-height: var(--leading-snug); }
+.items .pick, .items:not(.lines) .meta { grid-column: 1 / -1; }
+.items .pick { display: grid; gap: var(--s-1); }
+.items .pick .field-error:empty { display: none; }
+.size-chips { display: flex; flex-wrap: wrap; gap: var(--s-1); }
+.size-chips .chip { min-width: 2.75rem; min-height: 2.75rem; padding: 0 var(--s-2); font-variant-numeric: tabular-nums; }
+.price { text-align: right; }
+.thumb { display: grid; place-items: center; width: 4.5rem; height: 4.5rem; border-radius: var(--r-md); object-fit: cover; background: var(--sunken); color: var(--ink-3); }
+.thumb .icon { width: 1.75rem; height: 1.75rem; stroke-width: 1.3; }
+.alt { display: grid; grid-template-columns: 3rem 1fr; gap: var(--s-2) var(--s-3); align-items: center; padding-top: var(--s-3); border-top: 1px dashed var(--line-strong); }
+.alt .thumb { width: 3rem; height: 3rem; }
+.alt .add, .alt .pick { grid-column: 1 / -1; }
+.alt .pick { display: grid; gap: var(--s-1); }
+.alt .pick .field-error:empty { display: none; }
+.alt button { min-height: 2.75rem; font-size: var(--text-sm); }
+
+/* Sticky cart bar on the results screen */
+.cart-bar { position: fixed; z-index: 4; left: 50%; bottom: max(var(--s-4), env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(40rem, calc(100% - 2 * var(--s-4))); display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); padding: var(--s-2) var(--s-2) var(--s-2) var(--s-5); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-3); animation: bar-in var(--dur-3) var(--ease-out); }
+.cart-bar > div { display: grid; line-height: var(--leading-snug); font-variant-numeric: tabular-nums; }
+@keyframes bar-in { from { opacity: 0; transform: translate(-50%, 12px); } }
+
+/* ---------- Cart and checkout */
+.cart-layout { display: grid; gap: var(--s-5); align-items: start; }
+html.kiosk .cart-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-6); }
+html.kiosk .cart-layout:has(> form[hidden]) { grid-template-columns: minmax(0, 1fr); }
+.items.lines li { grid-template-columns: 4.5rem 1fr auto; align-items: start; padding: var(--s-3) 0; }
+.items.lines .thumb { grid-row: span 4; }
+.items.lines .meta, .items.lines .size-chips, .items.lines .remove { grid-column: 2 / -1; }
+.items.lines .size-chips { margin-top: var(--s-1); }
+.items.lines .size-chips .chip { min-width: 2.25rem; min-height: 2.25rem; }
+.items.lines .remove { justify-self: start; min-height: 2.25rem; padding: 0 var(--s-2); margin-left: calc(-1 * var(--s-2)); font-size: var(--text-sm); }
+.checkout .field-error:empty { display: none; }
 .sum { margin: var(--s-4) 0; }
 .sum div { display: flex; justify-content: space-between; gap: var(--s-4); padding: var(--s-1) 0; font-variant-numeric: tabular-nums; }
 .sum .grand { font-size: var(--text-xl); font-weight: var(--weight-strong); border-top: 1px solid var(--line); margin-top: var(--s-2); padding-top: var(--s-3); }
 #map { height: 16rem; border-radius: var(--r-lg); border: 1px solid var(--line); margin-bottom: var(--s-2); }
-.order-no { font: var(--weight-strong) var(--text-4xl)/1 var(--font-display); color: var(--accent); margin-bottom: var(--s-4); font-variant-numeric: lining-nums; }
+.tgqr { width: 220px; max-width: 100%; margin: var(--s-2) auto 0; background: var(--surface); }
+
+/* ---------- Done */
+.done { text-align: center; }
+.done-mark { width: 3.5rem; height: 3.5rem; padding: .75rem; margin-top: var(--s-4); border-radius: var(--r-pill); background: var(--accent); color: var(--accent-ink); stroke-width: 2.2; }
+.done .sum, .done .notice { text-align: left; }
+.order-no { font: var(--weight-strong) var(--text-4xl)/1 var(--font-display); color: var(--accent); margin-bottom: var(--s-5); font-variant-numeric: lining-nums; }
 a.button.wide { margin: var(--s-3) 0; }
 
-/* Phone: price goes under the name so item text keeps its width (audit U9). */
+/* ---------- Phone: price under the name so item text keeps its width (U9). */
 @media (max-width: 30em) {
+  [data-screen] h1, .attract h1 { font-size: var(--text-3xl); }
   .card { padding: var(--s-4); }
-  .items li { grid-template-columns: 3.5rem 1fr; align-items: start; column-gap: var(--s-3); row-gap: var(--s-1); }
-  .items .thumb { width: 3.5rem; height: 3.5rem; grid-row: span 2; }
-  .items .price { grid-column: 2; text-align: left; }
-  .items .price s { display: inline; margin-right: var(--s-2); }
-  .alt { grid-template-columns: 3rem 1fr; }
-  .alt > :last-child { grid-column: 1 / -1; }
-}
-@media (max-width: 30em) {
+  .outfit { padding: 0; }
+  .outfit-body { padding: var(--s-4); }
+  .items.lines li { grid-template-columns: 4rem 1fr; column-gap: var(--s-3); }
+  .items.lines .thumb { width: 4rem; height: 4rem; grid-row: span 5; }
+  .items.lines .price { text-align: left; }
+  .price s { display: inline; margin-right: var(--s-2); }
+  .form-grid { column-gap: var(--s-3); }
   /* The store name needs the room; the bag icon + count still read as "Savat 4" to screen readers. */
   #cartBtn .cart-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   #cartBtn { padding: 0 var(--s-3); }
+  .cart-bar { padding-left: var(--s-4); }
+  .cart-bar button { padding: 0 var(--s-3); }
 }

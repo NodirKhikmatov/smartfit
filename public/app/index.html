@@ -2,7 +2,7 @@
 <html lang="uz">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Fit</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/shared/favicon.svg" type="image/svg+xml">
@@ -13,127 +13,157 @@
 </head>
 <body>
 <header class="topbar">
+  <button id="back" class="icon-btn ghost" hidden data-i18n-aria-label="common.back" data-i18n-title="common.back"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-left"></use></svg></button>
   <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg><span id="storeName">Smart Fit</span></div>
+  <div id="langBox"></div>
   <button id="cartBtn" hidden aria-live="polite"></button>
   <button id="home" class="icon-btn ghost" hidden data-i18n-aria-label="kiosk.home" data-i18n-title="kiosk.home"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#home"></use></svg></button>
 </header>
 <main>
-  <section data-screen="start">
-    <h1 tabindex="-1" data-i18n="kiosk.start.title"></h1>
-    <div id="langBox"></div>
-    <div class="weather card loading" id="weather" aria-live="polite" aria-busy="true"><span class="skeleton line short"></span><span class="skeleton block"></span><span class="visually-hidden" data-i18n="kiosk.weather.loading"></span></div>
-    <p class="error" id="startError" role="alert"></p>
-    <button class="primary wide" id="start" data-i18n="kiosk.start.go"></button>
+  <ol class="steps" id="steps" hidden data-i18n-aria-label="kiosk.steps">
+    <li data-step="form" data-i18n="kiosk.step.form"></li>
+    <li data-step="camera" data-i18n="kiosk.step.camera"></li>
+    <li data-step="results" data-i18n="kiosk.step.results"></li>
+    <li data-step="cart" data-i18n="kiosk.step.cart"></li>
+  </ol>
+
+  <section data-screen="start" class="attract">
+    <div class="attract-copy">
+      <h1 tabindex="-1" data-i18n="kiosk.start.title"></h1>
+      <div class="weather card loading" id="weather" aria-live="polite" aria-busy="true"><span class="skeleton line short"></span><span class="skeleton block"></span><span class="visually-hidden" data-i18n="kiosk.weather.loading"></span></div>
+      <p class="error" id="startError" role="alert"></p>
+      <div id="storePicker" hidden></div>
+      <button class="primary wide go" id="start"><span id="startLabel" data-i18n="kiosk.start.go"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></button>
+    </div>
+    <div class="lookbook" id="lookbook" aria-hidden="true"></div>
   </section>
 
   <section data-screen="form" hidden>
     <h1 tabindex="-1" data-i18n="kiosk.form.title"></h1>
-    <form id="form" novalidate>
-      <fieldset>
+    <form id="form" novalidate class="form-grid">
+      <fieldset class="span" aria-describedby="genderErr">
         <legend data-i18n="kiosk.form.gender"></legend>
         <div class="chips two">
           <label><input type="radio" name="gender" value="male"><span data-i18n="gender.male"></span></label>
           <label><input type="radio" name="gender" value="female"><span data-i18n="gender.female"></span></label>
         </div>
+        <p class="field-error" id="genderErr"></p>
       </fieldset>
-      <div class="row">
-        <label class="field">
-          <span data-i18n="kiosk.form.height"></span>
-          <input name="height" type="number" inputmode="numeric" min="100" max="230" step="1" data-i18n-placeholder="kiosk.form.height_ph">
-        </label>
-        <label class="field">
-          <span><span data-i18n="kiosk.form.weight"></span> <span class="hint" data-i18n="kiosk.form.weight_hint"></span></span>
-          <input name="weight" type="number" inputmode="numeric" min="30" max="250" step="1">
-        </label>
+      <label class="field">
+        <span data-i18n="kiosk.form.height"></span>
+        <input name="height" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" data-i18n-placeholder="kiosk.form.height_ph" aria-describedby="heightErr">
+        <span class="field-error" id="heightErr"></span>
+      </label>
+      <label class="field">
+        <span><span data-i18n="kiosk.form.weight"></span> <span class="hint" data-i18n="kiosk.form.optional"></span></span>
+        <input name="weight" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" aria-describedby="weightHint weightErr">
+        <span class="hint" id="weightHint" data-i18n="kiosk.form.weight_hint"></span>
+        <span class="field-error" id="weightErr"></span>
+      </label>
+      <fieldset class="span">
+        <legend><span data-i18n="kiosk.form.shoes"></span> <span class="hint" data-i18n="kiosk.form.optional"></span></legend>
+        <div class="chips sizes-chips" id="shoeChips">
+          <label class="wide-chip"><input type="radio" name="shoes" value="" checked><span data-i18n="kiosk.form.shoes_unknown"></span></label>
+        </div>
+      </fieldset>
+      <div class="field span">
+        <label for="budget"><span data-i18n="kiosk.form.budget"></span> <span class="hint" data-i18n="kiosk.form.optional"></span></label>
+        <input id="budget" name="budget" inputmode="numeric" autocomplete="off" maxlength="11" data-keys="digits" data-i18n-placeholder="kiosk.form.budget_ph" aria-describedby="budgetErr">
+        <div class="quick" role="group" data-i18n-aria-label="kiosk.form.budget_quick" id="budgetQuick"></div>
+        <span class="field-error" id="budgetErr"></span>
       </div>
-      <div class="row">
-        <label class="field">
-          <span><span data-i18n="kiosk.form.shoes"></span> <span class="hint" data-i18n="kiosk.form.optional"></span></span>
-          <select name="shoes"><option value="" data-i18n="kiosk.form.shoes_unknown"></option></select>
-        </label>
-        <label class="field">
-          <span><span data-i18n="kiosk.form.budget"></span> <span class="hint" data-i18n="kiosk.form.optional"></span></span>
-          <input name="budget" type="number" inputmode="numeric" min="1" step="1" data-i18n-placeholder="kiosk.form.budget_ph">
-        </label>
-      </div>
-      <p class="error" id="formError" role="alert"></p>
-      <button class="primary wide" data-i18n="kiosk.form.next"></button>
+      <button class="primary wide go span" id="formNext"><span data-i18n="kiosk.form.next"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></button>
     </form>
   </section>
 
-  <section data-screen="camera" hidden>
-    <h1 tabindex="-1" data-i18n="kiosk.camera.title"></h1>
-    <p data-i18n="kiosk.camera.intro"></p>
-    <p class="muted" data-i18n="kiosk.camera.privacy"></p>
-    <div class="camera" id="preview" hidden>
-      <video id="video" playsinline muted></video>
+  <section data-screen="camera" hidden class="camera-screen">
+    <div class="frame" id="frame">
+      <video id="video" playsinline muted hidden></video>
+      <svg class="pose" viewBox="0 0 120 240" role="img" data-i18n-aria-label="kiosk.camera.guide"><use href="/shared/icons.svg#pose"></use></svg>
       <div class="count" id="count" aria-live="assertive"></div>
     </div>
-    <p class="notice" id="cameraStatus" role="status" hidden></p>
-    <div class="row">
-      <button class="primary" id="shoot" data-i18n="kiosk.camera.shoot"></button>
-      <button id="galleryBtn" hidden data-i18n="kiosk.camera.gallery"></button>
-    </div>
-    <input type="file" id="gallery" accept="image/*" hidden>
-    <div class="row end">
-      <button id="cameraBack" data-i18n="common.back"></button>
-      <button id="noPhoto" data-i18n="kiosk.camera.skip"></button>
+    <div class="camera-copy">
+      <h1 tabindex="-1" data-i18n="kiosk.camera.title"></h1>
+      <p data-i18n="kiosk.camera.intro"></p>
+      <ul class="tips">
+        <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#user"></use></svg><span data-i18n="kiosk.camera.tip_full"></span></li>
+        <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#ruler"></use></svg><span data-i18n="kiosk.camera.tip_arms"></span></li>
+        <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="kiosk.camera.tip_feet"></span></li>
+      </ul>
+      <p class="notice" id="cameraStatus" role="status" hidden></p>
+      <div class="stack-actions">
+        <button class="primary go" id="shoot"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#camera"></use></svg><span id="shootLabel" data-i18n="kiosk.camera.shoot"></span></button>
+        <button id="galleryBtn" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#image"></use></svg><span data-i18n="kiosk.camera.gallery"></span></button>
+        <button class="ghost" id="noPhoto" data-i18n="kiosk.camera.skip"></button>
+      </div>
+      <input type="file" id="gallery" accept="image/*" hidden>
+      <p class="meta privacy" data-i18n="kiosk.camera.privacy"></p>
     </div>
   </section>
 
   <section data-screen="results" hidden>
-    <h1 tabindex="-1" data-i18n="kiosk.results.title"></h1>
-    <p class="muted" id="resultsWeather"></p>
-    <div class="sizes card" id="sizeBar"></div>
+    <div class="results-head">
+      <div>
+        <h1 tabindex="-1" data-i18n="kiosk.results.title"></h1>
+        <p class="muted" id="resultsWeather"></p>
+      </div>
+      <div class="sizes" id="sizeBar"></div>
+    </div>
     <p class="visually-hidden" id="resultsStatus" role="status"></p>
     <div id="results"></div>
     <div class="row">
-      <button id="changeSizes" data-i18n="kiosk.results.change"></button>
-    </div>
-  </section>
-  <section data-screen="cart" hidden>
-    <h1 tabindex="-1" data-i18n="kiosk.cart"></h1>
-    <p class="notice" id="holdNote" hidden></p>
-    <p class="error" id="cartError" role="alert"></p>
-    <div id="cartBody"></div>
-    <form id="checkout" novalidate hidden>
-      <fieldset>
-        <legend data-i18n="kiosk.checkout.how"></legend>
-        <div class="chips two">
-          <label><input type="radio" name="fulfillment" value="pickup" checked><span data-i18n="kiosk.checkout.pickup"></span></label>
-          <label><input type="radio" name="fulfillment" value="delivery"><span data-i18n="kiosk.checkout.delivery"></span></label>
-        </div>
-      </fieldset>
-      <div class="row">
-        <label class="field"><span data-i18n="kiosk.checkout.name"></span><input name="fullname" autocomplete="name" maxlength="80"></label>
-        <label class="field"><span data-i18n="kiosk.checkout.phone"></span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+998 90 123 45 67" maxlength="20"></label>
-      </div>
-      <div id="deliveryFields" hidden>
-        <label class="field"><span data-i18n="kiosk.checkout.address"></span><input name="address" autocomplete="street-address" maxlength="200" data-i18n-placeholder="kiosk.checkout.address_ph"></label>
-        <p class="meta" id="mapHint" data-i18n="kiosk.checkout.map_hint"></p>
-        <div id="map"></div>
-      </div>
-      <div class="sum card" id="cartSum"></div>
-      <fieldset id="payFields" hidden>
-        <legend data-i18n="kiosk.checkout.pay_how"></legend>
-        <div class="chips" id="payChoices"></div>
-      </fieldset>
-      <p class="muted" id="payNote"></p>
-      <p class="error" id="checkoutError" role="alert"></p>
-      <button class="primary wide" id="placeOrder" data-i18n="kiosk.checkout.place"></button>
-    </form>
-    <div class="row end">
-      <button id="cartBack" data-i18n="kiosk.cart.back"></button>
+      <button class="ghost" id="changeSizes"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#edit"></use></svg><span data-i18n="kiosk.results.change"></span></button>
     </div>
   </section>
 
-  <section data-screen="done" hidden>
+  <section data-screen="cart" hidden>
+    <h1 tabindex="-1" data-i18n="kiosk.cart"></h1>
+    <div class="cart-layout">
+      <div>
+        <p class="notice" id="holdNote" hidden></p>
+        <p class="error" id="cartError" role="alert"></p>
+        <div id="cartBody"></div>
+        <button class="ghost" id="cartBack"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-left"></use></svg><span data-i18n="kiosk.cart.back"></span></button>
+      </div>
+      <form id="checkout" novalidate hidden class="card checkout">
+        <fieldset>
+          <legend data-i18n="kiosk.checkout.how"></legend>
+          <div class="chips two">
+            <label><input type="radio" name="fulfillment" value="pickup" checked><span data-i18n="kiosk.checkout.pickup"></span></label>
+            <label><input type="radio" name="fulfillment" value="delivery"><span data-i18n="kiosk.checkout.delivery"></span></label>
+          </div>
+        </fieldset>
+        <label class="field"><span data-i18n="kiosk.checkout.name"></span><input name="fullname" autocomplete="name" maxlength="80" data-keys="letters" aria-describedby="fullnameErr"><span class="field-error" id="fullnameErr"></span></label>
+        <label class="field"><span data-i18n="kiosk.checkout.phone"></span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+998 90 123 45 67" maxlength="20" data-keys="phone" aria-describedby="phoneErr"><span class="field-error" id="phoneErr"></span></label>
+        <div id="deliveryFields" hidden>
+          <label class="field"><span data-i18n="kiosk.checkout.address"></span><input name="address" autocomplete="street-address" maxlength="200" data-keys="letters" data-i18n-placeholder="kiosk.checkout.address_ph" aria-describedby="addressErr"><span class="field-error" id="addressErr"></span></label>
+          <p class="meta" id="mapHint" data-i18n="kiosk.checkout.map_hint"></p>
+          <div id="map"></div>
+        </div>
+        <fieldset id="payFields" hidden>
+          <legend data-i18n="kiosk.checkout.pay_how"></legend>
+          <div class="chips" id="payChoices"></div>
+        </fieldset>
+        <div class="sum" id="cartSum"></div>
+        <p class="meta" id="payNote"></p>
+        <p class="error" id="checkoutError" role="alert"></p>
+        <button class="primary wide go" id="placeOrder" data-i18n="kiosk.checkout.place"></button>
+      </form>
+    </div>
+  </section>
+
+  <section data-screen="done" hidden class="done">
+    <svg class="icon done-mark" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg>
     <h1 tabindex="-1" data-i18n="kiosk.done.title"></h1>
     <div class="order-no" id="orderNo"></div>
     <div id="doneBody"></div>
-    <button class="primary wide" id="doneHome" data-i18n="kiosk.home"></button>
+    <button class="primary wide go" id="doneHome" data-i18n="kiosk.home"></button>
   </section>
 </main>
+<div class="cart-bar" id="cartBar" hidden>
+  <div><strong id="barCount"></strong><span class="muted" id="barTotal"></span></div>
+  <button class="primary" id="barGo"><span data-i18n="kiosk.bar.go"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></button>
+</div>
 <script type="module" src="/app/app.js"></script>
 </body>
 </html>
