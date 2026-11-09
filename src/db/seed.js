@@ -1,5 +1,8 @@
-// Demo data: 2 stores × 25 items covering all seasons. Wipes all data first (dev only).
-import { pathToFileURL } from 'node:url';
+// Demo data: 2 stores × ~76 items with economy/mid/premium prices, SKUs, descriptions and a demo image each.
+// Wipes all data first (dev only). Coverage (3 outfits for every gender × size × store × season) is tested.
+import { copyFile, mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const STORES = [
   { name: 'Smart Fit Toshkent', city: 'Toshkent', lat: 41.2995, lon: 69.2401, address: 'Amir Temur ko\'chasi, 15', delivery_fee: 25000, free_delivery_threshold: 1000000 },
@@ -10,54 +13,138 @@ const CLOTHES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 const SHOES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
 const ONE = ['ONE'];
 
-// [name, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, name_ru]
-// Ranges give ≥2 items per required category and gender at −10, 5, 15 and 30 °C.
-export const CATALOGUE = [
-  ['Qishki puxovik', 'outerwear', 'unisex', 'qora', 'casual', 1290000, 990000, -25, 0, true, 'Зимний пуховик'],
-  ['Jun palto', 'outerwear', 'female', 'bej', 'classic', 1150000, null, -15, 8, false, 'Шерстяное пальто'],
-  ['Charm kurtka', 'outerwear', 'male', 'jigarrang', 'classic', 1450000, null, -15, 10, false, 'Кожаная куртка'],
-  ['Plashch', 'outerwear', 'unisex', 'bej', 'classic', 890000, 750000, 5, 17, true, 'Плащ'],
-  ['Yengil vetrovka', 'outerwear', 'unisex', 'to\'q ko\'k', 'sport', 420000, null, 8, 20, true, 'Лёгкая ветровка'],
-  ['Issiq sviter', 'top', 'unisex', 'kulrang', 'casual', 380000, null, -25, 10, false, 'Тёплый свитер'],
-  ['Hudi', 'top', 'unisex', 'qora', 'sport', 290000, 240000, -10, 18, false, 'Худи'],
-  ['Klassik ko\'ylak', 'top', 'male', 'oq', 'classic', 260000, null, 8, 30, false, 'Классическая рубашка'],
-  ['Bluzka', 'top', 'female', 'qizil', 'classic', 240000, null, 10, 32, false, 'Блузка'],
-  ['Paxta futbolka', 'top', 'unisex', 'oq', 'casual', 120000, 99000, 18, 40, false, 'Хлопковая футболка'],
-  ['Polo', 'top', 'male', 'yashil', 'sport', 180000, null, 18, 38, false, 'Поло'],
-  ['Longsliv', 'top', 'female', 'sariq', 'casual', 160000, null, 0, 22, false, 'Лонгслив'],
-  ['Isitilgan jinsi', 'bottom', 'unisex', 'to\'q ko\'k', 'casual', 420000, null, -25, 8, false, 'Утеплённые джинсы'],
-  ['Klassik jinsi', 'bottom', 'unisex', 'ko\'k', 'casual', 350000, 290000, -10, 25, false, 'Классические джинсы'],
-  ['Chino shim', 'bottom', 'male', 'bej', 'classic', 310000, null, 10, 32, false, 'Брюки чинос'],
-  ['Midi yubka', 'bottom', 'female', 'qora', 'classic', 270000, null, 12, 32, false, 'Юбка миди'],
-  ['Shorti', 'bottom', 'unisex', 'kulrang', 'sport', 150000, null, 22, 40, false, 'Шорты'],
-  ['Jun shim', 'bottom', 'female', 'kulrang', 'classic', 390000, null, -20, 10, false, 'Шерстяные брюки'],
-  ['Qishki etik', 'shoes', 'unisex', 'qora', 'casual', 950000, 790000, -25, 5, true, 'Зимние сапоги'],
-  ['Charm botinka', 'shoes', 'unisex', 'jigarrang', 'classic', 820000, null, -10, 15, true, 'Кожаные ботинки'],
-  ['Krossovka', 'shoes', 'unisex', 'oq', 'sport', 590000, null, 5, 30, false, 'Кроссовки'],
-  ['Sandal', 'shoes', 'unisex', 'bej', 'casual', 230000, null, 22, 40, false, 'Сандалии'],
-  ['Jun sharf', 'accessory', 'unisex', 'qizil', 'casual', 140000, null, -25, 5, false, 'Шерстяной шарф'],
-  ['Trikotaj shapka', 'accessory', 'unisex', 'kulrang', 'casual', 90000, null, -25, 5, false, 'Вязаная шапка'],
-  ['Kepka', 'accessory', 'unisex', 'qora', 'sport', 85000, 70000, 18, 40, false, 'Кепка'],
+export const IMAGE_DIR = fileURLToPath(new URL('../../demo/images/', import.meta.url));
+
+// [sku, name, name_ru, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, art, stores, description]
+// art = demo illustration (demo/make-images.js). stores: T = Toshkent, S = Samarqand.
+const ROWS = [
+  ['SF-OW-01', 'Qishki puxovik', 'Зимний пуховик', 'outerwear', 'unisex', 'qora', 'casual', 1290000, 990000, -25, 0, true, 'puffer', 'TS', "Qalin pat to'ldirilgan, kapyushonli, suv o'tkazmaydi."],
+  ['SF-OW-02', 'Parka', 'Парка', 'outerwear', 'unisex', 'zaytun', 'casual', 1150000, null, -20, 5, true, 'parka', 'TS', "Uzun parka, issiq astarli va kapyushonli."],
+  ['SF-OW-03', 'Yengil puxovik', 'Лёгкий пуховик', 'outerwear', 'unisex', "to'q ko'k", 'sport', 690000, null, -12, 10, false, 'puffer', 'TS', "Yengil, yig'ilganda sumkaga sig'adi."],
+  ['SF-OW-04', 'Kalta puxovik', 'Короткий пуховик', 'outerwear', 'female', 'bej', 'casual', 890000, 760000, -15, 3, false, 'puffer', 'TS', "Bel chizig'igacha, yumshoq yoqali."],
+  ['SF-OW-05', 'Jun palto', 'Шерстяное пальто', 'outerwear', 'female', 'bej', 'classic', 1150000, null, -12, 10, false, 'coat', 'TS', "Jun aralash mato, ikki qator tugmali."],
+  ['SF-OW-06', 'Klassik palto', 'Классическое пальто', 'outerwear', 'male', 'kulrang', 'classic', 1390000, null, -12, 10, false, 'coat', 'TS', "To'g'ri bichim, tizzagacha, jun aralash."],
+  ['SF-OW-07', 'Charm kurtka', 'Кожаная куртка', 'outerwear', 'male', 'jigarrang', 'classic', 1450000, null, -5, 14, false, 'leather', 'TS', "Tabiiy charm, metall zamokli."],
+  ['SF-OW-08', 'Eko-charm kurtka', 'Куртка из экокожи', 'outerwear', 'female', 'qora', 'casual', 520000, 449000, -2, 15, false, 'leather', 'TS', "Eko-charm, qiya zamokli bayker bichim."],
+  ['SF-OW-09', 'Plashch', 'Плащ', 'outerwear', 'unisex', 'bej', 'classic', 890000, 750000, 5, 19, true, 'trench', 'TS', "Klassik trench, kamarli, suv o'tkazmaydi."],
+  ['SF-OW-10', 'Yengil vetrovka', 'Лёгкая ветровка', 'outerwear', 'unisex', "to'q ko'k", 'sport', 420000, null, 8, 22, true, 'windbreaker', 'TS', "Shamol va yomg'irdan himoya, kapyushonli."],
+  ['SF-OW-11', 'Jinsi kurtka', 'Джинсовая куртка', 'outerwear', 'unisex', "ko'k", 'casual', 380000, null, 10, 22, false, 'denim', 'TS', "Paxta denim, ko'krak cho'ntaklari bilan."],
+  ['SF-OW-12', "Yomg'irpo'sh", 'Дождевик', 'outerwear', 'unisex', 'sariq', 'casual', 290000, null, 8, 24, true, 'windbreaker', 'TS', "Yengil yomg'irpo'sh, choklari yopishtirilgan."],
+  ['SF-OW-13', 'Bomber', 'Бомбер', 'outerwear', 'male', 'zaytun', 'casual', 460000, null, 5, 18, false, 'bomber', 'TS', "Trikotaj manjetli, yengil astarli."],
+  ['SF-OW-14', 'Erkaklar pidjagi', 'Мужской пиджак', 'outerwear', 'male', "to'q ko'k", 'classic', 790000, null, 10, 24, false, 'blazer', 'TS', "Ikki tugmali, yarim astarli."],
+  ['SF-OW-15', 'Ayollar pidjagi', 'Женский пиджак', 'outerwear', 'female', 'qora', 'classic', 690000, 590000, 10, 24, false, 'blazer', 'TS', "Erkin bichim, bitta tugmali."],
+  ['SF-OW-16', 'Issiq jilet', 'Тёплый жилет', 'outerwear', 'unisex', 'qora', 'sport', 350000, null, -5, 12, false, 'gilet', 'TS', "Yengsiz, qavatli, sviter ustidan kiyiladi."],
+  ['SF-OW-17', 'Softshell kurtka', 'Куртка софтшелл', 'outerwear', 'unisex', 'kulrang', 'sport', 540000, null, 0, 16, true, 'windbreaker', 'TS', "Ichi flisli, shamol o'tkazmaydi."],
+  ['SF-OW-18', 'Qishki palto', 'Зимнее пальто', 'outerwear', 'male', 'qora', 'classic', 1690000, null, -20, 2, false, 'coat', 'T', "Issiq astarli jun palto, tizzadan past."],
+  ['SF-OW-19', 'Uzun puxovik', 'Длинный пуховик', 'outerwear', 'female', 'qora', 'casual', 1490000, 1290000, -25, -2, true, 'puffer', 'S', "Tizzagacha, qalin pat, kapyushonli."],
+
+  ['SF-TP-01', 'Issiq sviter', 'Тёплый свитер', 'top', 'unisex', 'kulrang', 'casual', 380000, null, -25, 10, false, 'sweater', 'TS', "Qalin trikotaj, yumshoq jun aralash."],
+  ['SF-TP-02', 'Hudi', 'Худи', 'top', 'unisex', 'qora', 'sport', 290000, 240000, -10, 18, false, 'hoodie', 'TS', "Ichi tukli paxta, kenguru cho'ntakli."],
+  ['SF-TP-03', "Klassik ko'ylak", 'Классическая рубашка', 'top', 'male', 'oq', 'classic', 260000, null, 5, 30, false, 'shirt', 'TS', "Paxta poplin, tugmali yoqa."],
+  ['SF-TP-04', 'Bluzka', 'Блузка', 'top', 'female', 'qizil', 'classic', 240000, null, 10, 32, false, 'blouse', 'TS', "Yengil viskoza, bo'yni bog'ichli."],
+  ['SF-TP-05', 'Paxta futbolka', 'Хлопковая футболка', 'top', 'unisex', 'oq', 'casual', 120000, 99000, 18, 40, false, 'tshirt', 'TS', "100% paxta, erkin bichim."],
+  ['SF-TP-06', 'Polo', 'Поло', 'top', 'male', 'yashil', 'sport', 180000, null, 18, 38, false, 'polo', 'TS', "Pike trikotaj, uch tugmali."],
+  ['SF-TP-07', 'Longsliv', 'Лонгслив', 'top', 'female', 'sariq', 'casual', 160000, null, 0, 22, false, 'longsleeve', 'TS', "Uzun yengli yupqa trikotaj."],
+  ['SF-TP-08', 'Vodolazka', 'Водолазка', 'top', 'unisex', 'qora', 'classic', 220000, null, -20, 12, false, 'turtleneck', 'TS', "Baland yoqali, cho'ziluvchan trikotaj."],
+  ['SF-TP-09', 'Kashemir sviter', 'Кашемировый свитер', 'top', 'female', 'krem', 'classic', 890000, null, -15, 12, false, 'sweater', 'T', "Kashemir aralash, juda yumshoq."],
+  ['SF-TP-10', 'Jun sviter', 'Шерстяной свитер', 'top', 'male', "to'q ko'k", 'classic', 650000, null, -20, 10, false, 'sweater', 'TS', "Merinos jun, dumaloq yoqa."],
+  ['SF-TP-11', 'Kardigan', 'Кардиган', 'top', 'female', 'bej', 'casual', 340000, null, 0, 18, false, 'cardigan', 'TS', "Tugmali, yumshoq trikotaj."],
+  ['SF-TP-12', "Flanel ko'ylak", 'Фланелевая рубашка', 'top', 'male', 'bordo', 'casual', 280000, null, -5, 18, false, 'shirt', 'S', "Issiq flanel, ikki cho'ntakli."],
+  ['SF-TP-13', 'Bazaviy futbolka', 'Базовая футболка', 'top', 'unisex', 'qora', 'casual', 89000, null, 18, 40, false, 'tshirt', 'TS', "Har kunlik paxta futbolka."],
+  ['SF-TP-14', "Zig'ir ko'ylak", 'Льняная рубашка', 'top', 'male', 'havorang', 'casual', 330000, null, 22, 40, false, 'shirt', 'T', "Toza zig'ir, issiqda salqin."],
+  ['SF-TP-15', 'Top', 'Топ', 'top', 'female', 'pushti', 'casual', 110000, null, 22, 40, false, 'tank', 'TS', "Yengsiz paxta top."],
+  ['SF-TP-16', 'Sport futbolka', 'Спортивная футболка', 'top', 'unisex', 'kulrang', 'sport', 140000, null, 15, 40, false, 'tshirt', 'TS', "Ter o'tkazadigan sport mato."],
+  ['SF-TP-17', "Oksford ko'ylak", 'Оксфордская рубашка', 'top', 'unisex', 'havorang', 'classic', 290000, null, 8, 28, false, 'shirt', 'TS', "Oksford paxta, tugmali yoqa."],
+  ['SF-TP-18', 'Flis kofta', 'Флисовая кофта', 'top', 'unisex', 'zaytun', 'sport', 270000, null, -10, 12, false, 'fleece', 'TS', "Issiq flis, yarim zamokli."],
+  ['SF-TP-19', 'Termo longsliv', 'Термолонгслив', 'top', 'unisex', 'oq', 'sport', 150000, null, -20, 8, false, 'longsleeve', 'TS', "Issiqlikni saqlaydigan ichki qatlam."],
+  ['SF-TP-20', 'Ipak bluzka', 'Шёлковая блузка', 'top', 'female', 'oq', 'classic', 520000, null, 12, 32, false, 'blouse', 'T', "Tabiiy ipak, yengil va silliq."],
+
+  ['SF-BT-01', 'Isitilgan jinsi', 'Утеплённые джинсы', 'bottom', 'unisex', "to'q ko'k", 'casual', 420000, null, -25, 8, false, 'jeans', 'TS', "Ichi flisli, qishki jinsi."],
+  ['SF-BT-02', 'Klassik jinsi', 'Классические джинсы', 'bottom', 'unisex', "ko'k", 'casual', 350000, 290000, -10, 25, false, 'jeans', 'TS', "To'g'ri bichim, paxta denim."],
+  ['SF-BT-03', 'Chino shim', 'Брюки чинос', 'bottom', 'male', 'bej', 'classic', 310000, null, 8, 32, false, 'chinos', 'TS', "Paxta twill, toraygan pacha."],
+  ['SF-BT-04', 'Midi yubka', 'Юбка миди', 'bottom', 'female', 'qora', 'classic', 270000, null, 10, 32, false, 'skirt', 'TS', "A-siluet, tizzadan past."],
+  ['SF-BT-05', 'Shorti', 'Шорты', 'bottom', 'unisex', 'kulrang', 'sport', 150000, null, 22, 40, false, 'shorts', 'TS', "Rezinkali, yengil sport shorti."],
+  ['SF-BT-06', 'Jun shim', 'Шерстяные брюки', 'bottom', 'female', 'kulrang', 'classic', 390000, null, -20, 10, false, 'trousers', 'TS', "Jun aralash, dazmol chiziqli."],
+  ['SF-BT-07', 'Klassik shim', 'Классические брюки', 'bottom', 'male', 'qora', 'classic', 450000, null, -10, 25, false, 'trousers', 'TS', "Kostyum matosi, dazmol chiziqli."],
+  ['SF-BT-08', 'Jogger', 'Джоггеры', 'bottom', 'unisex', 'qora', 'sport', 220000, null, -5, 20, false, 'joggers', 'TS', "Manjetli, yumshoq trikotaj."],
+  ['SF-BT-09', 'Issiq jogger', 'Утеплённые джоггеры', 'bottom', 'unisex', 'kulrang', 'sport', 260000, null, -20, 5, false, 'joggers', 'TS', "Ichi tukli, qishki jogger."],
+  ['SF-BT-10', 'Keng shim', 'Широкие брюки', 'bottom', 'female', 'krem', 'classic', 360000, null, 12, 32, false, 'wide', 'TS', "Baland belli, keng pachali."],
+  ['SF-BT-11', 'Plisse yubka', 'Юбка плиссе', 'bottom', 'female', 'yashil', 'casual', 290000, null, 15, 32, false, 'pleated', 'TS', "Plisse burmali, midi uzunlikda."],
+  ['SF-BT-12', "Zig'ir shim", 'Льняные брюки', 'bottom', 'male', 'krem', 'casual', 340000, null, 22, 40, false, 'chinos', 'TS', "Zig'ir aralash, issiqda salqin."],
+  ['SF-BT-13', 'Jinsi shorti', 'Джинсовые шорты', 'bottom', 'female', "ko'k", 'casual', 160000, null, 22, 40, false, 'shorts', 'TS', "Deniм shorti, baland belli."],
+  ['SF-BT-14', 'Kord shim', 'Вельветовые брюки', 'bottom', 'male', 'jigarrang', 'casual', 380000, null, -10, 15, false, 'chinos', 'S', "Velvet (kord), issiq va yumshoq."],
+  ['SF-BT-15', 'Issiq leggings', 'Тёплые леггинсы', 'bottom', 'female', 'qora', 'sport', 180000, null, -15, 10, false, 'leggings', 'TS', "Ichi tukli, cho'ziluvchan."],
+  ['SF-BT-16', 'Slim jinsi', 'Джинсы слим', 'bottom', 'female', 'qora', 'casual', 320000, null, -5, 25, false, 'jeans', 'TS', "Tor bichim, cho'ziluvchan denim."],
+  ['SF-BT-17', 'Chino shorti', 'Шорты чинос', 'bottom', 'male', "to'q ko'k", 'casual', 190000, null, 22, 40, false, 'shorts', 'TS', "Paxta twill, tizzadan yuqori."],
+  ['SF-BT-18', 'Premium jinsi', 'Джинсы премиум', 'bottom', 'male', "to'q ko'k", 'casual', 690000, null, -10, 22, false, 'jeans', 'T', "Yapon denimi, qo'lda ishlov berilgan."],
+  ['SF-BT-19', 'Yengil shim', 'Лёгкие брюки', 'bottom', 'male', 'kulrang', 'classic', 330000, null, 18, 38, false, 'trousers', 'TS', "Yozgi kostyum matosi, nafas oladi."],
+
+  ['SF-SH-01', 'Qishki etik', 'Зимние сапоги', 'shoes', 'unisex', 'qora', 'casual', 950000, 790000, -25, 5, true, 'winterboot', 'TS', "Mo'ynali astar, sirpanmaydigan taglik."],
+  ['SF-SH-02', 'Charm botinka', 'Кожаные ботинки', 'shoes', 'unisex', 'jigarrang', 'classic', 820000, null, -10, 15, true, 'boot', 'TS', "Tabiiy charm, bog'ichli, suv o'tkazmaydi."],
+  ['SF-SH-03', 'Krossovka', 'Кроссовки', 'shoes', 'unisex', 'oq', 'sport', 590000, null, 5, 30, false, 'sneaker', 'TS', "Charm krossovka, yumshoq taglik."],
+  ['SF-SH-04', 'Sandal', 'Сандалии', 'shoes', 'unisex', 'bej', 'casual', 230000, null, 22, 40, false, 'sandal', 'TS', "Charm tasmali, yengil taglik."],
+  ['SF-SH-05', 'Chelsi', 'Челси', 'shoes', 'unisex', 'qora', 'classic', 690000, null, -5, 18, false, 'chelsea', 'TS', "Rezina qo'yilmali charm chelsi."],
+  ['SF-SH-06', 'Lofer', 'Лоферы', 'shoes', 'male', 'jigarrang', 'classic', 520000, null, 10, 32, false, 'loafer', 'TS', "Tabiiy charm, bog'ichsiz."],
+  ['SF-SH-07', 'Balerina', 'Балетки', 'shoes', 'female', 'bej', 'classic', 290000, null, 15, 32, false, 'flats', 'TS', "Yumshoq charm, tekis taglik."],
+  ['SF-SH-08', 'Yugurish krossovkasi', 'Беговые кроссовки', 'shoes', 'unisex', 'kulrang', 'sport', 450000, null, 5, 32, false, 'runner', 'TS', "Setkali, amortizatsiyali taglik."],
+  ['SF-SH-09', 'Keda', 'Кеды', 'shoes', 'unisex', 'oq', 'casual', 180000, null, 15, 35, false, 'canvas', 'TS', "Kanvas mato, rezina taglik."],
+  ['SF-SH-10', 'Uzun etik', 'Высокие сапоги', 'shoes', 'female', 'qora', 'classic', 1190000, null, -20, 8, false, 'tallboot', 'T', "Tizzagacha, tabiiy charm."],
+  ['SF-SH-11', 'Trekking botinka', 'Треккинговые ботинки', 'shoes', 'unisex', 'jigarrang', 'sport', 740000, null, -15, 12, true, 'boot', 'TS', "Membranali, qalin protektorli."],
+  ['SF-SH-12', 'Shippak', 'Шлёпанцы', 'shoes', 'unisex', 'qora', 'sport', 99000, null, 25, 40, false, 'slides', 'TS', "Yumshoq rezina, plyaj va uy uchun."],
+  ['SF-SH-13', 'Oksford tufli', 'Оксфорды', 'shoes', 'male', 'qora', 'classic', 640000, null, 5, 28, false, 'oxford', 'TS', "Klassik bog'ichli charm tufli."],
+  ['SF-SH-14', 'Qishki krossovka', 'Зимние кроссовки', 'shoes', 'unisex', 'qora', 'sport', 650000, 560000, -10, 10, true, 'runner', 'TS', "Issiq astarli, suv o'tkazmaydi."],
+  ['SF-SH-15', 'Tufli', 'Туфли', 'shoes', 'female', 'qora', 'classic', 420000, null, 12, 30, false, 'pump', 'T', "O'rta poshnali klassik tufli."],
+  ['SF-SH-16', "Mo'ynali botinka", 'Ботинки с мехом', 'shoes', 'unisex', 'bej', 'casual', 780000, null, -25, 3, true, 'winterboot', 'S', "Zamsh, ichi mo'ynali."],
+
+  ['SF-AC-01', 'Jun sharf', 'Шерстяной шарф', 'accessory', 'unisex', 'qizil', 'casual', 140000, null, -25, 5, false, 'scarf', 'TS', "Yumshoq jun, popukli."],
+  ['SF-AC-02', 'Trikotaj shapka', 'Вязаная шапка', 'accessory', 'unisex', 'kulrang', 'casual', 90000, null, -25, 5, false, 'beanie', 'TS', "Qalin trikotaj, qaytarma chetli."],
+  ['SF-AC-03', 'Kepka', 'Кепка', 'accessory', 'unisex', 'qora', 'sport', 85000, 70000, 18, 40, false, 'cap', 'TS', "Paxta, sozlanadigan tasmali."],
+  ['SF-AC-04', "Charm qo'lqop", 'Кожаные перчатки', 'accessory', 'unisex', 'jigarrang', 'classic', 210000, null, -25, 5, false, 'gloves', 'TS', "Tabiiy charm, issiq astarli."],
+  ['SF-AC-05', 'Kashemir sharf', 'Кашемировый шарф', 'accessory', 'female', 'bej', 'classic', 450000, null, -15, 10, false, 'scarf', 'T', "Kashemir aralash, keng."],
+  ['SF-AC-06', 'Charm kamar', 'Кожаный ремень', 'accessory', 'male', 'qora', 'classic', 160000, null, -30, 40, false, 'belt', 'TS', "Tabiiy charm, metall to'qa."],
+  ['SF-AC-07', 'Tote sumka', 'Сумка-тоут', 'accessory', 'female', 'bej', 'casual', 380000, null, -30, 40, false, 'bag', 'S', "Sig'imli, yumshoq charm."],
+  ['SF-AC-08', "Quyosh ko'zoynagi", 'Солнцезащитные очки', 'accessory', 'unisex', 'qora', 'casual', 250000, null, 15, 40, false, 'sunglasses', 'TS', "UV400 himoya, klassik shakl."],
 ];
+
+const KEYS = ['sku', 'name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'art', 'stores', 'description'];
+export const CATALOGUE = ROWS.map((r) => Object.fromEntries(KEYS.map((k, i) => [k, r[i]])));
 
 export const sizesFor = (category) => (category === 'shoes' ? SHOES : category === 'accessory' ? ONE : CLOTHES);
 
-// Deterministic stock 0–5 per size, so some sizes are sold out (exercises the stock > 0 rule).
-const stockFor = (item, size, storeIdx, sizeCount) => (sizeCount === 1 ? 5 : (item * 7 + size * 5 + storeIdx * 3) % 6);
+// Deterministic stock: middle sizes deepest, most sizes ≥ 2, and about 1 in 17 sizes sold out (exercises the stock > 0 rule).
+const DEPTH = { 6: [2, 3, 5, 5, 3, 2], 10: [2, 2, 3, 4, 4, 5, 5, 4, 3, 2], 1: [6] };
+export function stockFor(item, size, storeIdx, sizeCount) {
+  const h = (item * 13 + size * 5 + storeIdx * 7) % 17;
+  if (sizeCount > 1 && h === 0) return 0;
+  return DEPTH[sizeCount][size] + (h % 3);
+}
 
-export async function seed(db) {
+// Demo images are copied per store, so deleting one store's product (which deletes its image) leaves the other's.
+// The name is fixed per store + SKU, so re-seeding overwrites instead of piling up files.
+const imageName = (storeIdx, sku) => `demo-s${storeIdx + 1}-${sku.toLowerCase()}.svg`;
+
+// uploadDir: where /uploads is served from. Without it (tests) image_url is still set, but no file is copied.
+export async function seed(db, { uploadDir } = {}) {
   if (process.env.NODE_ENV === 'production') throw new Error('Seed wipes all data; refusing to run in production');
+  if (uploadDir) {
+    await mkdir(path.join(uploadDir, 'products'), { recursive: true });
+    for (const [storeIdx] of STORES.entries()) {
+      for (const p of CATALOGUE.filter((x) => x.stores.includes('TS'[storeIdx]))) await copyFile(path.join(IMAGE_DIR, `${p.sku}.svg`), path.join(uploadDir, 'products', imageName(storeIdx, p.sku)));
+    }
+  }
   await db.transaction(async (trx) => {
     for (const t of ['payment_transactions', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'admins', 'stores']) {
       await trx(t).del();
     }
     for (const [storeIdx, store] of STORES.entries()) {
       const [{ id: storeId }] = await trx('stores').insert(store).returning('id');
-      for (const [i, [name, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, name_ru]] of CATALOGUE.entries()) {
+      const code = 'TS'[storeIdx];
+      for (const [i, { art, stores, ...p }] of CATALOGUE.entries()) {
+        if (!stores.includes(code)) continue;
         const [{ id: productId }] = await trx('products')
-          .insert({ store_id: storeId, name, name_ru, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, shelf_location: `${'ABCDE'[i % 5]}-${i + 1}` })
+          .insert({ ...p, store_id: storeId, shelf_location: `${'ABCDE'[i % 5]}-${i + 1}`, image_url: `/uploads/products/${imageName(storeIdx, p.sku)}` })
           .returning('id');
-        const sizes = sizesFor(category);
+        const sizes = sizesFor(p.category);
         await trx('product_stock').insert(sizes.map((size, s) => ({ product_id: productId, size, quantity: stockFor(i, s, storeIdx, sizes.length) })));
       }
     }
@@ -70,8 +157,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const db = createDb();
   try {
     await db.migrate.latest();
-    await seed(db);
-    console.log(`Seed: ${STORES.length} do'kon, ${STORES.length * CATALOGUE.length} kiyim`);
+    await seed(db, { uploadDir: process.env.UPLOAD_DIR || 'uploads' });
+    const [{ n }] = await db('products').count({ n: '*' });
+    console.log(`Seed: ${STORES.length} do'kon, ${n} kiyim, rasmlar bilan`);
   } finally {
     await db.destroy();
   }

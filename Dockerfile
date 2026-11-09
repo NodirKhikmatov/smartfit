@@ -7,6 +7,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --omit=optional && npm cache clean --force
 COPY src ./src
 COPY public ./public
+# Demo product illustrations, copied to uploads by `npm run seed` on a test server (the seed refuses production).
+COPY demo/images ./demo/images
 # Product images (admin uploads) live on a volume; customer photos are never written anywhere.
 RUN mkdir -p /app/uploads && chown node:node /app/uploads
 USER node

@@ -2,7 +2,7 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { sizesFor } from '../db/seed.js';
 import { fail, langOf } from '../admin/routes.js';
-import { filterCandidates, buildOutfits } from './engine.js';
+import { filterCandidates, ruleOutfits } from './engine.js';
 import { parsePhoto, applyStylist, withDeadline, TIMEOUT_MS } from './stylist.js';
 
 const pick = (v, allowed, label, required) => {
@@ -53,21 +53,23 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon');
     if (!store) throw fail(404, 'err.store_not_found');
     const w = await weather(store);
-    const candidates = await filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature });
     const ctx = { temperature: w.temperature, raining: w.raining, budget };
-    let result = { ...buildOutfits(candidates, ctx), style_guess: null, source: 'rules' };
-    // No rule outfit means a required category is empty, so Claude could not build one either.
-    if (stylist && result.outfits.length && allowAi(req.ip)) {
+    const load = (spread) => filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread });
+    const { candidates, ...rules } = await ruleOutfits(load, ctx);
+    let result = { ...rules, style_guess: null, source: 'rules' };
+    // No rule outfit means a required category is empty, so Claude could not build one either. Without outerwear
+    // (notice) applyStylist rejects every AI outfit, so the rules answer stands. Claude sees the relaxed candidates.
+    if (stylist && result.outfits.length && !result.notice && allowAi(req.ip)) {
       try {
         const answer = await withDeadline((signal) => stylist({ photo, weather: w, sizes, budget, candidates, lang: langOf(req) }, signal), stylistTimeoutMs);
         const ai = applyStylist(answer, candidates, ctx);
-        if (ai) result = { ...ai, source: 'ai' };
+        if (ai) result = { ...result, ...ai, partial: null, source: 'ai' };
         else console.warn('stylist: no valid outfit, using rules');
       } catch (err) {
         console.warn('stylist failed, using rules:', err.status ?? err.name ?? 'error'); // never the error body or the request
       }
     }
-    const { outfits, over_budget, style_guess, source } = result;
+    const { outfits, over_budget, partial, relaxed, notice, style_guess, source } = result;
 
     // Stats (task 3) need product_ids as a JSON array of integers. No photo or body data here.
     const log = {
@@ -76,7 +78,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       gender: b.gender,
       sizes: JSON.stringify(sizes),
       budget,
-      product_ids: JSON.stringify([...new Set(outfits.flatMap((o) => o.items.map((i) => i.id)))]),
+      product_ids: JSON.stringify([...new Set([...outfits, ...(partial ? [partial] : [])].flatMap((o) => o.items.map((i) => i.id)))]),
       source,
     };
     // A −/+ re-query sends back its `rec` and updates the same row, so one customer counts once in the pilot report.
@@ -85,7 +87,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       rec = randomBytes(16).toString('hex');
       await db('recommendation_logs').insert({ ...log, store_id: store.id, token: rec });
     }
-    res.json({ weather: w, budget, over_budget, source, style_guess, outfits, rec });
+    res.json({ weather: w, budget, over_budget, partial, relaxed, notice, source, style_guess, outfits, rec });
   });
 
   // Pilot funnel: the customer tapped "Kiyib ko'rdim" (tried the suggestion on). { rec } → 204, once per results screen.

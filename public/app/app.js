@@ -350,7 +350,10 @@ function renderResults(r) {
   }
   $('results').replaceChildren(
     ...(r.style_guess ? [el('p', { className: 'muted', textContent: t('kiosk.results.style', { style: r.style_guess }) })] : []),
+    ...(r.notice === 'no_outerwear' ? [el('div', { className: 'notice warn', textContent: t('kiosk.results.no_outerwear') })] : []),
+    ...(r.relaxed ? [el('p', { className: 'muted', textContent: t('kiosk.results.relaxed', { n: r.relaxed }) })] : []),
     ...(r.over_budget > 0 ? [el('div', { className: 'notice warn', textContent: t('kiosk.results.over_budget', { sum: som(r.over_budget) }) })] : []),
+    ...(r.partial ? [partialCard(r.partial)] : []),
     ...r.outfits.map((o, i) => outfitCard(o, i + 1)),
     triedCard(),
   );
@@ -419,17 +422,28 @@ function outfitCard(o, n) {
     el('ul', { className: 'items' }, ...o.items.map(itemRow)),
     el('div', { className: 'total' }, el('span', {}, `${t('common.total')}: `, el('strong', { textContent: som(o.total) })), addButton(o.items)),
   );
+  // R5: the cheaper variant is one compact "swap X for Y, save N" row, not a second outfit.
   if (o.alternative) {
-    const swapped = o.alternative.items.find((p) => !o.items.some((x) => x.id === p.id));
+    const swap = o.alternative.items.find((p) => !o.items.some((x) => x.id === p.id));
     const old = o.items.find((p) => p.id === o.alternative.replaces);
     card.append(el('div', { className: 'alt' },
-      el('h2', { textContent: t('kiosk.outfit.alt') }),
-      el('p', { className: 'muted', textContent: t('kiosk.outfit.alt_save', { name: productName(old), sum: som(o.total - o.alternative.total) }) }),
-      el('ul', { className: 'items' }, itemRow(swapped)),
-      el('div', { className: 'total' }, el('span', {}, `${t('common.total')}: `, el('strong', { textContent: som(o.alternative.total) })), addButton(o.alternative.items)),
+      thumb(swap),
+      el('div', {}, el('strong', { textContent: t('kiosk.outfit.alt') }),
+        el('div', { className: 'meta', textContent: t('kiosk.outfit.alt_save', { name: productName(old), swap: productName(swap), sum: som(o.total - o.alternative.total) }) })),
+      addButton(o.alternative.items),
     ));
   }
   return card;
+}
+
+// Nothing fits the budget: the required items that do fit, cheapest first (the full cheapest outfit follows).
+function partialCard(p) {
+  return el('article', { className: 'outfit card' },
+    el('h2', { textContent: t('kiosk.partial.title') }),
+    ...(p.missing.length ? [el('p', { className: 'muted', textContent: t('kiosk.partial.missing', { cats: p.missing.map(cat).join(', ') }) })] : []),
+    el('ul', { className: 'items' }, ...p.items.map(itemRow)),
+    el('div', { className: 'total' }, el('span', {}, `${t('common.total')}: `, el('strong', { textContent: som(p.total) })), addButton(p.items)),
+  );
 }
 
 // --- Cart and checkout. Every number shown here comes from the server; the browser sends no prices.

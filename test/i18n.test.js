@@ -86,7 +86,8 @@ test('no Uzbek or Russian text outside the dictionary (pages, browser JS, server
   // Not app UI: the spec's Uzbek stylist prompt (task 7), Payme's ru/uz/en protocol messages, demo seed data, the
   // operator CLI, Telegram order messages (still Uzbek only, see TASKS.md task 14 Notes).
   const EXEMPT = ['src/recommend/stylist.js', 'src/cart/payments.js', 'src/db/seed.js', 'src/notify/telegram.js', 'src/admin/create-store.js'];
-  const INPUT_WORDS = ["yo'q"]; // a CSV "waterproof" value staff may type, not text we show
+  // Values staff type, not text we show: a CSV "waterproof" value and colour names (the engine's neutral colours).
+  const INPUT_WORDS = ["yo'q", "to'q ko'k", "ko'k"];
   assert.ok(LOOKS_LOCAL.test("Do'kon topilmadi") && LOOKS_LOCAL.test('Корзина') && LOOKS_LOCAL.test('Savat bo‘sh') && !LOOKS_LOCAL.test('application/json'), 'detector works');
   const hits = [];
   for (const [f, text] of Object.entries(sources)) {

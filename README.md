@@ -22,7 +22,7 @@ Caddy for HTTPS.
 nvm use                      # Node 22 (.nvmrc)
 npm install
 cp .env.example .env         # every variable is optional in development
-npm run seed                 # demo data: 2 stores × 25 items (wipes the DB!)
+npm run seed                 # demo data: 2 stores × ~75 items with demo images (wipes the DB!)
 npm run admin:create -- boss@example.uz   # super-admin; asks for the password
 npm start                    # http://localhost:3000/kiosk?store=1  and  /admin
 ```

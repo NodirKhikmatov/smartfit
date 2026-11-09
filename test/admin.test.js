@@ -2,11 +2,12 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { testDb } from './helpers/db.js';
 import { createApp } from '../src/app.js';
-import { seed } from '../src/db/seed.js';
+import { seed, CATALOGUE } from '../src/db/seed.js';
 import { createAdmin } from '../src/admin/routes.js';
 import { hashPassword, verifyPassword, signToken, verifyToken, TOKEN_TTL_MS } from '../src/admin/auth.js';
 
 process.env.ADMIN_TOKEN_SECRET = 'test-secret';
+const inStore = (code) => CATALOGUE.filter((p) => p.stores.includes(code)).length;
 const db = testDb();
 let server, base, tashkent, samarkand, superToken, tashToken;
 
@@ -78,9 +79,9 @@ test('super-admin sees all stores, manager only their own', async () => {
   assert.equal((await api('/stores', { token: superToken })).body.length, 2);
   assert.deepEqual((await api('/stores', { token: tashToken })).body.map((s) => s.id), [tashkent]);
   const all = (await api('/products', { token: superToken })).body;
-  assert.equal(all.length, 50);
+  assert.equal(all.length, inStore('T') + inStore('S'));
   const own = (await api('/products', { token: tashToken })).body;
-  assert.equal(own.length, 25);
+  assert.equal(own.length, inStore('T'));
   assert.ok(own.every((p) => p.store_id === tashkent));
   assert.equal((await api(`/products?store_id=${samarkand}`, { token: tashToken })).body.length, 0);
 });
@@ -96,12 +97,12 @@ test('store manager cannot read or change another store\'s products', async () =
 
   assert.deepEqual(await db('products').where({ id: other.id }).first(), other);
   assert.deepEqual(await db('product_stock').where({ product_id: other.id }), before);
-  assert.equal(Number((await db('products').where({ store_id: samarkand }).count({ n: '*' }))[0].n), 25);
+  assert.equal(Number((await db('products').where({ store_id: samarkand }).count({ n: '*' }))[0].n), inStore('S'));
 });
 
 test('search and category filter', async () => {
   const jinsi = (await api('/products?q=JINSI', { token: tashToken })).body;
-  assert.deepEqual(jinsi.map((p) => p.name).sort(), ['Isitilgan jinsi', 'Klassik jinsi']);
+  assert.deepEqual(jinsi.map((p) => p.name).sort(), ['Isitilgan jinsi', 'Jinsi kurtka', 'Jinsi shorti', 'Klassik jinsi', 'Premium jinsi', 'Slim jinsi']);
   const shoes = (await api('/products?category=shoes', { token: tashToken })).body;
   assert.ok(shoes.length > 0 && shoes.every((p) => p.category === 'shoes'));
   assert.deepEqual(shoes[0].stock.map((s) => s.size), ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45']);
