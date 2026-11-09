@@ -99,9 +99,10 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
   }
 
   // A manager may read their store's profile (read-only form); only its owner or a super-admin may change it.
+  const pinSet = async (id) => (await db('stores').where({ id }).first('kiosk_pin_hash')).kiosk_pin_hash != null;
   r.get('/stores/:id', async (req, res) => {
     const s = await findStore(req);
-    res.json({ ...s, can_edit: canEditStore(req.admin, s.id) });
+    res.json({ ...s, kiosk_pin_set: await pinSet(s.id), can_edit: canEditStore(req.admin, s.id) });
   });
 
   // Partial edit: only known profile fields count (order_seq etc. can't be reached), merged and validated as a whole.
@@ -110,14 +111,19 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
     if (!canEditStore(req.admin, id)) throw fail(403, 'err.forbidden');
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const next = validStore({ ...before, ...Object.fromEntries(Object.entries(body).filter(([k]) => Object.hasOwn(before, k))) });
+    // Kiosk staff exit PIN (task 21): 4–8 digits, stored like a password; empty = unchanged. The audit row never holds it.
+    const pin = body.kiosk_pin;
+    if (pin != null && pin !== '' && (typeof pin !== 'string' || !/^\d{4,8}$/.test(pin))) throw fail(400, 'err.invalid', { field: 'field.kiosk_pin' });
+    const pinHash = pin ? await hashPassword(pin) : null;
     const d = diff(before, next);
-    if (d) {
+    if (d || pinHash) {
       await db.transaction(async (trx) => {
-        await trx('stores').where({ id }).update({ ...next, updated_at: trx.fn.now() });
-        await audit(trx, req.admin, { action: 'store.update', storeId: id, entityId: id, label: next.name, ...d });
+        await trx('stores').where({ id }).update({ ...next, ...(pinHash && { kiosk_pin_hash: pinHash }), updated_at: trx.fn.now() });
+        if (d) await audit(trx, req.admin, { action: 'store.update', storeId: id, entityId: id, label: next.name, ...d });
+        if (pinHash) await audit(trx, req.admin, { action: 'store.kiosk_pin', storeId: id, entityId: id, label: next.name });
       });
     }
-    res.json({ id, ...next, can_edit: true });
+    res.json({ id, ...next, kiosk_pin_set: await pinSet(id), can_edit: true });
   });
 
   // Store scope for team and audit: an owner is pinned to their store; ?store_id narrows a super-admin.

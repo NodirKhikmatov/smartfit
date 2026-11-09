@@ -21,6 +21,7 @@ Caddy for HTTPS.
 ```bash
 nvm use                      # Node 22 (.nvmrc)
 npm install
+npm run vendor               # pose model for size-from-photo (9 MB, Google's MediaPipe URL, sha256-checked)
 cp .env.example .env         # every variable is optional in development
 npm run seed                 # demo data: 2 stores × ~75 items with demo images (wipes the DB!)
 npm run admin:create -- boss@example.uz   # super-admin; asks for the password
@@ -57,7 +58,9 @@ docker stop smartfit-testpg
 | `POSTGRES_PASSWORD` | — | docker compose only: the database password (compose builds `DATABASE_URL` from it, so letters and digits only, e.g. `openssl rand -hex 24`). Required by compose. |
 | `DOMAIN` | `localhost` | docker compose only: the HTTPS domain Caddy serves and gets a certificate for. |
 | `NODE_ENV` | empty | `production` requires `ADMIN_TOKEN_SECRET` and blocks `npm run seed`. compose sets it. |
-| `TRUST_PROXY` | empty | Number of reverse proxies in front of the app. compose sets `1` (Caddy), so client IPs (login lock, AI rate limit) and `https` (QR links) are right. Leave empty when the app is reached directly. |
+| `TRUST_PROXY` | empty | Number of reverse proxies in front of the app. compose sets `1` (Caddy), so client IPs (login lock, rate limits, open-cart cap) and `https` (QR links) are right. Leave empty when the app is reached directly. |
+| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN` | 60, 30, 300, 20, 30, 5 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat and the kiosk exit PIN. Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
+| `MAX_OPEN_CARTS_PER_IP` | 30 | Live carts (each holds stock for 15 min) one client IP may have at once; the next new cart → `429 too_many_carts`. `0` = off. |
 | `ERROR_WEBHOOK_URL` | empty | Optional error monitoring: every error log line is POSTed as JSON `{text, content, level, time}` (works with Slack, Discord and Mattermost incoming webhooks), at most 10 a minute. |
 
 Secrets live only in `.env` (git-ignored), never in code. The logs redact them anyway (see Logs below).
@@ -164,6 +167,24 @@ curl -X POST https://<domain>/api/sync/stock \
   or send at least that many).
 - A missing, wrong or deleted key → `401 {"code":"sync_key"}`. Errors are in Uzbek, or Russian with `?lang=ru`.
 
+## Kiosk (PWA, self-hosted assets, security headers)
+
+- Open `https://<domain>/kiosk?store=<id>` on the kiosk (Chrome: "Install app", or start it with `--kiosk`). It installs as a
+  fullscreen app (`/kiosk.webmanifest`), keeps the screen on (Wake Lock), re-enters fullscreen on the next touch, and a
+  service worker (`/kiosk-sw.js`) caches the app shell and `/vendor` files, never API answers or photos.
+- After 90 s without a touch it resets for the next customer and the start screen plays a slow attract loop.
+- **Staff exit:** hold the logo for 3 s and type the store's kiosk PIN (Sozlamalar › Do'kon, 4–8 digits; stored hashed,
+  each change is in the audit log). It leaves fullscreen until the page is reloaded. A browser started with `--kiosk`
+  needs the OS to close it; the PIN only covers the in-page lock.
+- Every kiosk pings `/api/kiosk/ping` once a minute; the admin dashboard lists them as online (seen in the last 3 min) or
+  offline with the last-seen time.
+- MediaPipe (size from photo) and Leaflet (delivery map) are served from `/vendor/...@<version>` out of their pinned npm
+  packages, the pose model from `vendor/` (`npm run vendor`; the Docker build does it and fails on a checksum mismatch).
+  Only OpenStreetMap map tiles still come from the internet.
+- Every response carries a Content-Security-Policy (same origin only, plus `tile.openstreetmap.org` images,
+  `frame-ancestors 'none'`), `Referrer-Policy`, `Permissions-Policy: camera=(self)`, `X-Content-Type-Options` and
+  `X-Frame-Options`. New UI code must not use inline `<script>`, `<style>` or `style="…"` (set styles from JS instead).
+
 ## Logs and error monitoring
 
 The server writes one JSON line per event to stdout/stderr (`{time, level, msg, ...}`), one line per request
@@ -235,6 +256,6 @@ the 2-week pilot.
 - [ ] Consent text on the camera screen reviewed (photo not saved; a small copy goes to Claude when the key is set).
 
 **Known limits to watch during the pilot**
-- No per-IP rate limit on `/api/recommend` and on opening carts (anyone could hold stock with many carts). Add one if it
-  shows up in the stats or the stock holds.
+- Per-IP rate limits and the open-cart cap (task 21) count a whole store's Wi-Fi as one client. If customers see
+  "So'rovlar juda ko'p", raise the `RATE_*` / `MAX_OPEN_CARTS_PER_IP` values.
 - One app instance only (Telegram long poll, outbox, in-memory limits).

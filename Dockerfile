@@ -6,6 +6,8 @@ COPY package.json package-lock.json ./
 # better-sqlite3 is an optional dev/test dependency; production runs on PostgreSQL only.
 RUN npm ci --omit=dev --omit=optional && npm cache clean --force
 COPY src ./src
+# Pose model for the size-from-photo step, from Google's MediaPipe URL; the build fails if its sha256 doesn't match.
+RUN node src/vendor.js
 COPY public ./public
 # Demo product illustrations, copied to uploads by `npm run seed` on a test server (the seed refuses production).
 COPY demo/images ./demo/images

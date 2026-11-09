@@ -134,7 +134,10 @@ function printFrame(title, css, fill) {
   document.body.append(frame);
   const d = frame.contentDocument;
   d.title = title;
-  d.head.append(Object.assign(d.createElement('style'), { textContent: css }));
+  // A constructed sheet, not a <style> element: the frame inherits the page's CSP (no inline styles).
+  const sheet = new frame.contentWindow.CSSStyleSheet();
+  sheet.replaceSync(css);
+  d.adoptedStyleSheets = [sheet];
   const mk = (tag, props = {}, ...kids) => {
     const e = Object.assign(d.createElement(tag), props);
     e.append(...kids.filter((k) => k != null));
@@ -355,6 +358,11 @@ async function loadDashboard(quiet) {
     heat(x.stock, x.low_stock_threshold),
     el('button', { type: 'button', className: 'icon-btn ghost', title: t('adm.products.edit'), ariaLabel: t('adm.products.edit_aria', { name: productName(x) }), onclick: () => openForm(x) }, icon('edit')))) :
     [el('li', { className: 'li-empty' }, emptyState({ ic: 'check', title: t('adm.dash.low_empty'), text: t('adm.dash.low_empty_text') }))]));
+  $('dashKiosks').replaceChildren(...(d.kiosks.length ? d.kiosks.map((k) => el('li', {},
+    el('div', { className: 'grow' }, el('strong', { textContent: t('adm.dash.kiosk_name', { id: k.id }) }),
+      el('div', { className: 'sizes', textContent: [!scope && me.role === 'super' && stores.find((s) => s.id === k.store_id)?.name, t('adm.dash.seen', { at: fmt.dateTime(k.last_seen_at) })].filter(Boolean).join(' · ') })),
+    el('span', { className: `badge ${k.online ? 'ok' : 'off'}`, textContent: t(k.online ? 'adm.dash.online' : 'adm.dash.offline') }))) :
+    [el('li', { className: 'li-empty' }, emptyState({ ic: 'info', title: t('adm.dash.kiosks_none'), text: t('adm.dash.kiosks_none_text') }))]));
 }
 
 // Line chart of revenue or recommendations per day, with the period total and its change against the previous period.
@@ -924,6 +932,8 @@ async function loadStore() {
     if (seq !== loads.store) return;
     stateBox($('storeLoadError'));
     for (const k of STORE_FIELDS) sf[k].value = s[k] ?? '';
+    sf.kiosk_pin.value = '';
+    $('pinState').textContent = t(s.kiosk_pin_set ? 'adm.set.pin_on' : 'adm.set.pin_off') + '.';
     $('storeFields').disabled = !s.can_edit;
     $('storeReadOnly').hidden = s.can_edit;
     $('storeSave').hidden = !s.can_edit;
@@ -943,6 +953,7 @@ sf.onsubmit = async (e) => {
     opens_at: v('opens_at') || null, closes_at: v('closes_at') || null,
     delivery_fee: Number(v('delivery_fee')), free_delivery_threshold: v('free_delivery_threshold') ? Number(v('free_delivery_threshold')) : null,
     telegram_chat_id: v('telegram_chat_id') || null, low_stock_threshold: Number(v('low_stock_threshold')),
+    ...(v('kiosk_pin') && { kiosk_pin: v('kiosk_pin') }),
   };
   try {
     const s = await call(`/stores/${storeId()}`, { method: 'PATCH', body });
@@ -951,6 +962,8 @@ sf.onsubmit = async (e) => {
       known.name = s.name; // sidebar picker and store names elsewhere
       show();
     }
+    sf.kiosk_pin.value = '';
+    $('pinState').textContent = t(s.kiosk_pin_set ? 'adm.set.pin_on' : 'adm.set.pin_off') + '.';
     toast(t('adm.set.saved'), { tone: 'ok' });
   } catch (err) { $('storeError').textContent = err.message; }
 };

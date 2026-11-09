@@ -15,7 +15,7 @@ const srcFiles = (dir = 'src') => readdirSync(new URL(`../${dir}`, import.meta.u
 
 // Every file with user-facing text. i18n.js counts only below the dictionary (its helpers use keys too).
 const PAGES = ['public/app/index.html', 'public/app/order.html', 'public/admin/index.html'];
-const SCRIPTS = ['public/app/app.js', 'public/app/idle.js', 'public/app/pose.js', 'public/app/flow.js', 'public/app/keypad.js', 'public/app/order.js', 'public/admin/admin.js', 'public/admin/util.js', 'public/admin/charts.js', 'public/shared/ui.js', ...srcFiles()];
+const SCRIPTS = ['public/app/app.js', 'public/app/idle.js', 'public/app/pose.js', 'public/app/flow.js', 'public/app/keypad.js', 'public/app/kiosk.js', 'public/app/order.js', 'public/admin/admin.js', 'public/admin/util.js', 'public/admin/charts.js', 'public/shared/ui.js', ...srcFiles()];
 const i18nSrc = read('public/shared/i18n.js');
 const sources = Object.fromEntries([...PAGES, ...SCRIPTS].map((f) => [f, read(f)]));
 sources['public/shared/i18n.js#helpers'] = i18nSrc.slice(i18nSrc.indexOf('export const DICT'));
@@ -54,6 +54,12 @@ test('both languages have exactly the same keys, placeholders and plural forms',
     }
   }
   assert.deepEqual(LANGS, ['uz', 'ru']);
+});
+
+test('no key is written twice in one language (a later copy would silently win)', () => {
+  const counts = {};
+  for (const [, k] of i18nSrc.matchAll(/^  '([^']+)':/gm)) counts[k] = (counts[k] ?? 0) + 1;
+  assert.deepEqual(Object.keys(counts).filter((k) => counts[k] > 2), [], 'uz + ru = 2 definitions per key');
 });
 
 test('every key used in code exists, and every dictionary key is used', () => {

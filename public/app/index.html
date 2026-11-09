@@ -165,6 +165,18 @@
   <div><strong id="barCount"></strong><span class="muted" id="barTotal"></span></div>
   <button class="primary" id="barGo"><span data-i18n="kiosk.bar.go"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></button>
 </div>
+<!-- Kiosk only: staff exit after a 3 s press on the logo (public/app/kiosk.js) -->
+<dialog id="staffDlg" class="narrow" aria-labelledby="staffTitle">
+  <form id="staffForm" novalidate>
+    <h2 id="staffTitle" data-i18n="kiosk.staff.title"></h2>
+    <p class="muted" data-i18n="kiosk.staff.text"></p>
+    <label class="field"><span data-i18n="kiosk.staff.pin"></span>
+      <input name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" data-keys="digits" aria-describedby="staffErr">
+      <span class="field-error" id="staffErr" role="alert"></span>
+    </label>
+    <div class="dialog-actions"><button type="button" id="staffCancel" data-i18n="common.cancel"></button><button class="primary" id="staffGo" data-i18n="kiosk.staff.exit"></button></div>
+  </form>
+</dialog>
 <script type="module" src="/app/app.js"></script>
 </body>
 </html>

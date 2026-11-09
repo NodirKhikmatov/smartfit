@@ -1,6 +1,7 @@
 import { watchIdle } from './idle.js';
 import { loadPose, measure } from './pose.js';
 import { keypad } from './keypad.js';
+import { kioskShell, attract } from './kiosk.js';
 import { CLOTHES, SHOES, nextError, toRequest, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
 import { icon, confirmDialog, showAfter, skeletonCard, toast } from '/shared/ui.js';
 import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName } from '/shared/i18n.js';
@@ -793,12 +794,12 @@ function renderSum() {
 }
 
 // Map pin for delivery: Leaflet + OpenStreetMap tiles, loaded only when delivery is picked. Without it the address alone is enough.
-const LEAFLET = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/';
+const LEAFLET = '/vendor/leaflet@1.9.4/'; // self-hosted (src/vendor.js); tiles still come from OpenStreetMap
 let leaflet = null, map = null, marker = null, pin = null;
 function loadMap() {
   leaflet ??= new Promise((ok, no) => {
-    document.head.append(el('link', { rel: 'stylesheet', href: LEAFLET + 'leaflet.css', integrity: 'sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H', crossOrigin: 'anonymous' }));
-    document.head.append(el('script', { src: LEAFLET + 'leaflet.js', integrity: 'sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH', crossOrigin: 'anonymous', onload: ok, onerror: no }));
+    document.head.append(el('link', { rel: 'stylesheet', href: LEAFLET + 'leaflet.css' }));
+    document.head.append(el('script', { src: LEAFLET + 'leaflet.js', onload: ok, onerror: no }));
   });
   leaflet.then(() => {
     if (map) return map.invalidateSize();
@@ -906,7 +907,11 @@ function reset() {
   go('start', { replace: true });
   loadStore();
 }
-if (kiosk) watchIdle(document, { onIdle: reset });
+if (kiosk) {
+  watchIdle(document, { onIdle: () => { reset(); attract(true); } });
+  kioskShell({ storeId, api });
+  attract(true);
+}
 
 // Refresh: restore the saved screen and the form's numbers (never a photo, name or phone), then ask the server again.
 const saved = loadRoute();

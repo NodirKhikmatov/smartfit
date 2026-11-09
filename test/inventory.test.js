@@ -48,7 +48,8 @@ test('migration 010: unique SKU per store, threshold default 1, existing lows pr
   try {
     await m.migrate.latest();
     await seed(m);
-    await m.migrate.down();
+    await m.migrate.down(); // 011
+    await m.migrate.down(); // 010
     const p = await m('products').where({ sku: 'SF-TP-01' }).first();
     await m('product_stock').where({ product_id: p.id }).update({ quantity: 0, reserved: 0 });
     await m.migrate.up();

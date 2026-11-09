@@ -8,10 +8,11 @@ import { sizesFor } from '../db/seed.js';
 import { unitPrice } from '../recommend/engine.js';
 import { REC } from '../recommend/routes.js';
 import { qrSvg, publicBase } from '../qr.js';
+import { clientKey } from '../limits.js';
 
 export const HOLD_MS = 15 * 60 * 1000;
 export const HANDOFF_MS = 5 * 60 * 1000; // how long the kiosk's "continue on your phone" QR works
-const MAX_UNITS = 20; // shortcut: per-cart cap only; anyone can open many carts, add a per-IP limit in task 11 if holds get abused
+const MAX_UNITS = 20; // per cart; open carts per client are capped by maxOpenCarts (task 21)
 const DELIVERY_RADIUS_KM = 30; // "within the city" = the map pin is this close to the store
 const TOKEN = /^[a-f0-9]{32}$/;
 const iso = (ms) => new Date(ms).toISOString(); // ISO strings compare correctly in SQLite text and Postgres timestamptz
@@ -214,7 +215,7 @@ function parseItems(items) {
 
 // Public, keyed by an unguessable cart token. The token is the customer's only handle on the cart.
 // `link(notifyToken)` → how the customer subscribes to order messages ({ url, svg } for Telegram), or null when off.
-export function createCartRouter(db, { methods = CASHIER, link = () => null } = {}) {
+export function createCartRouter(db, { methods = CASHIER, link = () => null, maxOpenCarts = 0 } = {}) {
   const r = express.Router();
   const view = (cart) => cartView(db, cart, Object.keys(methods));
   r.use(async (req, res, next) => {
@@ -232,8 +233,14 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
       if (cart && Number.isInteger(b.store_id) && cart.store_id !== b.store_id) cart = null; // phone scanned another store's QR
       if (!cart) {
         if (!Number.isInteger(b.store_id) || !(await trx('stores').where({ id: b.store_id }).first('id'))) throw fail(404, 'err.store_not_found');
+        // Inventory DoS guard (X2): one client can't hold stock in more than maxOpenCarts live carts.
+        const client = clientKey(req.ip);
+        if (maxOpenCarts) {
+          const [{ n }] = await trx('carts').where({ client }).where('expires_at', '>', iso(Date.now())).count({ n: '*' });
+          if (Number(n) >= maxOpenCarts) throw fail(429, 'err.too_many_carts');
+        }
         const token = randomBytes(16).toString('hex');
-        await trx('carts').insert({ store_id: b.store_id, token, expires_at: iso(Date.now() + HOLD_MS) });
+        await trx('carts').insert({ store_id: b.store_id, token, client, expires_at: iso(Date.now() + HOLD_MS) });
         cart = await trx('carts').where({ token }).first();
       }
       const [{ n }] = await trx('cart_items').where({ cart_id: cart.id }).sum({ n: 'quantity' });
@@ -318,7 +325,7 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null } = 
     // One conditional UPDATE: a second scan (or a race) finds no row.
     const n = typeof handoff === 'string' && TOKEN.test(handoff)
       ? await db('carts').where({ handoff_token: handoff }).where('handoff_expires_at', '>', iso(now)).where('expires_at', '>', iso(now))
-        .update({ token, handoff_token: null, handoff_expires_at: null, expires_at: iso(now + HOLD_MS), updated_at: db.fn.now() })
+        .update({ token, client: clientKey(req.ip), handoff_token: null, handoff_expires_at: null, expires_at: iso(now + HOLD_MS), updated_at: db.fn.now() })
       : 0;
     if (!n) throw fail(404, 'err.handoff_invalid');
     res.json(await view(await db('carts').where({ token }).first()));

@@ -109,6 +109,10 @@
             </div>
             <ul class="low-list" id="dashLow"></ul>
           </section>
+          <section class="card panel span-2" aria-labelledby="dashKioskTitle">
+            <div class="panel-head"><div><h2 id="dashKioskTitle" data-i18n="adm.dash.kiosks"></h2><p class="panel-sub" data-i18n="adm.dash.kiosks_sub"></p></div></div>
+            <ul class="low-list" id="dashKiosks"></ul>
+          </section>
         </div>
       </section>
 
@@ -235,6 +239,7 @@
                 <label class="field"><span data-i18n="field.free_threshold"></span> <input name="free_delivery_threshold" type="number" min="1" step="1" inputmode="numeric"><span class="hint" data-i18n="adm.set.free_hint"></span></label>
                 <label class="field span-all"><span data-i18n="field.telegram_chat"></span> <input name="telegram_chat_id" inputmode="numeric" pattern="-?[0-9]{1,15}" maxlength="16" autocomplete="off"><span class="hint" data-i18n="adm.set.chat_hint"></span></label>
                 <label class="field"><span data-i18n="field.low_stock"></span> <input name="low_stock_threshold" type="number" min="0" max="1000" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.low_hint"></span></label>
+                <label class="field"><span data-i18n="field.kiosk_pin"></span> <input name="kiosk_pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" autocomplete="new-password" aria-describedby="pinState"><span class="hint"><strong id="pinState"></strong> <span data-i18n="adm.set.kiosk_pin_hint"></span></span></label>
               </div>
             </fieldset>
             <p class="error" id="storeError" role="alert"></p>

@@ -7,7 +7,8 @@ import { testDb, tableNames } from './helpers/db.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 import { estimateSize } from '../src/size/size.js';
-import { poseRatios, MEDIAPIPE } from '../public/app/pose.js';
+import { poseRatios, MEDIAPIPE, MODEL as POSE_MODEL } from '../public/app/pose.js';
+import { VENDOR, MODEL } from '../src/vendor.js';
 
 // Ratios that the size chart reads as M for a 176 cm man (shoulder 40 cm, hip 33.7 cm).
 const M_POSE = { shoulder: 0.227, hip: 0.145 };
@@ -106,8 +107,10 @@ test('poseRatios: widths divided by the eye-to-heel span; null when the full bod
   assert.equal(poseRatios(lunge, 1000, 1000), null, 'legs spread wide');
 });
 
-test('MediaPipe loads from an exact pinned CDN version', () => {
-  assert.match(MEDIAPIPE, /^https:\/\/cdn\.jsdelivr\.net\/npm\/@mediapipe\/tasks-vision@\d+\.\d+\.\d+$/);
+test('MediaPipe loads from the self-hosted, exact pinned version (task 21)', () => {
+  assert.equal(MEDIAPIPE, VENDOR.mediapipe.path);
+  assert.match(MEDIAPIPE, /^\/vendor\/tasks-vision@\d+\.\d+\.\d+$/);
+  assert.equal(POSE_MODEL, MODEL.path);
 });
 
 // --- API and privacy

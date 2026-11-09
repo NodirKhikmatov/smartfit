@@ -1,7 +1,7 @@
-// Body measurement in the browser with MediaPipe Pose Landmarker (pinned CDN build).
+// Body measurement in the browser with MediaPipe Pose Landmarker, self-hosted under /vendor (src/vendor.js; a test keeps these in sync).
 // Only two ratios leave the device; the image is never uploaded, stored or logged.
-export const MEDIAPIPE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35';
-const MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task';
+export const MEDIAPIPE = '/vendor/tasks-vision@0.10.35';
+export const MODEL = '/vendor/models/pose_landmarker_full-5134a3aa.task';
 // Eyes, shoulders, hips, ankles and heels must all be in frame for a full-body measurement.
 const NEEDED = [2, 5, 11, 12, 23, 24, 27, 28, 29, 30];
 

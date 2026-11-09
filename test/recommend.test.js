@@ -14,7 +14,7 @@ before(async () => {
   await db.migrate.latest();
   await seed(db);
   tashkent = (await db('stores').orderBy('id').first()).id;
-  server = createApp(db, { weather: async () => fakeWeather }).listen(0);
+  server = createApp(db, { weather: async () => fakeWeather, limits: { recommend: 0 } }).listen(0); // the coverage test sends 120 requests at once
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });

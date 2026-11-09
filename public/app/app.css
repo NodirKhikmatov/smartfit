@@ -15,6 +15,7 @@ main { max-width: 47.5rem; margin: 0 auto; padding: var(--s-5) var(--s-4) var(--
 html.kiosk main { max-width: 60rem; padding-inline: var(--s-6); }
 html.has-bar main { padding-bottom: 8rem; }
 html.keypad-open main { padding-bottom: 20rem; }
+html.kiosk #staffDlg { margin-top: var(--s-5); } /* always above the on-screen digits, so it never jumps when they hide */
 html.keypad-open input:focus { border-color: var(--accent); box-shadow: var(--ring); } /* the field the keypad types into */
 [data-screen] h1 { margin: var(--s-2) 0 var(--s-5); }
 html.kiosk [data-screen] h1 { font-size: var(--text-4xl); }
@@ -37,6 +38,16 @@ html.kiosk .lookbook { order: 0; grid-template-columns: 1fr 1fr; gap: var(--s-4)
 html.kiosk .lookbook img { border-radius: var(--r-lg); box-shadow: var(--shadow-2); }
 html.kiosk .lookbook img:nth-child(even) { transform: translateY(var(--s-6)); }
 html.kiosk .attract .go { min-height: 4.5rem; font-size: var(--text-xl); }
+/* Attract loop (task 21): after idle the looks take turns stepping forward and "Boshlash" breathes; any touch stops it. */
+@media (prefers-reduced-motion: no-preference) {
+  html.attract-loop .lookbook img { animation: look 12s var(--ease-in-out) infinite; }
+  html.attract-loop .lookbook img:nth-child(2) { animation-delay: -9s; }
+  html.attract-loop .lookbook img:nth-child(3) { animation-delay: -6s; }
+  html.attract-loop .lookbook img:nth-child(4) { animation-delay: -3s; }
+  html.attract-loop .attract .go { animation: nudge 3s var(--ease-in-out) infinite; }
+}
+@keyframes look { 0%, 25%, 100% { scale: 1; opacity: .8; } 8%, 17% { scale: 1.05; opacity: 1; } }
+@keyframes nudge { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); } 50% { box-shadow: 0 0 0 .6rem var(--accent-soft); } }
 /* Portrait kiosk (1080×1920, the usual stand): one stacked column filling the height. Lookbook on top as a wide band,
    then the big heading, weather and "Boshlash" at thumb height at the bottom. */
 @media (orientation: portrait) and (min-width: 48em) {

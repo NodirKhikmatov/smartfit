@@ -10,6 +10,7 @@ import { releaseExpired, markPaid, orderView, nextStatuses, changeStatus, stamp 
 import { LANGS, errorText, t } from '../../public/shared/i18n.js';
 import { dbTime } from '../recommend/routes.js';
 import { audit, diff } from './audit.js';
+import { kioskStatus } from '../kiosk.js';
 import { publicTeamRoutes, settingsRoutes, ROLES } from './settings.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
@@ -680,6 +681,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
       waiting: { total: open.length, unpaid: open.filter((o) => o.payment_status === 'pending').length },
       top_sold: sold.map((x) => ({ ...x, units: Number(x.units), revenue: Number(x.revenue) })),
       low_stock: { total: Number(lowTotal), items: await withStock(low) },
+      kiosks: await kioskStatus(inScope(req, db('kiosks'))),
     });
   });
 
