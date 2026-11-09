@@ -46,6 +46,26 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
   return [...byId.values()];
 }
 
+// Task 24, missed demand: items this weather and gender would have been offered, but whose size (the customer's,
+// after the fit shift) has no free stock. Accessories and shoes without a size are left out: no size was asked for.
+// → [{ product_id, size }].
+export async function missedItems(db, { storeId, gender, sizes, temperature }) {
+  const rows = await db('products as p').leftJoin('product_stock as s', 's.product_id', 'p.id')
+    .where('p.store_id', storeId)
+    .whereIn('p.gender', [gender, 'unisex'])
+    .whereIn('p.category', Object.keys(sizeKey).filter((c) => sizes[sizeKey[c]]))
+    .whereRaw('p.temp_min <= cast(? as real) and p.temp_max >= cast(? as real)', [temperature, temperature])
+    .orderBy(['p.id', 's.id'])
+    .select('p.id', 'p.category', 'p.fit_offset', 's.size', db.raw('s.quantity - s.reserved as free'));
+  const free = new Map(rows.map((r) => [`${r.id}:${r.size}`, Number(r.free)]));
+  const products = [...new Map(rows.map((r) => [r.id, r])).values()];
+  const fits = await fitOf(db, products);
+  return products.flatMap((p) => {
+    const size = shiftSize(sizesFor(p.category), sizes[sizeKey[p.category]], fits.get(p.id).offset);
+    return (free.get(`${p.id}:${size}`) ?? 0) > 0 ? [] : [{ product_id: p.id, size }];
+  });
+}
+
 // Spec colour rule: neutrals go with anything, never two bright colours in one outfit. Brown, cream, olive and
 // denim blue count as neutral here too (wardrobe basics).
 const NEUTRAL = new Set(['qora', 'oq', 'kulrang', "to'q ko'k", 'bej', 'jigarrang', 'krem', 'zaytun', "ko'k"]);

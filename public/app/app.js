@@ -1,7 +1,7 @@
 import { watchIdle } from './idle.js';
 import { loadPose, measure } from './pose.js';
 import { keypad } from './keypad.js';
-import { kioskShell, attract } from './kiosk.js';
+import { kioskShell, attract, kioskDevice, randomId } from './kiosk.js';
 import { CLOTHES, SHOES, nextError, toRequest, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
 import { icon, confirmDialog, showAfter, skeletonCard, toast } from '/shared/ui.js';
 import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName } from '/shared/i18n.js';
@@ -76,7 +76,17 @@ const ENTER = {
   cart: () => renderCartScreen(),
 };
 const PARENT = { form: 'start', camera: 'form', results: 'form', cart: () => (request ? 'results' : 'start'), done: 'start' };
+// Funnel drop-off (task 24): one random id per customer visit, one event per step reached (the server keeps the first).
+// Only ids and the step: no sizes, photo, name or phone. Forgotten at the kiosk reset.
+const FUNNEL = { form: 'start', camera: 'size', results: 'outfits', cart: 'cart', done: 'order' };
+let visit = null;
+function track(name) {
+  if (!FUNNEL[name] || !(storeId > 0)) return;
+  visit ??= randomId();
+  api('/funnel', { store_id: storeId, visit, step: FUNNEL[name], ...(kiosk && { device: kioskDevice() }) }).catch(() => {});
+}
 function render(name) {
+  track(name);
   if (name !== 'camera') stopCamera();
   if (name !== 'cart') clearInterval(holdTimer);
   current = name;
@@ -900,7 +910,7 @@ function reset() {
   stopHandoff();
   if (cart) api(`/cart/${cart.token}`, null, 'DELETE').catch(() => {}); // give the held stock back now, not in 15 min
   setCart(null);
-  request = body = sizeInfo = lastResult = lastOrder = null;
+  request = body = sizeInfo = lastResult = lastOrder = visit = null;
   loadSeq++; // a results request still in flight must not draw for the next customer
   if (kiosk) {
     setLang('uz'); // the next customer starts in Uzbek

@@ -32,12 +32,7 @@ export function kioskShell({ storeId, api }) {
   }, { capture: true, passive: true });
   document.addEventListener('keydown', () => attract(false), { capture: true });
 
-  // Heartbeat: a random id per kiosk device, kept in localStorage (not personal data).
-  let device = null;
-  try {
-    device = localStorage.getItem('sfKiosk');
-    if (!/^[a-f0-9]{32}$/.test(device ?? '')) localStorage.setItem('sfKiosk', (device = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('')));
-  } catch {}
+  const device = kioskDevice();
   const ping = () => storeId > 0 && device && api('/kiosk/ping', { store_id: storeId, device }).catch(() => {});
   ping();
   setInterval(ping, PING_MS);
@@ -80,6 +75,17 @@ export function kioskShell({ storeId, api }) {
       $('staffGo').disabled = false;
     }
   };
+}
+
+// Heartbeat id: random per kiosk device, kept in localStorage (not personal data). Also tags the funnel events (task 24).
+export const randomId = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+export function kioskDevice() {
+  let device = null;
+  try {
+    device = localStorage.getItem('sfKiosk');
+    if (!/^[a-f0-9]{32}$/.test(device ?? '')) localStorage.setItem('sfKiosk', (device = randomId()));
+  } catch {}
+  return device;
 }
 
 // Attract loop: the start screen slowly cycles through today's looks until someone touches the screen.

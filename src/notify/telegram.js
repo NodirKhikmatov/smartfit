@@ -5,7 +5,8 @@
 import { qrSvg } from '../qr.js';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { smsSender } from './sms.js';
-import { fittingView } from '../admin/routes.js';
+import { fittingView, dayStart, DAY_MS } from '../admin/routes.js';
+import { demandItems, funnelStats } from '../demand.js';
 import { dbTime } from '../recommend/routes.js';
 
 const DONE = ['delivered', 'cancelled']; // nothing more to say after these
@@ -133,6 +134,64 @@ export async function flushDemoRequests(db, telegram, chatId = process.env.TELEG
   }
 }
 
+// Task 24: the weekly owner report, Monday 09:00 Tashkent, to stores.report_chat_id. Outbox like the others:
+// stores.report_week holds the Monday of the last report sent, so each week goes once; a network error retries next
+// round; without a chat id nothing is sent or marked. Only the newest due week is ever sent (no backlog).
+const WEEK_MS = 7 * DAY_MS;
+const TZ_MS = 5 * 60 * 60 * 1000; // Asia/Tashkent is UTC+5 all year (no DST)
+// The Monday (Tashkent date, YYYY-MM-DD) of the newest report that is due at `now`.
+export function reportWeek(now = Date.now()) {
+  const local = new Date(now + TZ_MS);
+  const monday = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() - ((local.getUTCDay() + 6) % 7));
+  const key = (ms) => new Date(ms).toISOString().slice(0, 10);
+  return now >= Date.parse(`${key(monday)}T09:00:00+05:00`) ? key(monday) : key(monday - WEEK_MS);
+}
+
+const sizeText = (size) => (size === 'ONE' ? 'yagona razmer' : size);
+const ddmm = (ms) => new Date(ms + TZ_MS).toISOString().slice(5, 10).split('-').reverse().join('.');
+// The text for the 7 days before `week` (its Monday 00:00): sales, conversion, top items, missed demand top 5, low stock.
+export async function weeklyReport(db, store, week) {
+  const to = dayStart(week), from = to - WEEK_MS;
+  const iso = (ms) => new Date(ms).toISOString();
+  const paid = () => db('orders as o').where('o.store_id', store.id).where('o.payment_status', 'paid').whereNot('o.status', 'cancelled')
+    .where('o.paid_at', '>=', iso(from)).where('o.paid_at', '<', iso(to));
+  const [{ n, revenue }] = await paid().count({ n: '*' }).sum({ revenue: 'o.total' });
+  const top = await paid().join('order_items as i', 'i.order_id', 'o.id').join('products as p', 'p.id', 'i.product_id')
+    .groupBy('i.product_id', 'p.name').select('p.name').sum({ units: 'i.quantity' })
+    .orderBy([{ column: 'units', order: 'desc' }, { column: 'i.product_id' }]).limit(3);
+  const scope = (q, col) => q.where(col, store.id);
+  const { total: f } = await funnelStats(db, scope, { from, to });
+  const missed = await demandItems(db, scope, { from, to, limit: 5 });
+  const free = 'ps.quantity - ps.reserved';
+  const low = await db('product_stock as ps').join('products as p', 'p.id', 'ps.product_id').where('p.store_id', store.id)
+    .whereRaw(`${free} <= ?`, [store.low_stock_threshold]).orderByRaw(`${free}, p.name, ps.id`).select('p.name', 'ps.size', db.raw(`${free} as free`));
+  const list = (rows, line, none) => (rows.length ? rows.map(line) : [`• ${none}`]);
+  return [
+    `${store.name}: haftalik hisobot, ${ddmm(from)}–${ddmm(to - 1)}`,
+    `Savdo: ${Number(n)} ta buyurtma, ${som(Number(revenue ?? 0))} so'm`,
+    f.start ? `Konversiya: ${Math.round((f.order / f.start) * 100)}% (${f.start} ta tashrifdan ${f.order} ta buyurtma)` : "Konversiya: tashriflar bo'lmadi",
+    '', 'Eng ko\'p sotilgan:', ...list(top, (x) => `• ${x.name} — ${Number(x.units)} dona`, "yo'q"),
+    '', 'Talab bor, lekin qolmagan (top 5):', ...list(missed, (x) => `• ${x.name} — ${sizeText(x.size)}: ${x.missed} marta`, "yo'q"),
+    '', `Kam qolgan o'lchamlar: ${low.length} ta`, ...low.slice(0, 5).map((x) => `• ${x.name} — ${sizeText(x.size)}: ${Number(x.free) > 0 ? `${x.free} dona qoldi` : 'tugadi'}`),
+  ].join('\n');
+}
+
+export async function flushWeeklyReport(db, telegram, now = Date.now()) {
+  if (!telegram) return;
+  const week = reportWeek(now);
+  const due = await db('stores').whereNotNull('report_chat_id').where((w) => w.whereNull('report_week').orWhere('report_week', '<', week))
+    .orderBy('id').select('id', 'name', 'report_chat_id', 'low_stock_threshold');
+  for (const s of due) {
+    try {
+      await telegram(s.report_chat_id, await weeklyReport(db, s, week));
+    } catch (err) {
+      console.error(`telegram: weekly report for store ${s.id} not sent:`, err.message);
+      if (err.code !== 403 && err.code !== 400) continue; // network, 429, 5xx, a failed query: try again next round
+    }
+    await db('stores').where({ id: s.id }).update({ report_week: week });
+  }
+}
+
 // "/start <token>" from the order link → the order's messages go to this chat. The first chat to link keeps it.
 export async function handleUpdate(db, update, send) {
   const m = update?.message;
@@ -170,6 +229,7 @@ export function startNotifications(db, { telegram = telegramConfig(), sms = smsS
     await flushFitting(db, send).catch((err) => console.error('fitting notify failed:', err.message));
     await flushLowStock(db, send).catch((err) => console.error('low-stock notify failed:', err.message));
     await flushDemoRequests(db, send).catch((err) => console.error('demo request notify failed:', err.message));
+    await flushWeeklyReport(db, send).catch((err) => console.error('weekly report failed:', err.message));
     busy = false;
   };
   setInterval(flush, everyMs).unref();

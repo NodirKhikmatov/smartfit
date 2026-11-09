@@ -71,6 +71,10 @@ async function orgBRecords() {
   const key = (await admin('POST', '/sync-keys', { name: 'Kassa B' }, ownerB)).body;
   await createAdmin(db, { email: `b.mgr${Date.now()}@smartfit.uz`, password: 'bmgr-pass-1', storeId: b1, role: 'manager' });
   const member = await db('admins').where({ store_id: b1, role: 'manager' }).orderBy('id', 'desc').first();
+  // Task 24: org B's missed demand (with a SKU only org B has) and a funnel visit.
+  await db('products').where({ id: product.id }).update({ sku: 'ORGB-ONLY-1' });
+  await db('missed_demand').insert({ store_id: b1, product_id: product.id, size: 'L', session: 'b'.repeat(32), source: 'recommend' });
+  await db('funnel_events').insert({ store_id: b1, visit: 'c'.repeat(32), step: 'order' });
   return { product, order, fitting, invite, key, member };
 }
 
@@ -136,6 +140,20 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       assert.equal(r.body.recommendations ?? r.body.totals?.recommendations ?? 0, 0);
     },
     'GET /dashboard': async () => noB(await admin('GET', '/dashboard', undefined, ownerA)),
+    'GET /demand': async () => {
+      noB(await admin('GET', '/demand?days=30', undefined, ownerA));
+      const r = await admin('GET', `/demand?store_id=${b1}`, undefined, ownerA);
+      assert.equal(r.body.items.length, 0, '?store_id cannot widen the scope');
+      assert.equal(r.body.funnel.total.start, 0);
+      assert.equal(r.body.funnel.per_kiosk.length, 0);
+    },
+    'GET /demand/export': async () => {
+      for (const q of ['', `?store_id=${b1}`]) {
+        const r = await admin('GET', `/demand/export${q}`, undefined, ownerA);
+        assert.equal(r.status, 200);
+        assert.ok(!String(r.body).includes('ORGB-ONLY-1'), 'no org B row in the export');
+      }
+    },
     'GET /stores/:id': async () => refused(await admin('GET', `/stores/${b1}`, undefined, ownerA)),
     'PATCH /stores/:id': async () => refused(await admin('PATCH', `/stores/${b1}`, { delivery_fee: 1 }, ownerA)),
     'POST /stores': async () => {
@@ -233,7 +251,8 @@ test('migration 012: existing stores, owners, managers and invites land in one d
     // An owner without a store is now allowed (made by an org invite).
     await m('admins').insert({ email: 'new.owner@old.uz', password_hash: pw, role: 'owner', organization_id: orgs[0].id });
     // Reachable through the API: the old owner signs in and sees both of their organisation's stores.
-    await m.migrate.up(); // 013: the app runs on the current schema
+    await m.migrate.up(); // 013
+    await m.migrate.up(); // 014: the app runs on the current schema
     const app = createApp(m, { telegram: null }).listen(0);
     await new Promise((r) => app.once('listening', r));
     try {
@@ -246,6 +265,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
+    await m.migrate.down(); // 014
     await m.migrate.down(); // 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));

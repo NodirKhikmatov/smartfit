@@ -73,12 +73,18 @@ export async function createInvite(req, q, { email, role, storeId, orgId }) {
 }
 
 // Store profile as the settings form edits it.
-const STORE_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'opens_at', 'closes_at', 'telegram_chat_id', 'low_stock_threshold'];
+const STORE_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'opens_at', 'closes_at', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id'];
 function validStore(b) {
   const num = (v, min, max, field) => {
     const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
     if (typeof n !== 'number' || !Number.isFinite(n) || n < min || n > max) throw fail(400, 'err.invalid', { field });
     return n;
+  };
+  // Telegram chat ids: up to 13 digits, negative for groups (-100…); 15 digits still fit a double exactly.
+  const chat = (v, field) => {
+    if (v == null || v === '') return null;
+    if (!/^-?\d{1,15}$/.test(String(v).trim())) throw fail(400, 'err.invalid', { field });
+    return Number(String(v).trim());
   };
   const time = (v, field) => {
     if (v == null || v === '') return null;
@@ -95,15 +101,11 @@ function validStore(b) {
     free_delivery_threshold: b.free_delivery_threshold == null || b.free_delivery_threshold === '' ? null : int(b.free_delivery_threshold, 1, 1e9, 'field.free_threshold'),
     opens_at: time(b.opens_at, 'field.hours'),
     closes_at: time(b.closes_at, 'field.hours'),
-    telegram_chat_id: null,
+    telegram_chat_id: chat(b.telegram_chat_id, 'field.telegram_chat'),
+    report_chat_id: chat(b.report_chat_id, 'field.report_chat'), // task 24: the owner's weekly report
     low_stock_threshold: int(typeof b.low_stock_threshold === 'string' && b.low_stock_threshold.trim() !== '' ? Number(b.low_stock_threshold) : b.low_stock_threshold, 0, 1000, 'field.low_stock'),
   };
   if ((s.opens_at === null) !== (s.closes_at === null)) throw fail(400, 'err.invalid', { field: 'field.hours' });
-  // Telegram chat ids: up to 13 digits, negative for groups (-100…); 15 digits still fit a double exactly.
-  if (b.telegram_chat_id != null && b.telegram_chat_id !== '') {
-    if (!/^-?\d{1,15}$/.test(String(b.telegram_chat_id).trim())) throw fail(400, 'err.invalid', { field: 'field.telegram_chat' });
-    s.telegram_chat_id = Number(String(b.telegram_chat_id).trim());
-  }
   return s;
 }
 

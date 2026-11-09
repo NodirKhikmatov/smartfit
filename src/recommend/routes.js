@@ -2,7 +2,8 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { sizesFor } from '../db/seed.js';
 import { fail, langOf } from '../admin/routes.js';
-import { filterCandidates, ruleOutfits } from './engine.js';
+import { filterCandidates, ruleOutfits, missedItems } from './engine.js';
+import { logMissed } from '../demand.js';
 import { parsePhoto, applyStylist, withDeadline, TIMEOUT_MS } from './stylist.js';
 
 const pick = (v, allowed, label, required) => {
@@ -89,6 +90,10 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       rec = randomBytes(16).toString('hex');
       await db('recommendation_logs').insert({ ...log, store_id: store.id, token: rec });
     }
+    // Task 24: what this customer wanted but the shelf has none of, once per results screen (rec). Never fails the answer.
+    await missedItems(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature })
+      .then((items) => logMissed(db, { storeId: store.id, session: rec, items, source: 'recommend' }))
+      .catch((err) => console.error('missed demand not logged:', err.message));
     res.json({ weather: w, budget, over_budget, partial, relaxed, notice, source, style_guess, outfits, rec });
   });
 

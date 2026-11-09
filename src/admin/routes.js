@@ -14,6 +14,7 @@ import { kioskStatus } from '../kiosk.js';
 import { publicTeamRoutes, settingsRoutes, ROLES } from './settings.js';
 import { orgRoutes } from './orgs.js';
 import { fitOf } from '../size/size.js';
+import { demandItems, funnelStats } from '../demand.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -146,12 +147,12 @@ const IMAGE_TYPES = [
   ['webp', (b) => b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP'],
 ];
 const STATS_TZ = 'Asia/Tashkent'; // every store is in Uzbekistan (UTC+5, no DST)
-const DAY_MS = 86400000;
-const dayKey = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: STATS_TZ });
-const dayStart = (key) => Date.parse(`${key}T00:00:00+05:00`);
+export const DAY_MS = 86400000;
+export const dayKey = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: STATS_TZ });
+export const dayStart = (key) => Date.parse(`${key}T00:00:00+05:00`);
 const iso = (ms) => new Date(ms).toISOString(); // paid_at / expires_at are written as ISO strings (cart.js)
 // SQLite gives 'YYYY-MM-DD HH:MM:SS' (UTC) strings, Postgres gives Date objects.
-const msOf = (v) => (v instanceof Date ? v.getTime() : Date.parse(`${String(v).replace(' ', 'T')}${String(v).includes('Z') || String(v).includes('+') ? '' : 'Z'}`));
+export const msOf = (v) => (v instanceof Date ? v.getTime() : Date.parse(`${String(v).replace(' ', 'T')}${String(v).includes('Z') || String(v).includes('+') ? '' : 'Z'}`));
 
 // ?from&to = Tashkent days (YYYY-MM-DD, inclusive) on a created_at column.
 export function dateRange(q, col, { from, to }) {
@@ -734,6 +735,29 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
         return { product_id, name: p?.name ?? null, name_ru: p?.name_ru ?? null, category: p?.category ?? null, count };
       }),
     });
+  });
+
+  // Task 24 "Talab": missed demand by product and size with the restock suggestion, and the funnel by step per day and
+  // per kiosk, over the last `days` (7, 14 or 30; 14 by default, the window the restock suggestion is meant for).
+  const demandWindow = (req) => {
+    const days = [7, 30].includes(Number(req.query.days)) ? Number(req.query.days) : 14;
+    const keys = Array.from({ length: days }, (_, i) => dayKey(Date.now() - (days - 1 - i) * DAY_MS));
+    return { days, keys, from: dayStart(keys[0]), scope: (q, col) => inScope(req, q, col) };
+  };
+  r.get('/demand', async (req, res) => {
+    const { days, keys, from, scope } = demandWindow(req);
+    res.json({ days, items: await demandItems(db, scope, { from }), funnel: await funnelStats(db, scope, { from, keys }) });
+  });
+  r.get('/demand/export', async (req, res) => {
+    const { days, from, scope } = demandWindow(req);
+    const lang = langOf(req);
+    const tr = (key) => t(key, {}, lang);
+    const items = await demandItems(db, scope, { from, limit: EXPORT_MAX });
+    const csv = toCsv([
+      [tr('adm.demand.product'), tr('field.sku'), tr('common.store'), tr('adm.demand.size'), tr('adm.demand.missed'), tr('adm.demand.sold'), tr('adm.demand.stock'), tr('adm.demand.suggest')],
+      ...items.map((x) => [(lang === 'ru' && x.name_ru) || x.name, x.sku, x.store_name, x.size === 'ONE' ? tr('common.size_one') : x.size, x.missed, x.sold, x.stock, x.suggest]),
+    ]);
+    res.type('text/csv; charset=utf-8').attachment(`talab-${days}d-${dayKey(Date.now())}.csv`).send(csv);
   });
 
   // Dashboard home: today so far against yesterday up to the same time, the orders that need work now, the best sellers

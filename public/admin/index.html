@@ -49,6 +49,7 @@
           <li><a href="#/cashier" data-route="cashier"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#cash"></use></svg><span data-i18n="adm.route.cashier"></span></a></li>
           <li><a href="#/products" data-route="products"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><span data-i18n="adm.route.products"></span></a></li>
           <li><a href="#/stats" data-route="stats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.route.stats"></span></a></li>
+          <li><a href="#/demand" data-route="demand"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trend-up"></use></svg><span data-i18n="adm.route.demand"></span></a></li>
           <li><a href="#/qr" data-route="qr"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg><span data-i18n="adm.route.qr"></span></a></li>
           <li id="navOrgs" hidden><a href="#/orgs" data-route="orgs"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#store"></use></svg><span data-i18n="adm.route.orgs"></span></a></li>
           <li class="nav-sep"><a href="#/settings" data-route="settings"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#settings"></use></svg><span data-i18n="adm.route.settings"></span></a></li>
@@ -211,6 +212,41 @@
         </div>
       </section>
 
+      <!-- Talab (task 24): missed demand with restock suggestions, and the customer funnel by step -->
+      <section data-page="demand" hidden>
+        <div class="page-head">
+          <p class="muted" id="demandRange"></p>
+          <div class="seg" role="group" data-i18n-aria-label="adm.stats.period" id="demandDays"></div>
+        </div>
+        <div id="demandError"></div>
+        <div class="dash-grid">
+          <section class="card panel span-2" aria-labelledby="demandTitle">
+            <div class="panel-head"><div><h2 id="demandTitle" data-i18n="adm.demand.title"></h2><p class="panel-sub" data-i18n="adm.demand.sub"></p></div></div>
+            <div class="table-wrap">
+              <table class="table demand-table">
+                <thead><tr><th data-i18n="adm.demand.product"></th><th class="hide-sm" data-i18n="adm.demand.size"></th><th class="num" data-i18n="adm.demand.missed"></th><th class="num hide-sm" data-i18n="adm.demand.sold"></th><th class="num hide-sm" data-i18n="adm.demand.stock"></th><th class="num" data-i18n="adm.demand.suggest"></th></tr></thead>
+                <tbody id="demandRows"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="card panel span-2" aria-labelledby="dropTitle">
+            <div class="panel-head"><div><h2 id="dropTitle" data-i18n="adm.drop.title"></h2><p class="panel-sub" id="dropSub"></p></div></div>
+            <div class="funnel" id="dropFunnel"></div>
+          </section>
+          <section class="card panel span-2" aria-labelledby="dropKioskTitle">
+            <div class="panel-head"><div><h2 id="dropKioskTitle" data-i18n="adm.drop.kiosks"></h2></div></div>
+            <div class="table-wrap"><table class="table"><thead id="dropKioskHead"></thead><tbody id="dropKioskRows"></tbody></table></div>
+          </section>
+          <section class="card panel span-2" aria-labelledby="dropDayTitle">
+            <div class="panel-head"><div><h2 id="dropDayTitle" data-i18n="adm.drop.days"></h2></div></div>
+            <details class="table-view">
+              <summary data-i18n="adm.stats.table"></summary>
+              <div class="table-wrap"><table class="table"><thead id="dropDayHead"></thead><tbody id="dropDayRows"></tbody></table></div>
+            </details>
+          </section>
+        </div>
+      </section>
+
       <!-- QR -->
       <section data-page="qr" hidden>
         <p class="muted lead" data-i18n="adm.qrdlg.text"></p>
@@ -331,6 +367,7 @@
                 <label class="field"><span data-i18n="field.delivery_fee"></span> <input name="delivery_fee" type="number" min="0" step="1" required inputmode="numeric"></label>
                 <label class="field"><span data-i18n="field.free_threshold"></span> <input name="free_delivery_threshold" type="number" min="1" step="1" inputmode="numeric"><span class="hint" data-i18n="adm.set.free_hint"></span></label>
                 <label class="field span-all"><span data-i18n="field.telegram_chat"></span> <input name="telegram_chat_id" inputmode="numeric" pattern="-?[0-9]{1,15}" maxlength="16" autocomplete="off"><span class="hint" data-i18n="adm.set.chat_hint"></span></label>
+                <label class="field span-all"><span data-i18n="field.report_chat"></span> <input name="report_chat_id" inputmode="numeric" pattern="-?[0-9]{1,15}" maxlength="16" autocomplete="off"><span class="hint" data-i18n="adm.set.report_hint"></span></label>
                 <label class="field"><span data-i18n="field.low_stock"></span> <input name="low_stock_threshold" type="number" min="0" max="1000" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.low_hint"></span></label>
                 <label class="field"><span data-i18n="field.kiosk_pin"></span> <input name="kiosk_pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" autocomplete="new-password" aria-describedby="pinState"><span class="hint"><strong id="pinState"></strong> <span data-i18n="adm.set.kiosk_pin_hint"></span></span></label>
               </div>

@@ -202,6 +202,9 @@ a.kpi:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); col
 .name-btn { min-height: 0; padding: 0; border: 0; background: none; font-weight: var(--weight-strong); text-align: left; justify-content: flex-start; }
 .name-btn:hover { background: none; text-decoration: underline; text-underline-offset: .2em; }
 .push-left { margin-right: auto; }
+/* Talab: name, SKU and store stacked; on phones the size moves under them. */
+.demand-name { display: grid; gap: 2px; }
+.demand-name strong { font-weight: var(--weight-medium); }
 @media (max-width: 47.99em) { .prod { min-width: 0; } .heat { max-width: 7.75rem; } }
 .prod .sizes { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); font-size: var(--text-xs); }
 .table th .sort { display: inline-flex; gap: var(--s-1); min-height: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; }

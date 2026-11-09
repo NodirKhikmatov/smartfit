@@ -234,6 +234,7 @@ const PAGES = {
   cashier: { title: 'adm.route.cashier', load: loadCashier, poll: () => loadPending(true) },
   products: { title: 'adm.route.products', load: loadProducts },
   stats: { title: 'adm.route.stats', load: loadStats },
+  demand: { title: 'adm.route.demand', load: loadDemand },
   qr: { title: 'adm.route.qr', load: loadQr },
   settings: { title: 'adm.route.settings', load: loadSettings },
   orgs: { title: 'adm.route.orgs', load: loadOrgs },
@@ -246,6 +247,7 @@ const ACTIONS = {
     el('button', { type: 'button', className: 'primary', onclick: () => openForm(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.products.add') })),
   ],
   stats: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => exportStats() }, icon('download'))],
+  demand: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => download('/demand/export?' + qs(scoped({ days: demandDays() })), `talab-${demandDays()}d.csv`) }, icon('download'))],
 };
 
 function render() {
@@ -966,6 +968,51 @@ function exportStats() {
   a.remove();
 }
 
+// ---------- Talab (task 24): missed demand with a restock suggestion, and the customer funnel by step per kiosk and day.
+
+const sizeText = (size) => (size === 'ONE' ? t('common.size_one') : size);
+const DROP = [['start', 'adm.drop.start'], ['size', 'adm.drop.size'], ['outfits', 'adm.drop.outfits'], ['cart', 'adm.drop.cart'], ['order', 'adm.drop.order']];
+const demandDays = () => (['7', '30'].includes(route.params.days) ? Number(route.params.days) : 14);
+async function loadDemand() {
+  const seq = (loads.demand = (loads.demand || 0) + 1);
+  const p = route.params, days = demandDays();
+  seg($('demandDays'), [7, 14, 30].map((n) => [String(n), t('adm.stats.days', { n })]), String(days), (v) => setParams({ ...p, days: v === '14' ? '' : v }));
+  const stop = skeletonRows($('demandRows'), 6);
+  let d;
+  try { d = await call('/demand?' + qs(scoped({ days }))); } catch (err) {
+    stop();
+    if (seq === loads.demand) stateBox($('demandError'), err, () => loadDemand());
+    return;
+  }
+  stop();
+  if (seq !== loads.demand) return;
+  stateBox($('demandError'));
+  const f = d.funnel, withStore = showStore();
+  $('demandRange').textContent = t('adm.stats.range', { from: day(f.per_day[0].day), to: day(f.per_day.at(-1).day), n: d.days });
+  if (!d.items.length) emptyRow($('demandRows'), 6, { ic: 'check', title: t('adm.demand.empty'), text: t('adm.demand.empty_text') });
+  else $('demandRows').replaceChildren(...d.items.map((x) => el('tr', {},
+    el('td', {}, el('span', { className: 'demand-name' }, el('strong', { textContent: productName(x) }),
+      el('span', { className: 'sizes', textContent: [x.sku || cat(x.category), withStore && x.store_name].filter(Boolean).join(' · ') }),
+      el('span', { className: 'show-sm', textContent: `${t('adm.demand.size')}: ${sizeText(x.size)}` }))), // phones: the size column hides
+    el('td', { className: 'hide-sm', textContent: sizeText(x.size) }),
+    el('td', { className: 'num', textContent: x.missed }),
+    el('td', { className: 'num hide-sm', textContent: x.sold }),
+    el('td', { className: 'num hide-sm', textContent: x.stock }),
+    el('td', { className: 'num' }, el('strong', { textContent: x.suggest })))));
+
+  $('dropSub').textContent = t('adm.drop.sub', { n: f.total.start });
+  if (!f.total.start) $('dropFunnel').replaceChildren(emptyState({ ic: 'sparkle', title: t('adm.drop.empty'), text: t('adm.drop.empty_text') }));
+  else funnelChart($('dropFunnel'), DROP.map(([k, label]) => ({ label: t(label), value: f.total[k] })), { pct: (v, base) => (base ? `${dec(share(v, base))}%` : '—') });
+  const head = (first) => el('tr', {}, el('th', { textContent: t(first) }), ...DROP.map(([, label]) => el('th', { className: 'num', textContent: t(label) })));
+  const cells = (x) => DROP.map(([k]) => el('td', { className: 'num', textContent: x[k] }));
+  $('dropKioskHead').replaceChildren(head('adm.drop.kiosk'));
+  if (!f.per_kiosk.length) emptyRow($('dropKioskRows'), 6, { ic: 'store', title: t('adm.drop.empty'), text: t('adm.drop.empty_text') });
+  else $('dropKioskRows').replaceChildren(...f.per_kiosk.map((k) => el('tr', {},
+    el('td', { textContent: [k.kiosk ? t('adm.drop.kiosk_n', { id: k.kiosk }) : t('adm.drop.phone'), withStore && storeName(k.store_id)].filter(Boolean).join(' · ') }), ...cells(k))));
+  $('dropDayHead').replaceChildren(head('adm.stats.day'));
+  $('dropDayRows').replaceChildren(...f.per_day.slice().reverse().map((x) => el('tr', {}, el('td', { textContent: day(x.day) }), ...cells(x))));
+}
+
 // ---------- QR codes for the phone app, one card per store.
 
 async function loadQr() {
@@ -1014,7 +1061,7 @@ function loadSettings() {
 }
 
 // Store profile. A super-admin picks the store here (defaults to the sidebar's); everyone else has one.
-const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id', 'low_stock_threshold'];
+const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id'];
 const sf = $('storeForm');
 const storeId = () => (many() ? $('storePick').value : String(stores[0]?.id ?? me.store_id));
 function mapLink() {
@@ -1059,7 +1106,7 @@ sf.onsubmit = async (e) => {
     name: v('name'), city: v('city'), address: v('address'), lat: Number(v('lat')), lon: Number(v('lon')),
     opens_at: v('opens_at') || null, closes_at: v('closes_at') || null,
     delivery_fee: Number(v('delivery_fee')), free_delivery_threshold: v('free_delivery_threshold') ? Number(v('free_delivery_threshold')) : null,
-    telegram_chat_id: v('telegram_chat_id') || null, low_stock_threshold: Number(v('low_stock_threshold')),
+    telegram_chat_id: v('telegram_chat_id') || null, report_chat_id: v('report_chat_id') || null, low_stock_threshold: Number(v('low_stock_threshold')),
     ...(v('kiosk_pin') && { kiosk_pin: v('kiosk_pin') }),
   };
   try {
@@ -1230,7 +1277,7 @@ const AUDIT_FIELDS = {
   price: 'field.price', discount_price: 'field.discount_price', temp_min: 'field.temp_min', temp_max: 'field.temp_max', waterproof: 'field.waterproof',
   shelf_location: 'field.shelf_location', image_url: 'field.photo', stock: 'field.stock', status: 'field.status', payment_status: 'adm.orders.payment',
   city: 'field.city', address: 'field.address', lat: 'adm.set.lat', lon: 'adm.set.lon', opens_at: 'adm.set.opens', closes_at: 'adm.set.closes',
-  delivery_fee: 'field.delivery_fee', free_delivery_threshold: 'field.free_threshold', telegram_chat_id: 'field.telegram_chat',
+  delivery_fee: 'field.delivery_fee', free_delivery_threshold: 'field.free_threshold', telegram_chat_id: 'field.telegram_chat', report_chat_id: 'field.report_chat',
   sku: 'field.sku', barcode: 'field.barcode', low_stock_threshold: 'field.low_stock', prefix: 'adm.sync.key',
   email: 'field.email', role: 'field.role', disabled: 'adm.team.status',
 };

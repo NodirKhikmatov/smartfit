@@ -80,7 +80,7 @@ docker stop smartfit-testpg
 | `DOMAIN` | `localhost` | docker compose only: the HTTPS domain Caddy serves and gets a certificate for. |
 | `NODE_ENV` | empty | `production` requires `ADMIN_TOKEN_SECRET` and blocks `npm run seed`. compose sets it. |
 | `TRUST_PROXY` | empty | Number of reverse proxies in front of the app. compose sets `1` (Caddy), so client IPs (login lock, rate limits, open-cart cap) and `https` (QR links) are right. Leave empty when the app is reached directly. |
-| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN`, `RATE_DEMO_PER_MIN` | 60, 30, 300, 20, 30, 5, 3 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat, the kiosk exit PIN and the landing page's demo form. Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
+| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN`, `RATE_DEMO_PER_MIN`, `RATE_FUNNEL_PER_MIN` | 60, 30, 300, 20, 30, 5, 3, 120 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat, the kiosk exit PIN, the landing page's demo form and the customer funnel events (`/api/funnel`). Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
 | `MAX_OPEN_CARTS_PER_IP` | 30 | Live carts (each holds stock for 15 min) one client IP may have at once; the next new cart → `429 too_many_carts`. `0` = off. |
 | `ERROR_WEBHOOK_URL` | empty | Optional error monitoring: every error log line is POSTed as JSON `{text, content, level, time}` (works with Slack, Discord and Mattermost incoming webhooks), at most 10 a minute. |
 
@@ -177,6 +177,10 @@ Cashier payment always works. A provider appears in the phone app only when all 
 4. Low stock: when a size's free units (stock minus what carts hold) drop to the store's threshold (Sozlamalar → Do'kon →
    "Kam qoldi chegarasi", default 1), the staff chat gets one message listing the sizes that crossed. It comes again only
    after the size went above the threshold and back down. The same sizes show on the dashboard under "sizes running out".
+5. Weekly owner report: put the owner's chat id in Sozlamalar → Do'kon → "Haftalik hisobot uchun Telegram chat ID".
+   Every Monday at 09:00 Tashkent time that chat gets last week's sales, conversion, best sellers, the top 5 missed sizes
+   and the low-stock sizes, once per week. Set mid-week, it gets last week's report right away. Admin → Talab shows the
+   same missed demand with restock suggestions, the funnel by step and a CSV export.
 
 SMS is a stub (`src/notify/sms.js`): return a `(phone, text)` sender there to switch it on.
 

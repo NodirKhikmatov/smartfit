@@ -10,6 +10,7 @@ import { REC } from '../recommend/routes.js';
 import { qrSvg, publicBase } from '../qr.js';
 import { clientKey } from '../limits.js';
 import { FITS } from '../size/size.js';
+import { logMissed } from '../demand.js';
 
 export const HOLD_MS = 15 * 60 * 1000;
 export const HANDOFF_MS = 5 * 60 * 1000; // how long the kiosk's "continue on your phone" QR works
@@ -217,6 +218,11 @@ function parseItems(items) {
 // Public, keyed by an unguessable cart token. The token is the customer's only handle on the cart.
 // `link(notifyToken)` → how the customer subscribes to order messages ({ url, svg } for Telegram), or null when off.
 export function createCartRouter(db, { methods = CASHIER, link = () => null, maxOpenCarts = 0 } = {}) {
+  // A 409 carrying `missed` (task 24) is logged as missed demand after its transaction rolled back, then rethrown.
+  const missedThen = async (err) => {
+    if (err.missed) await logMissed(db, { ...err.missed, source: 'cart' }).catch((e) => console.error('missed demand not logged:', e.message));
+    throw err;
+  };
   const r = express.Router();
   const view = (cart) => cartView(db, cart, Object.keys(methods));
   r.use(async (req, res, next) => {
@@ -250,7 +256,11 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
         const p = await trx('products').where({ id: product_id, store_id: cart.store_id }).first('name', 'name_ru', 'category');
         if (!p) throw fail(404, 'err.product_not_found');
         if (!sizesFor(p.category).includes(size)) throw fail(400, 'err.product_size', { product: p });
-        if (!(await hold(trx, product_id, size, 1))) throw fail(409, 'err.out_of_stock', { product: p, size: size === 'ONE' ? 'common.size_one' : size });
+        if (!(await hold(trx, product_id, size, 1))) {
+          // Task 24: logged after the rollback (below) as missed demand, once per results screen or cart.
+          throw Object.assign(fail(409, 'err.out_of_stock', { product: p, size: size === 'ONE' ? 'common.size_one' : size }),
+            { missed: { storeId: cart.store_id, session: typeof b.rec === 'string' && REC.test(b.rec) ? b.rec : cart.token, items: [{ product_id, size }] } });
+        }
         await trx('cart_items').insert({ cart_id: cart.id, product_id, size, quantity: 1 })
           .onConflict(['cart_id', 'product_id', 'size']).merge({ quantity: trx.raw('?? + 1', ['cart_items.quantity']) });
       }
@@ -261,7 +271,7 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
         await trx('carts').where({ id: cart.id }).update({ recommendation_id: rec.id });
       }
       return cart;
-    });
+    }).catch(missedThen);
     res.json(await view(cart));
   });
 
@@ -282,11 +292,15 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
       const p = await trx('products').where({ id: line.product_id }).first('category');
       if (typeof size !== 'string' || !sizesFor(p.category).includes(size)) throw fail(400, 'err.invalid', { field: 'field.size' });
       if (await trx('cart_items').where({ cart_id: cart.id, product_id: line.product_id, size }).first()) throw fail(409, 'err.size_in_cart');
-      if (!(await hold(trx, line.product_id, size, line.quantity))) throw fail(409, 'err.size_sold_out', { size });
+      if (!(await hold(trx, line.product_id, size, line.quantity))) {
+        // Missed demand only when that size has none left (one unit wanted), not when there are fewer than the line needs.
+        throw Object.assign(fail(409, 'err.size_sold_out', { size }),
+          line.quantity === 1 && { missed: { storeId: cart.store_id, session: cart.token, items: [{ product_id: line.product_id, size }] } });
+      }
       await release(trx, [line]);
       await trx('cart_items').where({ id: line.id }).update({ size });
       return cart;
-    });
+    }).catch(missedThen);
     res.json(await view(cart));
   });
 

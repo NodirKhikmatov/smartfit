@@ -18,6 +18,7 @@ export function limitConfig() {
     login: env('RATE_LOGIN_PER_MIN', 20),
     kiosk: env('RATE_KIOSK_PER_MIN', 30), // heartbeat: 1/min per kiosk
     pin: env('RATE_PIN_PER_MIN', 5), // staff exit PIN tries: a 4-digit PIN takes ~33 h to guess from one IP
+    funnel: env('RATE_FUNNEL_PER_MIN', 120), // ≤ 5 events per customer visit, every device on the shop IP shares it
     demo: env('RATE_DEMO_PER_MIN', 3), // landing page "Demo so'rash" form
     openCarts: env('MAX_OPEN_CARTS_PER_IP', 30),
   };
