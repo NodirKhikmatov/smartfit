@@ -76,6 +76,7 @@ async function orgBRecords() {
   await db('missed_demand').insert({ store_id: b1, product_id: product.id, size: 'L', session: 'b'.repeat(32), source: 'recommend' });
   await db('funnel_events').insert({ store_id: b1, visit: 'c'.repeat(32), step: 'order' });
   await db('qr_scans').insert({ token: 'd'.repeat(32), store_id: b1, product_id: product.id }); // task 32: a label scan
+  await db('recommendation_logs').insert({ store_id: b1, product_ids: '[]', source: 'rules', occasion: 'party' }); // task 33
   const promo = (await admin('POST', '/promos', { code: 'ORGBPROMO', kind: 'percent', value: 10, store_id: b1 }, ownerB)).body; // task 26
   return { product, order, fitting, invite, key, member, promo };
 }
@@ -156,6 +157,7 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       assert.equal(r.body.funnel.total.start, 0);
       assert.equal(r.body.funnel.per_kiosk.length, 0);
       assert.equal(r.body.scans.length, 0, 'no org B label scans');
+      assert.ok(r.body.occasions.every((o) => o.customers === 0 && o.orders === 0), 'no org B occasion demand');
     },
     'GET /demand/export': async () => {
       for (const q of ['', `?store_id=${b1}`]) {
@@ -350,7 +352,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 24; i > 12; i--) await m.migrate.down(); // 024 … 013
+    for (let i = 25; i > 12; i--) await m.migrate.down(); // 025 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

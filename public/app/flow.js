@@ -9,6 +9,8 @@ export const FITS = ['tight', 'regular', 'loose'];
 export const METHODS = ['full', 'torso', 'upper', 'usual', 'tape', 'body', 'profile'];
 // Task 30: the categories a customer can come for as single items (same order as the engine's ORDER).
 export const WANT = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
+// Task 33, "Qayerga kiyasiz?": the optional occasion (same codes as the engine's OCCASIONS, a test keeps them equal).
+export const OCCASIONS = ['daily', 'work', 'party', 'sport', 'travel'];
 // Task 36: the store's own categories are wanted by id; their outfit role (or none) decides which sizes are asked.
 // Filled from the store (GET /api/stores/:id) and, until it loads after a refresh, from the saved route.
 const ROLES = new Map(); // category id → role | null
@@ -75,9 +77,10 @@ export function toRequest(v, storeId) {
   const skip = sizeNeeds(want).photo ? [] : ['height', 'weight'];
   if (FORM.some((k) => !skip.includes(k) && fieldError(k, v[k]))) return null;
   const num = (x) => (str(x) ? int(x) : null);
+  const occasion = OCCASIONS.includes(v.occasion) ? v.occasion : null;
   return {
     body: { gender: v.gender, height: skip.length ? null : num(v.height), weight: skip.length ? null : num(v.weight) },
-    request: { store_id: storeId, gender: v.gender, sizes: { top: null, bottom: null, shoes: SHOES.includes(v.shoes) ? v.shoes : null }, budget: num(v.budget), ...(want && { want }) },
+    request: { store_id: storeId, gender: v.gender, sizes: { top: null, bottom: null, shoes: SHOES.includes(v.shoes) ? v.shoes : null }, budget: num(v.budget), ...(want && { want }), ...(occasion && { occasion }) },
   };
 }
 
@@ -92,7 +95,7 @@ export function routeData({ screen, form = {}, sizes = {}, manual = false, metho
   const known = new Map(Array.isArray(roles) ? roles.filter((x) => Array.isArray(x) && Number.isInteger(x[0])) : []);
   return {
     screen: SCREENS.includes(screen) ? screen : 'start',
-    form: { ...Object.fromEntries(FORM.map((k) => [k, str(form?.[k]).slice(0, 12)])), want: cleanWant(form?.want) },
+    form: { ...Object.fromEntries(FORM.map((k) => [k, str(form?.[k]).slice(0, 12)])), want: cleanWant(form?.want), occasion: OCCASIONS.includes(form?.occasion) ? form.occasion : '' },
     own: Array.isArray(own) ? own.filter(ownItem).slice(0, 5).map((x) => ({ category: x.category, color: x.color, style: x.style ?? null })) : [],
     sizes: {
       top: CLOTHES.includes(sizes?.top) ? sizes.top : null,

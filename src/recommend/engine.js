@@ -79,14 +79,21 @@ export async function missedItems(db, { storeId, gender, sizes, temperature, fit
 const NEUTRAL = new Set(['qora', 'oq', 'kulrang', "to'q ko'k", 'bej', 'jigarrang', 'krem', 'zaytun', "ko'k"]);
 const bright = (p) => Boolean(p.color) && !NEUTRAL.has(p.color.toLowerCase());
 
+// Task 33, "Qayerga kiyasiz?": the product styles that suit each occasion. An item of another style ranks
+// OCCASION_PENALTY places lower (a soft weight: it only reorders, so the stock and budget rules are untouched); an item
+// without a style is never pushed down. No occasion → 0, so the answer is exactly what it was before.
+export const OCCASIONS = { daily: ['casual'], work: ['classic'], party: ['classic'], sport: ['sport'], travel: ['casual', 'sport'] };
+const OCCASION_PENALTY = 5;
+const offOccasion = (p, occasion) => (occasion && p.style && !OCCASIONS[occasion].includes(p.style) ? OCCASION_PENALTY : 0);
+
 // Lower is better. Rank order first (rain/budget/temperature), then a matching style, and a colour clash only as a last resort.
-function pickScore(p, idx, outfit, raining) {
+function pickScore(p, idx, outfit, raining, occasion = null) {
   const clash = bright(p) && outfit.some(bright);
   const style = outfit.length && p.style && outfit[0].style && p.style !== outfit[0].style;
-  return idx + (style ? 2 : 0) + (raining && !p.waterproof ? 10 : 0) + (clash ? 50 : 0);
+  return idx + (style ? 2 : 0) + (raining && !p.waterproof ? 10 : 0) + (clash ? 50 : 0) + offOccasion(p, occasion);
 }
-const bestFor = (list, outfit, raining) => list.reduce((best, p, i) => {
-  const s = pickScore(p, i, outfit, raining);
+const bestFor = (list, outfit, raining, occasion = null) => list.reduce((best, p, i) => {
+  const s = pickScore(p, i, outfit, raining, occasion);
   return !best || s < best.s ? { p, s } : best;
 }, null)?.p;
 const byOrder = (a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category);
@@ -95,7 +102,7 @@ const byOrder = (a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category);
 // the first item sets the style, later ones prefer the same style and a colour that goes with what is already picked.
 // skip: categories to leave out (outerwear when the store has none). Returns { outfits, over_budget, partial }:
 // over_budget > 0 only when nothing fits the budget, and then `partial` is the required items that do fit.
-export function buildOutfits(candidates, { temperature, raining, budget = null, skip = [] }) {
+export function buildOutfits(candidates, { temperature, raining, budget = null, skip = [], occasion = null }) {
   const required = requiredCategories(temperature, raining).filter((c) => !skip.includes(c));
   const pool = rankPool(candidates, { temperature, raining, budget });
   const used = new Set();
@@ -105,7 +112,7 @@ export function buildOutfits(candidates, { temperature, raining, budget = null, 
   while (outfits.length < MAX_OUTFITS) {
     const items = [];
     for (const c of required) {
-      const p = bestFor(free(c), items, raining);
+      const p = bestFor(free(c), items, raining, occasion);
       if (!p) break;
       items.push(p);
     }
@@ -115,7 +122,7 @@ export function buildOutfits(candidates, { temperature, raining, budget = null, 
   }
   // Optional accessory: the best unused one that goes with the outfit, only if it keeps the outfit within budget.
   for (const items of outfits) {
-    const acc = bestFor(free('accessory').filter((p) => !budget || totalOf(items) + p.unit_price <= budget), items, false);
+    const acc = bestFor(free('accessory').filter((p) => !budget || totalOf(items) + p.unit_price <= budget), items, false, occasion);
     if (acc) {
       items.push(acc);
       used.add(acc.id);
@@ -225,7 +232,7 @@ export function pairWith(item, candidates, max = 4) {
 // categories), not in this outfit or another shown one (`exclude`), and within budget; an outfit that is already over
 // budget (the cheapest-outfit fallback) only gets cheaper items. Best first by the outfit rules.
 // → [{ swap, items, total }]: the whole new outfit, priced from the candidate rows (DB).
-export function swapOptions(candidates, { items, replace, exclude = [], budget = null, temperature, raining = false, limit = 4 }) {
+export function swapOptions(candidates, { items, replace, exclude = [], budget = null, temperature, raining = false, limit = 4, occasion = null }) {
   const old = items.find((p) => p.id === replace);
   if (!old) return [];
   const rest = items.filter((p) => p.id !== replace);
@@ -233,7 +240,7 @@ export function swapOptions(candidates, { items, replace, exclude = [], budget =
   const over = budget && totalOf(items) > budget;
   const fits = (p) => !budget || (over ? p.unit_price < old.unit_price : totalOf(rest) + p.unit_price <= budget);
   const list = rankPool(candidates, { temperature, raining, budget })[old.category].filter((p) => !used.has(p.id) && fits(p));
-  return list.map((p, i) => ({ p, s: pickScore(p, i, rest, raining) })).sort((a, b) => a.s - b.s).slice(0, limit)
+  return list.map((p, i) => ({ p, s: pickScore(p, i, rest, raining, occasion) })).sort((a, b) => a.s - b.s).slice(0, limit)
     .map(({ p }) => {
       const next = [...rest, p].sort(byOrder);
       return { swap: p.id, items: next, total: totalOf(next) };
@@ -248,10 +255,10 @@ export function swapOptions(candidates, { items, replace, exclude = [], budget =
 // Each item gets its cheapest cheaper unshown item of the category (`alternative`) and the task 25 pairs.
 // → [{ category, items: [{ ...item, alternative, pairs }], over_budget }].
 export const MAX_SINGLE = 6;
-export function singleItems(candidates, { want, own = [], temperature, raining, budget = null }) {
+export function singleItems(candidates, { want, own = [], temperature, raining, budget = null, occasion = null }) {
   const rank = ranker({ temperature, raining, budget });
   const styles = new Set(own.map((x) => x.style).filter(Boolean)), clash = own.some(bright);
-  const score = (p, i) => i + (styles.size && p.style && !styles.has(p.style) ? 2 : 0) + (raining && !p.waterproof ? 10 : 0) + (clash && bright(p) ? 50 : 0);
+  const score = (p, i) => i + (styles.size && p.style && !styles.has(p.style) ? 2 : 0) + (raining && !p.waterproof ? 10 : 0) + (clash && bright(p) ? 50 : 0) + offOccasion(p, occasion);
   return want.map((category) => {
     const all = candidates.filter(inWant(category)).sort(rank);
     const fits = budget ? all.filter((p) => p.unit_price <= budget) : all;

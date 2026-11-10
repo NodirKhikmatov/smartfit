@@ -109,7 +109,7 @@ const switcher = langSwitch(() => {
 $('langBox').replaceChildren(switcher);
 
 // History routing (U2): one entry per screen, so the phone's back button steps back inside the app.
-const formValues = () => ({ gender: form.gender.value, height: form.height.value, weight: form.weight.value, shoes: form.shoes.value, budget: form.budget.value, want: formWant() });
+const formValues = () => ({ gender: form.gender.value, height: form.height.value, weight: form.weight.value, shoes: form.shoes.value, budget: form.budget.value, want: formWant(), occasion: form.occasion.value });
 const appState = () => ({ formOk: !!request, sizesOk: !!request && sizesReady(request.sizes, request.want), orderOk: !!lastOrder });
 const remember = () => saveRoute({ screen: current, form: formValues(), sizes: request?.sizes, manual: sizeInfo?.manual, method: request?.method, fit: request?.fit, item: current === 'item' ? itemId : null, own: request?.own, roles: categoryRoles() });
 const ENTER = {
@@ -639,7 +639,8 @@ function renderResults(r) {
   lastResult = r;
   syncs = new Set();
   renderSizes();
-  $('resultsWeather').textContent = [t('kiosk.results.weather', { weather: weatherLine(r.weather) }), r.budget && t(r.groups ? 'kiosk.single.budget' : 'kiosk.results.budget', { sum: som(r.budget) })].filter(Boolean).join(' · ');
+  $('resultsWeather').textContent = [t('kiosk.results.weather', { weather: weatherLine(r.weather) }), r.budget && t(r.groups ? 'kiosk.single.budget' : 'kiosk.results.budget', { sum: som(r.budget) }),
+    r.occasion && t('kiosk.results.occasion', { occasion: t(`kiosk.occasion.${r.occasion}`) })].filter(Boolean).join(' · '); // task 33
   const h1 = document.querySelector('[data-screen="results"] h1');
   h1.dataset.i18n = r.groups ? 'kiosk.single.title' : 'kiosk.results.title'; // kept for the language switch
   h1.textContent = t(h1.dataset.i18n);

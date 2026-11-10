@@ -2,7 +2,7 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { sizesFor, sizesOf } from '../db/seed.js';
 import { fail, langOf } from '../admin/routes.js';
-import { filterCandidates, ruleOutfits, ruleSingles, missedItems, swapOptions, SPREADS, ORDER, sizeKey, visible } from './engine.js';
+import { filterCandidates, ruleOutfits, ruleSingles, missedItems, swapOptions, SPREADS, ORDER, OCCASIONS, sizeKey, visible } from './engine.js';
 import { logMissed } from '../demand.js';
 import { isFit, METHODS } from '../size/size.js';
 import { parseJson } from '../cart/promo.js';
@@ -61,7 +61,10 @@ function parseRequest(b, cats = []) {
   const fit = b.fit ?? null, method = b.method ?? null;
   if (fit !== null && !isFit(fit)) throw fail(400, 'err.invalid', { field: 'field.fit_pref' });
   if (method !== null && !METHODS.includes(method)) throw fail(400, 'err.bad_request');
-  return { sizes, budget, fit, method, want, own };
+  // Task 33: where it will be worn, from the fixed list (own property only: "constructor" is not an occasion).
+  const occasion = b.occasion ?? null;
+  if (occasion !== null && (typeof occasion !== 'string' || !Object.hasOwn(OCCASIONS, occasion))) throw fail(400, 'err.invalid', { field: 'field.occasion' });
+  return { sizes, budget, fit, method, want, own, occasion };
 }
 
 // shortcut: in-memory per-IP cap on paid Claude calls (over it → rules, never an error); one process only.
@@ -74,7 +77,7 @@ const REC_TTL_MS = 2 * 60 * 60 * 1000; // a re-query after this starts a new log
 // Compares right against DB-default created_at: SQLite stores 'YYYY-MM-DD HH:MM:SS' (UTC) text, Postgres timestamptz.
 export const dbTime = (ms) => `${new Date(ms).toISOString().replace('T', ' ').slice(0, 19)}+00:00`;
 
-// Public: POST /api/recommend { store_id, gender, sizes: { top, bottom, shoes? }, budget?, fit?, method?, photo?, want?, own? }
+// Public: POST /api/recommend { store_id, gender, sizes: { top, bottom, shoes? }, budget?, fit?, method?, photo?, want?, own?, occasion? }
 // With want (task 30) the answer has `groups` (single items per category) and no outfits.
 // stylist (task 7) is null without ANTHROPIC_API_KEY → rules only.
 export function createRecommendRouter(db, { weather, stylist = null, stylistTimeoutMs = TIMEOUT_MS }) {
@@ -93,23 +96,23 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
   r.post('/', async (req, res) => {
     const b = req.body ?? {};
     const cats = await catsFor(db, b);
-    const { sizes, budget, fit, method, want, own } = parseRequest(b, cats);
+    const { sizes, budget, fit, method, want, own, occasion } = parseRequest(b, cats);
     const photo = parsePhoto(b.photo); // memory only: goes to Claude for this request, never stored or logged
 
     const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon', 'bundle_percent');
     if (!store) throw fail(404, 'err.store_not_found');
     const w = await weather(store);
-    const ctx = { temperature: w.temperature, raining: w.raining, budget };
+    const ctx = { temperature: w.temperature, raining: w.raining, budget, occasion };
     const load = (spread) => filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread, fit });
     const mode = want ? 'single' : 'outfit';
-    if (want) return single(req, res, { b, store, w, sizes, budget, method, fit, want, own, photo, load, cats });
+    if (want) return single(req, res, { b, store, w, sizes, budget, method, fit, want, own, occasion, photo, load, cats });
     const { candidates, ...rules } = await ruleOutfits(load, ctx);
     let result = { ...rules, style_guess: null, source: 'rules' };
     // No rule outfit means a required category is empty, so Claude could not build one either. Without outerwear
     // (notice) applyStylist rejects every AI outfit, so the rules answer stands. Claude sees the relaxed candidates.
     if (stylist && result.outfits.length && !result.notice && allowAi(req.ip)) {
       try {
-        const answer = await withDeadline((signal) => stylist({ photo, weather: w, sizes, budget, candidates, lang: langOf(req) }, signal), stylistTimeoutMs);
+        const answer = await withDeadline((signal) => stylist({ photo, weather: w, sizes, budget, occasion, candidates, lang: langOf(req) }, signal), stylistTimeoutMs);
         const ai = applyStylist(answer, candidates, ctx);
         if (ai) result = { ...result, ...ai, partial: null, source: 'ai' };
         else console.warn('stylist: no valid outfit, using rules');
@@ -119,22 +122,23 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     }
     const { outfits, over_budget, partial, relaxed, notice, style_guess, source } = result;
 
-    const rec = await logResults({ b, store, w, sizes, budget, method, fit, source, mode,
+    const rec = await logResults({ b, store, w, sizes, budget, method, fit, occasion, source, mode,
       shown: [...outfits, ...(partial ? [partial] : [])].flatMap((o) => o.items),
       // Task 26: the whole outfits shown (and their cheaper variants), so the cart can trust an "outfit" for the bundle discount.
       outfits: outfits.flatMap((o) => [o, ...(o.alternative ? [o.alternative] : [])]).map((o) => o.items.map((i) => i.id)) });
-    res.json({ mode, weather: w, budget, over_budget, partial, relaxed, notice, source, style_guess, outfits, rec, bundle_percent: store.bundle_percent });
+    // `occasion` only when one was asked for: a request without it gets exactly the answer it got before task 33.
+    res.json({ mode, weather: w, budget, over_budget, partial, relaxed, notice, source, style_guess, outfits, rec, bundle_percent: store.bundle_percent, ...(occasion && { occasion }) });
   });
 
   // Task 30, single items: rule picks per wanted category; Claude (when there) only re-orders the items the rules chose.
-  async function single(req, res, { b, store, w, sizes, budget, method, fit, want, own, photo, load, cats }) {
-    const ctx = { temperature: w.temperature, raining: w.raining, budget, want, own };
+  async function single(req, res, { b, store, w, sizes, budget, method, fit, want, own, occasion, photo, load, cats }) {
+    const ctx = { temperature: w.temperature, raining: w.raining, budget, want, own, occasion };
     let { groups, relaxed } = await ruleSingles(load, ctx);
     let style_guess = null, source = 'rules';
     const shownItems = () => groups.flatMap((g) => g.items);
     if (stylist && shownItems().length && allowAi(req.ip)) {
       try {
-        const answer = await withDeadline((signal) => stylist({ mode: 'single', photo, weather: w, sizes, budget, own,
+        const answer = await withDeadline((signal) => stylist({ mode: 'single', photo, weather: w, sizes, budget, own, occasion,
           want: want.map((c) => (Number.isInteger(c) ? cats.find((x) => x.id === c).name : c)), candidates: shownItems(), lang: langOf(req) }, signal), stylistTimeoutMs);
         const ai = applyRanking(answer, groups);
         if (ai) {
@@ -146,13 +150,13 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       }
     }
     // outfits: [] — no whole outfit was shown, so the task 26 bundle discount can never apply to these items.
-    const rec = await logResults({ b, store, w, sizes, budget, method, fit, want, source, mode: 'single', shown: shownItems(), outfits: [] });
-    res.json({ mode: 'single', weather: w, budget, relaxed, source, style_guess, groups, outfits: [], over_budget: 0, partial: null, notice: null, rec, bundle_percent: 0 });
+    const rec = await logResults({ b, store, w, sizes, budget, method, fit, want, occasion, source, mode: 'single', shown: shownItems(), outfits: [] });
+    res.json({ mode: 'single', weather: w, budget, relaxed, source, style_guess, groups, outfits: [], over_budget: 0, partial: null, notice: null, rec, bundle_percent: 0, ...(occasion && { occasion }) });
   }
 
   // One recommendation_logs row per results screen (stats need product_ids as a JSON int array; no photo or body data),
   // then the task 24 missed demand under its rec. → rec.
-  async function logResults({ b, store, w, sizes, budget, method, fit, want = null, source, mode, shown, outfits }) {
+  async function logResults({ b, store, w, sizes, budget, method, fit, want = null, occasion = null, source, mode, shown, outfits }) {
     const log = {
       temperature: w.temperature,
       raining: w.raining,
@@ -163,6 +167,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       source,
       size_method: method,
       mode,
+      occasion,
       outfits: JSON.stringify(outfits),
     };
     // A −/+ re-query sends back its `rec` and updates the same row, so one customer counts once in the pilot report.
@@ -183,7 +188,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
   // same in-stock candidates (customer's sizes, the answer's temperature window). With `rec`, the options are kept for the bundle rule.
   r.post('/swap', async (req, res) => {
     const b = req.body ?? {};
-    const { sizes, budget, fit } = parseRequest(b, await catsFor(db, b));
+    const { sizes, budget, fit, occasion } = parseRequest(b, await catsFor(db, b));
     const ids = (v, max) => {
       if (!Array.isArray(v) || v.length > max || !v.every((x) => Number.isInteger(x) && x > 0) || new Set(v).size !== v.length) throw fail(400, 'err.invalid', { field: 'field.items' });
       return v;
@@ -200,7 +205,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       const byId = new Map(candidates.map((p) => [p.id, p]));
       const items = outfit.map((id) => byId.get(id));
       if (items.some((p) => !p)) throw fail(409, 'err.outfit_stale'); // sold out or resized since the outfit was shown
-      options = swapOptions(candidates, { items, replace: b.replace, exclude, budget, temperature: w.temperature, raining: w.raining });
+      options = swapOptions(candidates, { items, replace: b.replace, exclude, budget, temperature: w.temperature, raining: w.raining, occasion });
       if (options.length) break;
     }
     // Task 26: a swapped outfit is a recommended outfit too (bundle discount). Kept on its results screen's log row, newest 60.

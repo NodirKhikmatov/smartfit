@@ -4,6 +4,7 @@ import express from 'express';
 import { fail, dayKey, msOf } from './admin/routes.js';
 import { dbTime } from './recommend/routes.js';
 import { METHODS } from './size/size.js';
+import { OCCASIONS } from './recommend/engine.js';
 
 export const FUNNEL_STEPS = ['start', 'size', 'outfits', 'cart', 'order'];
 const ID = /^[a-f0-9]{32}$/;
@@ -113,6 +114,16 @@ export async function methodStats(db, scope, { from, to = null }) {
     const answers = row.small + row.right + row.big;
     return { ...row, answers, accuracy: answers ? Math.round((row.right / answers) * 100) : null };
   });
+}
+
+// Task 33: demand per occasion ("Qayerga kiyasiz?"): results screens in the window per occasion and the paid, not
+// cancelled orders made from them. Every occasion is listed (zero-filled); occasion null = the customer didn't pick one.
+export async function occasionStats(db, scope, { from, to = null }) {
+  const logs = () => range(scope(db('recommendation_logs as r'), 'r.store_id'), 'r.created_at', dbTime(from), to && dbTime(to)).groupBy('r.occasion').select('r.occasion');
+  const shown = await logs().count({ n: '*' });
+  const sold = await logs().join('orders as o', 'o.recommendation_id', 'r.id').where('o.payment_status', 'paid').whereNot('o.status', 'cancelled').count({ n: '*' });
+  const n = (rows, occasion) => Number(rows.find((x) => x.occasion === occasion)?.n ?? 0);
+  return [...Object.keys(OCCASIONS), null].map((occasion) => ({ occasion, customers: n(shown, occasion), orders: n(sold, occasion) }));
 }
 
 // Public: POST /api/funnel { store_id, visit, step, device?, mode? } → 204, once per visit and step. Rate-limited in app.js.

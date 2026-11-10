@@ -1290,6 +1290,10 @@ async function loadDemand() {
     el('td', { textContent: t(METHOD_NAME[m.method]) }), el('td', { className: 'num', textContent: m.customers }), el('td', { className: 'num hide-sm', textContent: m.answers }),
     ...['small', 'right', 'big'].map((k) => el('td', { className: 'num hide-sm', textContent: m[k] })),
     el('td', { className: 'num' }, el('strong', { textContent: m.accuracy === null ? '—' : `${m.accuracy}%` })))));
+  // Task 33: customers and paid orders per "Qayerga kiyasiz?" answer (null = not picked).
+  $('occasionRows').replaceChildren(...d.occasions.map((o) => el('tr', {},
+    el('td', { textContent: t(o.occasion ? `kiosk.occasion.${o.occasion}` : 'adm.occasion.none') }),
+    el('td', { className: 'num', textContent: o.customers }), el('td', { className: 'num', textContent: o.orders }))));
   $('dropDayHead').replaceChildren(head('adm.stats.day'));
   $('dropDayRows').replaceChildren(...f.per_day.slice().reverse().map((x) => el('tr', {}, el('td', { textContent: day(x.day) }), ...cells(x))));
 }

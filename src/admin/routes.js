@@ -19,7 +19,7 @@ import { orgRoutes } from './orgs.js';
 import { mallRoutes } from './malls.js';
 import { promoRoutes } from './promos.js';
 import { fitOf } from '../size/size.js';
-import { demandItems, funnelStats, methodStats } from '../demand.js';
+import { demandItems, funnelStats, methodStats, occasionStats } from '../demand.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -867,6 +867,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     res.json({
       days, items: await demandItems(db, scope, { from }), funnel: await funnelStats(db, scope, { from, keys }), methods: await methodStats(db, scope, { from }),
       scans: await scanStats(db, scope, { from }), // task 32: garment labels scanned often but rarely bought
+      occasions: await occasionStats(db, scope, { from }), // task 33: customers and orders per "Qayerga kiyasiz?" answer
     });
   });
   r.get('/demand/export', async (req, res) => {

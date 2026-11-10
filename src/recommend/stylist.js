@@ -3,10 +3,13 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { fail } from '../admin/routes.js';
 import { ORDER, requiredCategories, rankPool, cheaperAlternative, totalOf } from './engine.js';
+import { t } from '../../public/shared/i18n.js';
 
 export const TIMEOUT_MS = 8000;
 export const DEFAULT_MODEL = 'claude-haiku-5-5'; // fast, takes images, and still accepts a forced tool_choice
 export const PHOTO_MAX = 300_000;
+// Task 33: added only when the customer picked an occasion, so a request without one sends the same message as before.
+const OCCASION_LINE = "OCCASION — mijoz bu kiyimni qayerga kiyadi: shu joyga mos uslubdagi kiyimlarni tanla va oldinga qo'y.";
 // Extra user-message line per customer language (none for uz: the system prompt already asks for Uzbek).
 const LANG_LINE = { ru: "Mijoz rus tilida gaplashadi: title, reason va style_guess rus tilida yozilsin.\n" }; // base64 chars (~220 KB JPEG); the app sends ~512 px, usually 30–60 KB
 
@@ -76,7 +79,8 @@ export function createStylist({ client, apiKey = process.env.ANTHROPIC_API_KEY, 
   client ??= new Anthropic({ apiKey });
   // lang: the customer's UI language. The spec prompt stays Uzbek; a Russian customer gets one extra line and Russian names.
   // mode 'single' (task 30): the ranking prompt and tool, plus WANT and OWN.
-  return async ({ photo, weather, sizes, budget, candidates, lang = 'uz', mode = 'outfit', want = null, own = [] }, signal) => {
+  // occasion (task 33): one of the fixed codes or null; Claude gets its Uzbek name and one extra line, never free text.
+  return async ({ photo, weather, sizes, budget, candidates, lang = 'uz', mode = 'outfit', want = null, own = [], occasion = null }, signal) => {
     const single = mode === 'single';
     const tool = single ? SUBMIT_RANKING : SUBMIT_OUTFITS;
     const data = {
@@ -84,11 +88,12 @@ export function createStylist({ client, apiKey = process.env.ANTHROPIC_API_KEY, 
       SIZES: sizes,
       BUDGET: budget,
       ...(single && { WANT: want, OWN: own }),
+      ...(occasion && { OCCASION: t(`kiosk.occasion.${occasion}`, {}, 'uz') }),
       CANDIDATES: candidates.map((p) => ({ product_id: p.id, name: (lang === 'ru' && p.name_ru) || p.name, category: p.category, color: p.color, style: p.style, price: p.unit_price, waterproof: p.waterproof })),
     };
     const content = [
       ...(photo ? [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: photo } }] : []),
-      { type: 'text', text: (photo ? 'Mijoz rasmi yuqorida.' : "Mijoz rasmi yo'q (rasmsiz rejim).") + '\n' + (LANG_LINE[lang] ?? '') + JSON.stringify(data) },
+      { type: 'text', text: (photo ? 'Mijoz rasmi yuqorida.' : "Mijoz rasmi yo'q (rasmsiz rejim).") + '\n' + (LANG_LINE[lang] ?? '') + (occasion ? `${OCCASION_LINE}\n` : '') + JSON.stringify(data) },
     ];
     const msg = await client.messages.create(
       {

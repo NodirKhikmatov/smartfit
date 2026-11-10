@@ -202,7 +202,9 @@ html.kiosk .outfits { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)
 .want-chips { grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); }
 .want-chips label:first-child { grid-column: 1 / -1; }
 html.kiosk .want-chips { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.want .hint { margin: var(--s-2) 0 0; }
+.occasion-chips { grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); }
+html.kiosk .occasion-chips { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.want .hint, .occasion .hint { margin: var(--s-2) 0 0; }
 [data-need].need-off { display: none; }
 .single-group > h2 { font: var(--weight-strong) var(--text-2xl)/var(--leading-tight) var(--font-display); margin: 0 0 var(--s-3); }
 .single-group .outfits, html.kiosk .single-group .outfits { grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
