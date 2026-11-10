@@ -615,6 +615,10 @@ function totalsBlock(o) {
     el('dt', { className: 'total', textContent: t('adm.receipt.total') }), el('dd', { className: 'num total', textContent: money(o.total) }));
 }
 const method = (o) => (o.payment_method === 'cashier' ? t('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] || o.payment_method);
+// Task 35: an instalment order. The total stays the price; the term and monthly amount are what was shown at checkout.
+const instText = (o) => t('adm.order.instalment', { n: o.instalment_months, sum: money(o.instalment_monthly), pct: o.instalment_percent });
+const instNotice = (o) => (o.instalment_months ? [el('div', { className: 'notice inst' }, icon('info'),
+  el('p', {}, el('strong', { textContent: instText(o) }), ' ', ...(o.payment_status === 'pending' ? [t('adm.order.instalment_note')] : [])))] : []);
 function renderOrder(o) {
   $('orderTitle').replaceChildren(t('adm.order.title', { id: o.number }), ' ', badge(o));
   const fact = (k, ...v) => [el('dt', { textContent: t(k) }), el('dd', {}, ...v)];
@@ -628,7 +632,7 @@ function renderOrder(o) {
       ...fact('adm.orders.fulfillment', o.fulfillment === 'pickup' ? t('adm.orders.pickup') : t('adm.order.delivery_to', { address: o.address })),
       ...fact('adm.orders.payment', payBadge(o), ` ${method(o)}`, ...(o.payment_status === 'pending' && o.expires_at ? [' · ', deadline(Math.max(0, Date.parse(o.expires_at) - Date.now()))] : [])),
       ...fact('adm.order.tg', t(o.telegram ? 'adm.order.tg_on' : 'adm.order.tg_off'))),
-    el('h3', { textContent: t('adm.order.items') }), itemsList(o, true), totalsBlock(o), ...returnsList(o));
+    ...instNotice(o), el('h3', { textContent: t('adm.order.items') }), itemsList(o, true), totalsBlock(o), ...returnsList(o));
   $('orderActions').replaceChildren(
     ...(o.payment_status === 'pending' ? [el('button', { type: 'button', className: 'primary', onclick: (e) => markPaid(o, e.currentTarget) }, icon('cash'), t('adm.paydlg.confirm'))] : []),
     ...o.next.map((s) => el('button', { type: 'button', className: s === 'cancelled' ? 'danger' : 'primary', textContent: stepName(o, s), onclick: (e) => setStatus(o, s, e.currentTarget) })),
@@ -681,6 +685,7 @@ function printReceipt(o) {
     mk('tr', {}, mk('td', { textContent: t('adm.receipt.fee') }), mk('td', { textContent: som(o.delivery_fee) })),
     mk('tr', { className: 'big' }, mk('td', { textContent: t('adm.receipt.total') }), mk('td', { textContent: money(o.total) }))),
     mk('p', { textContent: `${pay(o)} · ${method(o)}` }),
+    ...(o.instalment_months ? [mk('p', { textContent: instText(o) })] : []),
     mk('p', {}, mk('small', { textContent: t('adm.receipt.note') })),
     mk('p', { textContent: t('adm.receipt.thanks') }),
   ));
@@ -704,7 +709,7 @@ async function loadPending(quiet) {
     $('pendingCount').textContent = r.total;
     $('pendingList').replaceChildren(...(r.items.length ? r.items.map((o) => el('li', {}, el('button', { type: 'button', id: `pay-${o.id}`, className: `pending-item${payOrder?.id === o.id ? ' on' : ''}`, onclick: () => selectPay(o.id) },
       el('strong', { className: 'pending-no num', textContent: `№ ${o.number}` }),
-      el('span', { className: 'pending-who' }, el('span', { textContent: o.customer_name }), el('span', { className: 'muted', textContent: [t(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), showStore() && o.store_name].filter(Boolean).join(' · ') })),
+      el('span', { className: 'pending-who' }, el('span', { textContent: o.customer_name }), el('span', { className: 'muted', textContent: [t(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), o.instalment_months && t('adm.order.instalment_short', { n: o.instalment_months }), showStore() && o.store_name].filter(Boolean).join(' · ') })),
       el('span', { className: 'pending-sum' }, el('strong', { className: 'num', textContent: som(o.total) }), deadline(o.pay_ms ?? 0))))) :
       [el('li', { className: 'li-empty' }, emptyState({ ic: 'cash', title: t('adm.cash.none'), text: t('adm.cash.none_text') }))]));
   } catch (err) {
@@ -729,7 +734,7 @@ function renderPay(o) {
     el('div', { className: 'pay-head' }, el('h2', { textContent: t('adm.order.title', { id: o.number }) }), payBadge(o),
       o.payment_status === 'pending' && o.expires_at ? deadline(Math.max(0, Date.parse(o.expires_at) - Date.now())) : null),
     el('p', { className: 'muted', textContent: [o.customer_name, o.phone, o.fulfillment === 'pickup' ? t('adm.orders.pickup') : t('adm.order.delivery_to', { address: o.address })].join(' · ') }),
-    itemsList(o), totalsBlock(o), err,
+    ...instNotice(o), itemsList(o), totalsBlock(o), err,
     el('div', { className: 'actions' },
       o.payment_status === 'pending' ? el('button', { type: 'button', className: 'primary', onclick: (e) => markPaid(o, e.currentTarget, err) }, icon('cash'), t('adm.paydlg.confirm')) : null,
       o.payment_status === 'paid' ? el('button', { type: 'button', className: 'primary', onclick: () => printReceipt(o) }, icon('print'), t('adm.receipt.print')) : null,
@@ -1216,6 +1221,9 @@ async function loadStats() {
   $('statsFunnelSub').textContent = t('adm.stats.orders', { orders: f.orders, delivery: f.delivery_orders });
   drawFunnel($('statsFunnel'), f);
   $('statsSales').textContent = salesLine(s.sales);
+  // Task 35: only once there are instalment orders in the period, so a store without them sees the page as before.
+  $('statsInst').hidden = !s.instalments.orders;
+  $('statsInst').textContent = t('adm.stats.instalments', { n: s.instalments.orders, share: s.instalments.share, sum: money(s.instalments.avg_total) });
   $('topRows').replaceChildren(...(s.top.length ? s.top.map((x) => el('li', {},
     el('span', { className: 'rank-name' }, el('strong', { textContent: x.name ? productName(x) : t('adm.stats.deleted', { id: x.product_id }) }), el('span', { className: 'muted', textContent: catOf(x) })),
     el('span', { className: 'rank-num num' }, el('strong', { textContent: t('adm.stats.times_n', { n: x.count }) })))) :
@@ -1409,6 +1417,12 @@ ptf.onsubmit = async (e) => {
 // Store profile. A super-admin picks the store here (defaults to the sidebar's); everyone else has one.
 const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id', 'bundle_percent'];
 const sf = $('storeForm');
+// Task 35: one row per possible term (the server's TERM_MONTHS): offered or not, and its markup percent.
+const TERM_MONTHS = [3, 6, 9, 12, 18, 24];
+$('instTerms').replaceChildren(...TERM_MONTHS.map((n) => el('div', { className: 'inst-term' },
+  el('label', { className: 'check' }, el('input', { type: 'checkbox', name: `inst_${n}` }), el('span', { textContent: t('adm.set.instalment_months', { n }) })),
+  el('label', { className: 'field' }, el('span', { textContent: t('adm.set.instalment_percent') }),
+    el('input', { name: `inst_pct_${n}`, type: 'number', min: 0, max: 100, step: 1, inputMode: 'numeric', value: 0, ariaLabel: `${t('adm.set.instalment_months', { n })}: ${t('adm.set.instalment_percent')}` })))));
 const storeId = () => (many() ? $('storePick').value : String(stores[0]?.id ?? me.store_id));
 function mapLink() {
   const [lat, lon] = [sf.lat.value, sf.lon.value];
@@ -1432,6 +1446,12 @@ async function loadStore() {
     if (seq !== loads.store) return;
     stateBox($('storeLoadError'));
     for (const k of STORE_FIELDS) sf[k].value = s[k] ?? '';
+    sf.instalment_on.checked = s.instalment_on;
+    for (const n of TERM_MONTHS) {
+      const term = s.instalment_terms.find((x) => x.months === n);
+      sf[`inst_${n}`].checked = Boolean(term);
+      sf[`inst_pct_${n}`].value = term?.percent ?? 0;
+    }
     sf.kiosk_pin.value = '';
     $('pinState').textContent = t(s.kiosk_pin_set ? 'adm.set.pin_on' : 'adm.set.pin_off') + '.';
     $('storeFields').disabled = !s.can_edit;
@@ -1454,6 +1474,8 @@ sf.onsubmit = async (e) => {
     delivery_fee: Number(v('delivery_fee')), free_delivery_threshold: v('free_delivery_threshold') ? Number(v('free_delivery_threshold')) : null,
     telegram_chat_id: v('telegram_chat_id') || null, report_chat_id: v('report_chat_id') || null, low_stock_threshold: Number(v('low_stock_threshold')),
     bundle_percent: Number(v('bundle_percent')),
+    instalment_on: sf.instalment_on.checked,
+    instalment_terms: TERM_MONTHS.filter((n) => sf[`inst_${n}`].checked).map((n) => ({ months: n, percent: Number(v(`inst_pct_${n}`)) })),
     ...(v('kiosk_pin') && { kiosk_pin: v('kiosk_pin') }),
   };
   try {
@@ -1699,7 +1721,7 @@ const AUDIT_FIELDS = {
   delivery_fee: 'field.delivery_fee', free_delivery_threshold: 'field.free_threshold', telegram_chat_id: 'field.telegram_chat', report_chat_id: 'field.report_chat',
   sku: 'field.sku', barcode: 'field.barcode', low_stock_threshold: 'field.low_stock', prefix: 'adm.sync.key',
   email: 'field.email', role: 'field.role', disabled: 'adm.team.status',
-  bundle_percent: 'field.bundle_percent', store_id: 'common.store', kind: 'field.promo_kind', value: 'field.promo_value', min_order: 'field.promo_min',
+  bundle_percent: 'field.bundle_percent', instalment_on: 'adm.set.instalment_on', instalment_terms: 'field.instalment_terms', store_id: 'common.store', kind: 'field.promo_kind', value: 'field.promo_value', min_order: 'field.promo_min',
   description: 'field.description', description_ru: 'field.description_ru', details: 'field.details', size_kind: 'field.size_kind', sizes: 'field.cat_sizes',
   hidden: 'adm.cats.hide', sort: 'adm.cats.order',
   starts_on: 'adm.promo.starts', ends_on: 'adm.promo.ends', max_uses: 'field.promo_max_uses', max_per_phone: 'field.promo_per_phone', active: 'field.promo_active',

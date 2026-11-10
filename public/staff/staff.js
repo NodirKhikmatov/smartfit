@@ -167,7 +167,7 @@ const statusLabel = (o, s) => t(handed(o, s) ? 'adm.status.handed' : `adm.status
 function orderCard(o) {
   return el('article', { className: 'card req' },
     el('header', {}, el('h3', { textContent: `№ ${o.number}` }), el('span', { className: `badge ${o.status === 'new' ? 'warn' : 'ok'}`, textContent: t(`adm.status.${o.status}`) })),
-    el('p', { className: 'muted', textContent: [o.customer_name, t(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), storeOf(o)].filter(Boolean).join(' · ') }),
+    el('p', { className: 'muted', textContent: [o.customer_name, t(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), o.instalment_months && t('adm.order.instalment_short', { n: o.instalment_months }), storeOf(o)].filter(Boolean).join(' · ') }),
     el('ul', { className: 'picks' }, ...o.items.map(pick)),
     el('div', { className: 'actions' }, ...o.next.map((s, i) => act(`o${o.id}${s}`, stepLabel(o, s),
       () => call(`/orders/${o.id}/status`, { method: 'POST', body: { status: s } }), t('staff.order_toast', { n: o.number, status: statusLabel(o, s) }), i > 0))));

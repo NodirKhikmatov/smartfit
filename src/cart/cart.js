@@ -14,6 +14,7 @@ import { logMissed } from '../demand.js';
 import { price, findPromo, promoProblem, claimPromo, releasePromo, setKey, parseJson, spread } from './promo.js';
 import { fmt } from '../../public/shared/i18n.js';
 import { pointsConfig, balanceOf, maxSpend, checkSpend, spend, refundSpent, earnPoints } from './points.js';
+import { termsOf, plan, monthly } from './instalment.js';
 
 export const HOLD_MS = 15 * 60 * 1000;
 export const HANDOFF_MS = 5 * 60 * 1000; // how long the kiosk's "continue on your phone" QR works
@@ -149,7 +150,7 @@ export async function markPaid(db, orderId, now = Date.now()) {
 // SQLite CURRENT_TIMESTAMP is 'YYYY-MM-DD HH:MM:SS' in UTC, which Date would read as local time.
 export const stamp = (v) => (v == null ? null : new Date(typeof v === 'string' && !v.includes('T') ? `${v.replace(' ', 'T')}Z` : v).toISOString());
 const msLeft = (v) => (v == null ? null : Math.max(0, Date.parse(stamp(v)) - Date.now()));
-export const storeOf = (db, id) => db('stores').where({ id }).first('id', 'organization_id', 'name', 'city', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'bundle_percent');
+export const storeOf = (db, id) => db('stores').where({ id }).first('id', 'organization_id', 'name', 'city', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'bundle_percent', 'instalment_on', 'instalment_terms');
 
 // Task 26: the cart's discounts. → { ...price(), promo: { code, value, kind, error, sum } | null }. A promo that no longer
 // applies (switched off, used up, under its minimum after a removal) stays on the cart with its error and takes nothing off.
@@ -178,7 +179,14 @@ async function cartView(db, cart, payments) {
   const pr = await pricing(db, cart, store, items);
   const off = pr.subtotal - pr.goods;
   const points = await cartPoints(db, cart, store, pr.goods);
-  const withPoints = (f) => totals(store, pr.subtotal, f, off, points?.max ?? 0);
+  // Task 35: with instalments on, every totals object carries each term's monthly amount for its own total.
+  const terms = termsOf(store);
+  const sums = (f, pts = 0) => {
+    const t = totals(store, pr.subtotal, f, off, pts);
+    const instalments = plan(terms, t.total);
+    return instalments ? { ...t, instalments } : t;
+  };
+  const withPoints = (f) => sums(f, points?.max ?? 0);
   return {
     token: cart.token,
     store_id: store.id,
@@ -188,7 +196,7 @@ async function cartView(db, cart, payments) {
     payments,
     delivery: { city: store.city, lat: store.lat, lon: store.lon, fee: store.delivery_fee, free_over: store.free_delivery_threshold },
     discounts: { bundle: pr.bundle_discount, bundle_percent: store.bundle_percent, promo: pr.promo_discount, code: pr.promo && { code: pr.promo.code, error: pr.promo.error, min_order: pr.promo.min_order } },
-    totals: { pickup: totals(store, pr.subtotal, 'pickup', off), delivery: totals(store, pr.subtotal, 'delivery', off) },
+    totals: { pickup: sums('pickup'), delivery: sums('delivery') },
     // Task 34: null when points are off in this organisation. linked = a profile confirmed "use my points" for this cart;
     // max = what checkout accepts as `points` now, and totals = the totals when that much is used.
     ...(points && { points: { ...points, totals: { pickup: withPoints('pickup'), delivery: withPoints('delivery') } } }),
@@ -206,10 +214,11 @@ async function cartPoints(q, cart, store, goods) {
 export async function orderView(db, order) {
   const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').where('i.order_id', order.id).orderBy('i.id')
     .select('i.id', 'i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.sizes', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price', 'i.discount', 'i.returned', 'i.fit');
-  const { id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total, promo_code, promo_discount, bundle_discount, points_discount } = order;
+  const { id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total, promo_code, promo_discount, bundle_discount, points_discount,
+    instalment_months, instalment_percent, instalment_monthly } = order;
   return {
     id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total,
-    promo_code, promo_discount, bundle_discount, points_discount,
+    promo_code, promo_discount, bundle_discount, points_discount, instalment_months, instalment_percent, instalment_monthly,
     expires_at: stamp(order.expires_at), paid_at: stamp(order.paid_at), created_at: stamp(order.created_at), items,
   };
 }
@@ -258,15 +267,17 @@ function parseItems(items) {
 // their stock. pr (task 26) = price() of these lines and the claimed promo row, or nothing (no discounts).
 // points (task 34) = so'm of points spent and the profile they come from; split over the lines after the discounts.
 // Per-store display number: the UPDATE locks the store row, so parallel orders get 1, 2, 3… with no gaps or repeats.
-export async function insertOrder(trx, store, c, lines, { method = 'cashier', notifyToken, recommendationId = null, holdMs = HOLD_MS, client = null, pr = null, promo = null, points = 0, profileId = null }) {
+export async function insertOrder(trx, store, c, lines, { method = 'cashier', notifyToken, recommendationId = null, holdMs = HOLD_MS, client = null, pr = null, promo = null, points = 0, profileId = null, instalment = null }) {
   const subtotal = lines.reduce((s, l) => s + l.unit_price * l.quantity, 0);
   const d = pr ? { bundle_discount: pr.bundle_discount, promo_discount: pr.promo_discount, promo_code_id: promo?.id ?? null, promo_code: promo?.code ?? null } : {};
   const off = lines.map((l, i) => pr?.discounts[i] ?? 0);
   const pts = spread(lines.map((l, i) => l.unit_price * l.quantity - off[i]), points);
   const t = totals(store, subtotal, c.fulfillment, (d.bundle_discount ?? 0) + (d.promo_discount ?? 0), points);
+  // Task 35: the chosen term as it is now; the monthly amount is a shown figure, total stays the price paid.
+  const inst = instalment ? { instalment_months: instalment.months, instalment_percent: instalment.percent, instalment_monthly: monthly(t.total, instalment.months, instalment.percent) } : {};
   await trx('stores').where({ id: store.id }).increment('order_seq', 1);
   const { order_seq: number } = await trx('stores').where({ id: store.id }).first('order_seq');
-  const [{ id }] = await trx('orders').insert({ store_id: store.id, number, ...c, ...t, ...d, points_discount: points, profile_id: profileId, payment_method: method, notify_token: notifyToken, recommendation_id: recommendationId, client, expires_at: iso(Date.now() + holdMs) }).returning('id');
+  const [{ id }] = await trx('orders').insert({ store_id: store.id, number, ...c, ...t, ...d, ...inst, points_discount: points, profile_id: profileId, payment_method: method, notify_token: notifyToken, recommendation_id: recommendationId, client, expires_at: iso(Date.now() + holdMs) }).returning('id');
   // discount = everything taken off the line (points too), so a return refunds the money paid; points = the points part.
   await trx('order_items').insert(lines.map((l, i) => ({ order_id: id, product_id: l.product_id, size: l.size, quantity: l.quantity, unit_price: l.unit_price, discount: off[i] + pts[i], points: pts[i] })));
   return id;
@@ -465,6 +476,9 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
     if (typeof method !== 'string' || !Object.hasOwn(methods, method)) throw fail(400, 'err.invalid', { field: 'field.payment' });
     const want = b.points ?? 0;
     if (!Number.isInteger(want) || want < 0 || want > 1e9) throw fail(400, 'err.invalid', { field: 'field.points' });
+    // Task 35: instalment = the term in months; only at the cashier (the store's Nasiya terminal), never online.
+    const months = b.instalment ?? null;
+    if (months !== null && (!Number.isInteger(months) || method !== 'cashier')) throw fail(400, 'err.invalid', { field: 'field.instalment' });
     const notifyToken = randomBytes(16).toString('hex');
     const id = await db.transaction(async (trx) => {
       const cart = await liveCart(trx, req.params.token);
@@ -479,10 +493,14 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
       if (pr.promo) await claimPromo(trx, pr.promo, c.phone);
       const cfg = await pointsConfig(trx, store.id);
       if (want) await checkSpend(trx, cfg, cart.profile_id, pr.goods, want);
+      const owed = totals(store, pr.subtotal, c.fulfillment, pr.subtotal - pr.goods, want).total;
       // Payme/Click can't take 0 so'm: a fully discounted order is settled at the cashier.
-      if (method !== 'cashier' && totals(store, pr.subtotal, c.fulfillment, pr.subtotal - pr.goods, want).total < 1) throw fail(400, 'err.invalid', { field: 'field.payment' });
+      if (method !== 'cashier' && owed < 1) throw fail(400, 'err.invalid', { field: 'field.payment' });
+      // A term the store doesn't offer (or instalments off, or nothing left to pay) is refused, never silently dropped.
+      const instalment = months === null ? null : termsOf(store)?.find((x) => x.months === months);
+      if (months !== null && (!instalment || owed < 1)) throw fail(409, 'err.instalment_term');
       const profileId = cfg && cart.profile_id ? cart.profile_id : null; // earns on hand-over even when no points were spent
-      const id = await insertOrder(trx, store, c, priced, { method, notifyToken, recommendationId: cart.recommendation_id, pr, promo: pr.promo, points: want, profileId });
+      const id = await insertOrder(trx, store, c, priced, { method, notifyToken, recommendationId: cart.recommendation_id, pr, promo: pr.promo, points: want, profileId, instalment });
       if (want) await spend(trx, cfg, cart.profile_id, id, want);
       await trx('carts').where({ id: cart.id }).del(); // reserved stays: the order owns the hold now
       return id;
@@ -511,6 +529,7 @@ export function createOrderRouter(db, { methods = CASHIER, link = () => null } =
       items: v.items.map(({ id, name, name_ru, category, color, size, quantity, unit_price, fit }) => ({ id, name, name_ru, category, color, size, quantity, unit_price, fit })),
       fit_open: fitOpen(o),
       subtotal: v.subtotal, bundle_discount: v.bundle_discount, promo_discount: v.promo_discount, promo_code: v.promo_code, points_discount: v.points_discount,
+      instalment_months: v.instalment_months, instalment_monthly: v.instalment_monthly,
       delivery_fee: v.delivery_fee, total: v.total, created_at: v.created_at, paid_at: v.paid_at, expires_at: v.expires_at,
       pay_ms: o.payment_status === 'pending' ? msLeft(o.expires_at) : null, pay_url: pay?.url ?? null, telegram: link(o.notify_token)?.url ?? null,
     });

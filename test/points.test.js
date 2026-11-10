@@ -421,7 +421,8 @@ test('migration 026: the orders CHECK holds points; down folds them into the sub
     const [{ id }] = await m('orders').insert({ store_id: store.id, number: 1, customer_name: 'A', phone: '+998901112233', fulfillment: 'pickup', subtotal: 100000, points_discount: 30000, delivery_fee: 0, total: 70000 }).returning('id');
     await assert.rejects(m('orders').insert({ store_id: store.id, number: 2, customer_name: 'A', phone: '+998901112233', fulfillment: 'pickup', subtotal: 100000, points_discount: 30000, delivery_fee: 0, total: 100000 }));
     await assert.rejects(m('orders').insert({ store_id: store.id, number: 3, customer_name: 'A', phone: '+998901112233', fulfillment: 'pickup', subtotal: 100000, points_discount: 100001, delivery_fee: 0, total: -1 }));
-    await m.migrate.down();
+    await m.migrate.down(); // 027
+    await m.migrate.down(); // 026
     const o = await m('orders').where({ id }).first();
     assert.deepEqual([o.subtotal, o.total, 'points_discount' in o], [70000, 70000, false]);
     await m.migrate.latest();

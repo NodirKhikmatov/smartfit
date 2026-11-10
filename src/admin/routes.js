@@ -592,7 +592,8 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     return dateRange(q, 'o.created_at', f);
   }
   const ORDER_COLS = ['o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.phone', 'o.fulfillment', 'o.address', 'o.status',
-    'o.payment_status', 'o.payment_method', 'o.subtotal', 'o.bundle_discount', 'o.promo_discount', 'o.promo_code', 'o.points_discount', 'o.delivery_fee', 'o.total', 'o.created_at', 'o.expires_at', 'o.telegram_chat_id'];
+    'o.payment_status', 'o.payment_method', 'o.subtotal', 'o.bundle_discount', 'o.promo_discount', 'o.promo_code', 'o.points_discount', 'o.delivery_fee', 'o.total', 'o.created_at', 'o.expires_at', 'o.telegram_chat_id',
+    'o.instalment_months', 'o.instalment_monthly']; // task 35
 
   // → { items, total, limit, offset }, newest first (dir=asc: oldest first, so the cashier sees the soonest to expire on top).
   r.get('/orders', async (req, res) => {
@@ -622,9 +623,10 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const tashkent = (v) => new Date(msOf(v)).toLocaleString('sv-SE', { timeZone: STATS_TZ }).slice(0, 16);
     const csv = toCsv([
       ['№', tr('adm.orders.time'), tr('common.store'), tr('adm.orders.customer'), tr('adm.csv.phone'), tr('adm.orders.fulfillment'), tr('field.address'),
-        tr('adm.csv.subtotal'), tr('adm.csv.discount'), tr('field.promo_code'), tr('adm.csv.fee'), tr('adm.csv.total'), tr('field.payment'), tr('adm.orders.payment'), tr('adm.orders.status')],
+        tr('adm.csv.subtotal'), tr('adm.csv.discount'), tr('field.promo_code'), tr('adm.csv.fee'), tr('adm.csv.total'), tr('field.payment'), tr('adm.csv.instalment_months'), tr('adm.csv.instalment_monthly'), tr('adm.orders.payment'), tr('adm.orders.status')],
       ...rows.map((o) => [o.number, tashkent(o.created_at), o.store_name, o.customer_name, phoneText(o.phone), tr(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), o.address,
-        o.subtotal, o.bundle_discount + o.promo_discount + o.points_discount, o.promo_code, o.delivery_fee, o.total, o.payment_method === 'cashier' ? tr('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] ?? o.payment_method, tr(`adm.pay.${o.payment_status}`),
+        o.subtotal, o.bundle_discount + o.promo_discount + o.points_discount, o.promo_code, o.delivery_fee, o.total, o.payment_method === 'cashier' ? tr('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] ?? o.payment_method,
+        o.instalment_months, o.instalment_monthly, tr(`adm.pay.${o.payment_status}`),
         tr(o.status === 'delivered' && o.fulfillment === 'pickup' ? 'adm.status.handed' : `adm.status.${o.status}`)]),
     ]);
     res.type('text/csv; charset=utf-8').attachment(`orders-${dayKey(Date.now())}.csv`).send(csv);
@@ -775,7 +777,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const now = Date.now();
     const orders = await inStores(req.admin, db('orders as o').join('stores as s', 's.id', 'o.store_id').where('o.payment_status', 'paid')
       .whereIn('o.status', ['new', 'packing', 'shipping']).orderBy('o.paid_at').limit(50)
-      .select('o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.fulfillment', 'o.status', 'o.payment_status', 'o.paid_at'), 'o.store_id');
+      .select('o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.fulfillment', 'o.status', 'o.payment_status', 'o.paid_at', 'o.instalment_months'), 'o.store_id');
     const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').whereIn('i.order_id', orders.map((o) => o.id))
       .select('i.order_id', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity')
       .orderByRaw('p.shelf_location is null, p.shelf_location, p.category, p.name');
@@ -820,7 +822,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     // shortcut: aggregates in JS over the raw rows; fine for pilot volume, move to SQL GROUP BY if logs reach ~100k/90 days.
     const allLogs = await inScope(req, db('recommendation_logs').select('id', 'product_ids', 'created_at', 'accepted_at', 'tried_at').where('created_at', '>=', dbTime(prevSince)));
     // Pilot: paid orders that weren't cancelled afterwards (a cancelled paid order is a refund).
-    const allOrders = await inScope(req, db('orders').select('recommendation_id', 'fulfillment', 'total', 'created_at').where({ payment_status: 'paid' })
+    const allOrders = await inScope(req, db('orders').select('recommendation_id', 'fulfillment', 'total', 'created_at', 'instalment_months').where({ payment_status: 'paid' })
       .whereNot('status', 'cancelled').where('created_at', '>=', dbTime(prevSince)));
     const cur = (x) => msOf(x.created_at) >= since;
     const logs = allLogs.filter(cur), orders = allOrders.filter(cur);
@@ -847,6 +849,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const prevLogs = allLogs.filter((x) => !cur(x)), prevOrders = allOrders.filter((x) => !cur(x));
     res.json({
       days,
+      instalments: instalmentShare(orders), // task 35
       sales: await salesByMode(db, inScope(req, db('orders as o'), 'o.store_id').where('o.created_at', '>=', dbTime(since))),
       total: logs.length,
       pilot: funnel(logs, orders),
@@ -945,6 +948,13 @@ export async function salesByMode(db, q) {
   const out = Object.fromEntries(['outfit', 'single', 'other'].map((k) => [k, { orders: 0, revenue: 0 }]));
   for (const x of rows) if (out[x.kind]) out[x.kind] = { orders: Number(x.n), revenue: Number(x.revenue ?? 0) };
   return out;
+}
+
+// Task 35: of the paid, not cancelled orders, how many were "Muddatli to'lov" (share in %) and their average total.
+export function instalmentShare(orders) {
+  const inst = orders.filter((o) => o.instalment_months != null);
+  const sum = inst.reduce((a, o) => a + o.total, 0);
+  return { orders: inst.length, share: orders.length ? Math.round((inst.length * 100) / orders.length) : 0, avg_total: inst.length ? Math.round(sum / inst.length) : 0 };
 }
 
 // Funnel per results screen: shown → accepted (added to cart) → tried on → bought (a paid order from it), plus order totals.

@@ -8,6 +8,7 @@ import { unitPrice, pairWith, visible } from './recommend/engine.js';
 import { fitOf } from './size/size.js';
 import { logMissed } from './demand.js';
 import { hold, customer, insertOrder, orderView, releaseExpired, storeOf } from './cart/cart.js';
+import { termsOf, plan } from './cart/instalment.js';
 import { clientKey } from './limits.js';
 import { qrSvg, publicBase } from './qr.js';
 
@@ -32,7 +33,7 @@ export async function withSizes(db, rows) {
 }
 
 async function storeById(db, id) {
-  const store = posInt(id) ? await db('stores').where({ id }).first('id', 'organization_id') : null;
+  const store = posInt(id) ? await db('stores').where({ id }).first('id', 'organization_id', 'instalment_on', 'instalment_terms') : null;
   if (!store) throw fail(404, 'err.store_not_found');
   return store;
 }
@@ -81,7 +82,8 @@ export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {})
     const pairs = pairWith(row, pool).map((p) => p.id);
     const { fit_offset, details, ...rest } = item;
     res.json({
-      item: { ...rest, all_sizes: sizesOf(row), details: details ? JSON.parse(details) : [], fit_offset: (await fitOf(db, [row])).get(id).offset },
+      item: { ...rest, all_sizes: sizesOf(row), details: details ? JSON.parse(details) : [], fit_offset: (await fitOf(db, [row])).get(id).offset,
+        ...(termsOf(store) && { instalments: plan(termsOf(store), rest.unit_price) }) }, // task 35: per-month figures, server-made
       pairs: await withSizes(db, pool.filter((p) => pairs.includes(p.id)).sort((a, b) => pairs.indexOf(a.id) - pairs.indexOf(b.id))),
     });
   });

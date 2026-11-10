@@ -7,6 +7,8 @@ import { hashPassword, verifyPassword, signToken } from './auth.js';
 import { audit, diff, AUDIT_ENTITIES } from './audit.js';
 import { publicBase } from '../qr.js';
 import { stamp } from '../cart/cart.js';
+import { parseJson } from '../cart/promo.js';
+import { validTerms } from '../cart/instalment.js';
 
 export const ROLES = ['super', 'owner', 'manager', 'staff', 'mall'];
 const STORE_ROLES = ['manager', 'staff']; // bound to one store; an owner invites and manages these
@@ -74,7 +76,11 @@ export async function createInvite(req, q, { email, role, storeId, orgId, mallId
 }
 
 // Store profile as the settings form edits it.
-const STORE_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'opens_at', 'closes_at', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id', 'bundle_percent'];
+const STORE_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'opens_at', 'closes_at', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id', 'bundle_percent',
+  'instalment_on', 'instalment_terms'];
+// Task 35: the terms are JSON in the DB and an array everywhere else.
+const fromRow = (s) => s && { ...s, instalment_on: Boolean(s.instalment_on), instalment_terms: parseJson(s.instalment_terms, []) };
+const toRow = (s) => ({ ...s, instalment_terms: JSON.stringify(s.instalment_terms) });
 function validStore(b) {
   const num = (v, min, max, field) => {
     const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
@@ -106,7 +112,10 @@ function validStore(b) {
     report_chat_id: chat(b.report_chat_id, 'field.report_chat'), // task 24: the owner's weekly report
     low_stock_threshold: int(typeof b.low_stock_threshold === 'string' && b.low_stock_threshold.trim() !== '' ? Number(b.low_stock_threshold) : b.low_stock_threshold, 0, 1000, 'field.low_stock'),
     bundle_percent: int(b.bundle_percent ?? 0, 0, 90, 'field.bundle_percent'), // task 26: "whole outfit" discount, 0 = off
+    instalment_on: b.instalment_on ?? false, // task 35: "Muddatli to'lov (kassada)"
+    instalment_terms: validTerms(b.instalment_terms),
   };
+  if (typeof s.instalment_on !== 'boolean' || (s.instalment_on && !s.instalment_terms.length)) throw fail(400, 'err.invalid', { field: 'field.instalment_terms' });
   if ((s.opens_at === null) !== (s.closes_at === null)) throw fail(400, 'err.invalid', { field: 'field.hours' });
   return s;
 }
@@ -115,7 +124,7 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
   async function findStore(req) {
     const id = Number(req.params.id);
     if (!canSee(req.admin, id)) throw fail(404, 'err.store_not_found');
-    const s = Number.isInteger(id) && id > 0 ? await db('stores').where({ id }).first(STORE_COLS) : undefined;
+    const s = Number.isInteger(id) && id > 0 ? fromRow(await db('stores').where({ id }).first(STORE_COLS)) : undefined;
     if (!s) throw fail(404, 'err.store_not_found');
     return s;
   }
@@ -140,7 +149,7 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
     const d = diff(before, next);
     if (d || pinHash) {
       await db.transaction(async (trx) => {
-        await trx('stores').where({ id }).update({ ...next, ...(pinHash && { kiosk_pin_hash: pinHash }), updated_at: trx.fn.now() });
+        await trx('stores').where({ id }).update({ ...toRow(next), ...(pinHash && { kiosk_pin_hash: pinHash }), updated_at: trx.fn.now() });
         if (d) await audit(trx, req.admin, { action: 'store.update', storeId: id, entityId: id, label: next.name, ...d });
         if (pinHash) await audit(trx, req.admin, { action: 'store.kiosk_pin', storeId: id, entityId: id, label: next.name });
       });
@@ -162,7 +171,7 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
     const first = !(await db('stores').where({ organization_id: orgId }).first('id'));
     const mall = org.mall_id && first ? { mall_id: org.mall_id } : {};
     const id = await db.transaction(async (trx) => {
-      const [{ id }] = await trx('stores').insert({ ...s, organization_id: orgId, ...mall }).returning('id');
+      const [{ id }] = await trx('stores').insert({ ...toRow(s), organization_id: orgId, ...mall }).returning('id');
       if (req.admin.role === 'owner' && !req.admin.store_id) await trx('admins').where({ id: req.admin.id }).update({ store_id: id, updated_at: trx.fn.now() });
       await audit(trx, req.admin, { action: 'store.create', storeId: id, entityId: id, label: s.name, after: s });
       return id;

@@ -228,6 +228,7 @@
             <div class="panel-head"><div><h2 id="statsFunnelTitle" data-i18n="adm.stats.pilot"></h2><p class="panel-sub" id="statsFunnelSub"></p></div></div>
             <div class="funnel" id="statsFunnel"></div>
             <p class="panel-sub" id="statsSales"></p>
+            <p class="panel-sub" id="statsInst" hidden></p>
           </section>
           <section class="card panel" aria-labelledby="statsTopTitle">
             <div class="panel-head"><div><h2 id="statsTopTitle" data-i18n="adm.stats.top"></h2></div></div>
@@ -478,6 +479,12 @@
                 <label class="field span-all"><span data-i18n="field.report_chat"></span> <input name="report_chat_id" inputmode="numeric" pattern="-?[0-9]{1,15}" maxlength="16" autocomplete="off"><span class="hint" data-i18n="adm.set.report_hint"></span></label>
                 <label class="field"><span data-i18n="field.low_stock"></span> <input name="low_stock_threshold" type="number" min="0" max="1000" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.low_hint"></span></label>
                 <label class="field"><span data-i18n="field.bundle_percent"></span> <input name="bundle_percent" type="number" min="0" max="90" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.bundle_hint"></span></label>
+                <div class="span-all inst-set" role="group" aria-labelledby="instTitle">
+                  <h3 id="instTitle" data-i18n="adm.set.instalment_title"></h3>
+                  <label class="check"><input name="instalment_on" type="checkbox" aria-describedby="instHint"> <span data-i18n="adm.set.instalment_on"></span></label>
+                  <p class="hint" id="instHint" data-i18n="adm.set.instalment_hint"></p>
+                  <div class="inst-terms" id="instTerms"></div>
+                </div>
                 <label class="field"><span data-i18n="field.kiosk_pin"></span> <input name="kiosk_pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" autocomplete="new-password" aria-describedby="pinState"><span class="hint"><strong id="pinState"></strong> <span data-i18n="adm.set.kiosk_pin_hint"></span></span></label>
               </div>
             </fieldset>

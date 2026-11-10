@@ -802,6 +802,7 @@ function picker(p) {
   return box;
 }
 
+const lowest = (terms) => terms.reduce((a, b) => (b.monthly < a.monthly ? b : a)); // task 35: the smallest monthly amount
 const priceEl = (p) => el('div', { className: p.discount_price ? 'price sale' : 'price' }, ...(p.discount_price ? [el('s', { textContent: som(p.price) })] : []), som(p.unit_price));
 
 // swap(p, li): an outfit card's "Almashtirish" for this item (task 25); none on the partial card.
@@ -1105,6 +1106,8 @@ function renderItem(p, pairs) {
     el('div', { className: 'item-page' },
       p.image_url ? el('img', { className: 'item-photo', src: p.image_url, alt: '' }) : el('div', { className: 'item-photo ph' }, icon(p.category || 'hanger')),
       el('div', { className: 'item-info card' }, priceEl(p),
+        // Task 35: the lowest monthly amount the store offers for this price (server-made).
+        ...(p.instalments ? [el('p', { className: 'meta inst-line', textContent: t('kiosk.inst.item', { sum: som(lowest(p.instalments).monthly), n: lowest(p.instalments).months }) })] : []),
         el('p', { className: 'meta', textContent: [catOf(p), colorName(p.color), p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }),
         ...(description(p) ? [el('p', { textContent: description(p) })] : []),
         // Task 36: the shop's free details ("Mato: 100% paxta"), as text.
@@ -1190,7 +1193,7 @@ const checkout = $('checkout');
 
 $('cartBtn').onclick = () => go('cart');
 $('cartBack').onclick = () => go(request ? 'results' : 'start');
-checkout.addEventListener('change', (e) => e.target.name === 'fulfillment' && renderSum());
+checkout.addEventListener('change', (e) => ['fulfillment', 'payment', 'term'].includes(e.target.name) && renderSum());
 
 async function cartAction(call) {
   $('cartError').textContent = '';
@@ -1255,7 +1258,6 @@ function renderCartScreen() {
   startHold();
   if (empty) return $('cartBody').replaceChildren(el('div', { className: 'empty' }, icon('bag'), el('p', { textContent: t('kiosk.cart.empty') })));
   $('cartBody').replaceChildren(el('ul', { className: 'items lines' }, ...cart.items.map(cartLine)));
-  renderPay();
   renderPromo();
   renderPoints();
   renderSum();
@@ -1316,15 +1318,30 @@ $('handoffBtn').onclick = async () => {
 };
 
 // Click/Payme only on the phone (no card entry on a shared kiosk) and only when the server has them configured.
-const PAY = { cashier: 'kiosk.checkout.pay_cashier', click: 'Click', payme: 'Payme' }; // brand names stay as they are
-function renderPay() {
+// Task 35: "Muddatli to'lov (kassada)" when the shown totals carry instalment terms (the store offers them and
+// something is left to pay); it is a cashier order with a term, and the terms' monthly amounts come from the server.
+const PAY = { cashier: 'kiosk.checkout.pay_cashier', instalment: 'kiosk.inst.pay', click: 'Click', payme: 'Payme' }; // brand names stay as they are
+const picked = (name) => checkout[name]?.value || '';
+// Radios are rebuilt only when their set changes, so picking one keeps the focus on it.
+function radios(box, name, opts, fallback) {
+  const key = opts.map(([v, label]) => `${v}:${label}`).join('|');
+  if (box.dataset.opts === key && picked(name)) return;
+  const was = picked(name);
+  const on = opts.some(([v]) => String(v) === was) ? was : String(fallback);
+  box.dataset.opts = key;
+  box.replaceChildren(...opts.map(([v, label, sub]) => el('label', {}, el('input', { type: 'radio', name, value: v, checked: String(v) === on }),
+    el('span', {}, label, ...(sub ? [el('small', { textContent: sub })] : [])))));
+}
+function renderPay(s) {
   const online = kiosk ? [] : cart.payments.filter((m) => m !== 'cashier' && PAY[m]);
-  $('payFields').hidden = !online.length;
+  const opts = ['cashier', ...(s.instalments ? ['instalment'] : []), ...online];
+  $('payFields').hidden = opts.length < 2;
   $('payNote').textContent = t(online.length ? 'kiosk.checkout.note_online' : 'kiosk.checkout.note_cashier');
-  if (!online.length) return;
-  const picked = checkout.payment?.value || 'cashier';
-  $('payChoices').replaceChildren(...['cashier', ...online].map((m) =>
-    el('label', {}, el('input', { type: 'radio', name: 'payment', value: m, checked: m === picked }), el('span', { textContent: t(PAY[m]) }))));
+  radios($('payChoices'), 'payment', opts.map((m) => [m, t(PAY[m])]), 'cashier');
+  const terms = picked('payment') === 'instalment' ? s.instalments : null;
+  $('termFields').hidden = !terms;
+  if (terms) radios($('termChoices'), 'term', terms.map((x) => [x.months, t('kiosk.inst.term', { n: x.months, sum: som(x.monthly) }), x.percent ? t('kiosk.inst.markup', { pct: x.percent }) : t('kiosk.inst.no_markup')]), terms[0].months);
+  return terms ? terms.find((x) => String(x.months) === picked('term')) : null;
 }
 
 // Task 26: one promo code per cart. The server checks it and computes every discount; the kiosk shows what comes back.
@@ -1420,11 +1437,14 @@ function renderSum() {
   const used = pointsUsed(), d = cart.delivery, dc = cart.discounts;
   const s = (used ? cart.points.totals : cart.totals)[delivery ? 'delivery' : 'pickup'];
   $('deliveryFields').hidden = !delivery;
+  const term = renderPay(s), longest = s.instalments && lowest(s.instalments);
   $('cartSum').replaceChildren(
     sumRow(t('kiosk.checkout.items'), som(s.subtotal)),
     ...discountRows(dc.bundle, dc.promo, dc.code?.code, used),
     ...(delivery ? [sumRow(t('kiosk.checkout.delivery_in', { city: d.city }), s.delivery_fee ? som(s.delivery_fee) : t('common.free'))] : []),
     sumRow(t('common.total'), som(s.total), 'grand'),
+    // Task 35: the chosen term, else the lowest monthly amount on offer.
+    ...((term || longest) ? [el('p', { className: 'meta inst-line', textContent: t('kiosk.inst.item', { sum: som((term || longest).monthly), n: (term || longest).months }) })] : []),
     ...(delivery && s.delivery_fee && d.free_over !== null ? [el('p', { className: 'meta', style: 'margin:.35rem 0 0', textContent: t('kiosk.checkout.free_over', { sum: som(d.free_over) }) })] : []),
   );
   if (delivery) loadMap();
@@ -1471,7 +1491,8 @@ checkout.addEventListener('submit', async (e) => {
   $('placeOrder').disabled = true;
   try {
     const r = await api(`/cart/${cart.token}/checkout`, {
-      fulfillment: f.fulfillment.value, name: f.fullname.value, phone: f.phone.value, payment: f.payment?.value || 'cashier', points: pointsUsed(),
+      fulfillment: f.fulfillment.value, name: f.fullname.value, phone: f.phone.value, points: pointsUsed(),
+      ...(picked('payment') === 'instalment' ? { payment: 'cashier', instalment: Number(picked('term')) } : { payment: picked('payment') || 'cashier' }),
       ...(delivery && { address: f.address.value, ...(pin && { lat: pin.lat, lon: pin.lng }) }),
     });
     setCart(null);
@@ -1479,7 +1500,7 @@ checkout.addEventListener('submit', async (e) => {
     showDone(r.order, r.payment, r.notify, r.track);
   } catch (err) {
     if (err.status === 404) return cartAction(() => Promise.reject(err));
-    if (/^points_/.test(err.code)) await cartAction(() => api(`/cart/${cart.token}`)); // the balance or cap changed: show the new numbers
+    if (/^points_|^instalment_/.test(err.code)) await cartAction(() => api(`/cart/${cart.token}`)); // the balance or cap changed: show the new numbers
     $('checkoutError').textContent = err.message;
   } finally {
     $('placeOrder').disabled = false;
@@ -1495,8 +1516,9 @@ function showDone(o, pay = { method: 'cashier' }, notify = null, track = null) {
       ...o.items.map((i) => sumRow(`${productName(i)} · ${sizeName(i.size)}${i.quantity > 1 ? ` × ${i.quantity}` : ''}`, som(i.unit_price * i.quantity))),
       ...discountRows(o.bundle_discount, o.promo_discount, o.promo_code, o.points_discount),
       ...(o.fulfillment === 'delivery' ? [sumRow(t('kiosk.done.delivery'), o.delivery_fee ? som(o.delivery_fee) : t('common.free'))] : []),
-      sumRow(t('common.total'), som(o.total), 'grand')),
-    el('p', { className: 'notice', textContent: t('kiosk.done.pay_note', { what: online ? t('kiosk.done.pay_online', { method: t(PAY[pay.method]) }) : t('kiosk.done.pay_cashier'), time: fmt.time(o.expires_at) }) }),
+      sumRow(t('common.total'), som(o.total), 'grand'),
+      ...(o.instalment_months ? [el('p', { className: 'meta', textContent: t('kiosk.inst.item', { sum: som(o.instalment_monthly), n: o.instalment_months }) })] : [])),
+    el('p', { className: 'notice', textContent: t('kiosk.done.pay_note', { what: online ? t('kiosk.done.pay_online', { method: t(PAY[pay.method]) }) : t(o.instalment_months ? 'kiosk.done.pay_instalment' : 'kiosk.done.pay_cashier'), time: fmt.time(o.expires_at) }) }),
     ...(online ? [el('a', { className: 'button primary wide', href: pay.url, rel: 'noopener', textContent: t('kiosk.done.pay_btn', { method: t(PAY[pay.method]) }) })] : []),
     el('p', { textContent: o.fulfillment === 'pickup' ? t('kiosk.done.next_pickup') : t('kiosk.done.next_delivery', { phone: o.phone }) }),
     ...(track ? [trackBlock(track)] : []),

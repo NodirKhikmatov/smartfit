@@ -346,3 +346,10 @@ dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }
 .plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
 #mallPending:not(:empty) { margin-top: var(--s-4); }
 #mallProfile p { margin: 0 0 var(--s-1); overflow-wrap: anywhere; }
+
+/* Task 35: instalment terms in the store form: one row per term, the box and its markup. */
+.inst-set h3 { margin: 0 0 var(--s-2); font-size: var(--text-md); }
+.inst-terms { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: var(--s-3); margin-top: var(--s-3); }
+.inst-term { display: grid; grid-template-columns: 6rem 1fr; gap: var(--s-3); align-items: end; }
+.inst-term .check { min-height: var(--control-h); }
+.notice.inst { margin: var(--s-3) 0; }

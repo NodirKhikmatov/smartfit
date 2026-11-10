@@ -397,6 +397,12 @@ the 2-week pilot.
 - [ ] Cashback points: decide the percent and the share points may pay; tell cashiers that a returned item gives back
       its points share as points (not cash) and takes back the points it earned, and that "delete my data" forfeits
       the balance. Add `/points` to the bot's command list in @BotFather.
+- [ ] "Muddatli to'lov" (task 35): there is **no Uzum Nasiya / Alif Nasiya API integration** (it needs a merchant
+      agreement). Each store that turns it on needs its own Nasiya terminal and contract; enter the terms and markup
+      percents the provider really charges (the screens show "~" figures computed from them). Tell cashiers: an order
+      flagged "muddatli · N oy" is settled by making the contract on the terminal, then "Pul olindi: to'landi"; the
+      order total stays the shelf price. The order still expires 15 min after checkout, like every cashier order, so a
+      slow contract may need the order placed again. A later API integration would replace the manual step.
 - [ ] Promo codes: decide the codes, dates and limits. The per-phone limit uses the typed phone (not verified), and
       Telegram order messages show only the total.
 - [ ] Missed demand and funnel logs have no cleanup yet: decide a retention period. The funnel endpoint is public

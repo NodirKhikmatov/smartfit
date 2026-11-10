@@ -76,7 +76,9 @@ function render() {
       ...(o.promo_discount ? [el('div', { className: 'off' }, el('span', { textContent: t('common.promo_off', { code: o.promo_code }) }), el('span', { textContent: `−${fmt.som(o.promo_discount)}` }))] : []),
       ...(o.points_discount ? [el('div', { className: 'off' }, el('span', { textContent: t('common.points_off') }), el('span', { textContent: `−${fmt.som(o.points_discount)}` }))] : []),
       ...(o.fulfillment === 'delivery' ? [el('div', {}, el('span', { textContent: t('kiosk.done.delivery') }), el('span', { textContent: o.delivery_fee ? fmt.som(o.delivery_fee) : t('common.free') }))] : []),
-      el('div', { className: 'grand' }, el('span', { textContent: t('common.total') }), el('span', { textContent: fmt.som(o.total) }))),
+      el('div', { className: 'grand' }, el('span', { textContent: t('common.total') }), el('span', { textContent: fmt.som(o.total) })),
+      // Task 35: the instalment term chosen at checkout (the total is the price; the contract is made at the cashier).
+      ...(o.instalment_months ? [el('p', { className: 'meta', textContent: t('kiosk.inst.item', { sum: fmt.som(o.instalment_monthly), n: o.instalment_months }) })] : [])),
     ...(o.fit_open ? [fitBox(o)] : []),
     ...(o.telegram && /^https:\/\/t\.me\//.test(o.telegram) && !['delivered', 'cancelled'].includes(stage) ? [el('a', { className: 'button wide', href: o.telegram, rel: 'noopener', textContent: t('kiosk.done.tg_track') })] : []),
   );
