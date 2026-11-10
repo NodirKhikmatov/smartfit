@@ -273,3 +273,24 @@ Done when:
   - accuracy per method
 - Browser check on the phone at 375: a waist-up sample photo from the gallery gives a top size with the right message, the usual-size path works, all in uz/ru. The kiosk still works.
 - Manual (Notes): real iPhone/Android with a waist-up and a mirror selfie.
+
+## [ ] 30. "Faqat bitta kiyim kerak": single items, not a whole outfit
+Many customers come for one thing (a jacket, trousers, shoes) and never a full outfit. Today the main flow only builds whole outfits, and the catalogue (task 25) ignores weather and budget.
+- **Start, "Nima kerak?":** "To'liq obraz" (today's flow) or one or more categories: outerwear, top, bottom (trousers/skirt), shoes, accessory.
+- **Size step:** ask only what the choice needs. Outerwear/top → top size only. Bottom → bottom only. Shoes → shoe size only (the photo can't measure feet; use the usual-size path from task 29). Accessories → no size step at all. Keep task 29's methods where they apply.
+- **Results:** 3–6 best in-stock items per chosen category for today's weather, in the customer's size (task 23 fit offset and task 29 fit preference applied), within the budget per item. Each comes with its cheaper alternative and the task 25 "Shu bilan yaxshi ketadi" as an optional extra, never pushed into the cart.
+- **"Bor kiyimimga mos":** optionally say what you already own ("qora jinsi", "oq krossovka": category + colour + style from fixed lists, no free text). The picks are ranked with the same style/colour score so they go with it.
+- **Recommend API:** `POST /api/recommend` takes `want: [categories]` and `own: [{category, color, style}]`. With no `want` it is unchanged. Claude stylist: rules for single items; the AI only re-ranks, with the same fallback and ID checks.
+- **Cart and promos:** single items use the normal cart. The task 26 whole-outfit bundle applies only when every item of a shown outfit is bought, so single-item carts never get it. The task 24 funnel/missed demand log the mode (`outfit` / `single`) without personal data. The dashboard/pilot report splits outfit vs single-item sales.
+Done when:
+- Tests:
+  - `want` validation
+  - only stock > 0 in the asked size
+  - weather ranking per category (−10/15/30 °C, rain)
+  - per-item budget with fallback
+  - `own` ranking changes the order but never shows out-of-stock items
+  - no bundle discount on single items
+  - size step skipping per category
+  - mode logging without personal data
+  - old full-outfit requests unchanged
+- Browser check: kiosk at 1080×1920 and phone at 375, uz/ru, "only a jacket" and "jacket + shoes", plus the "Bor kiyimimga mos" path.
