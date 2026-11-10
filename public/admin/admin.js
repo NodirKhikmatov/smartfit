@@ -162,7 +162,7 @@ $('setLang').replaceChildren(langSwitch(() => location.reload()));
 let cats = [];
 const catText = (c) => (getLang() === 'ru' && c.name_ru) || c.name;
 // A product or report row → its category's name (rows carry category_name/_ru; a row without a category its role).
-const catOf = (x) => (x.category_name ? (getLang() === 'ru' && x.category_name_ru) || x.category_name : catOf(x));
+const catOf = (x) => (x.category_name ? (getLang() === 'ru' && x.category_name_ru) || x.category_name : cat(x.category));
 const orgOfStore = (id) => stores.find((s) => String(s.id) === String(id))?.organization_id;
 const catsOf = (storeId) => cats.filter((c) => c.organization_id === orgOfStore(storeId));
 async function loadCats() {
