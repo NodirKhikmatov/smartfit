@@ -563,7 +563,7 @@ function openReturn(o, i) {
   returning = { o, i, key: Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('') };
   rf.reset();
   $('retError').textContent = '';
-  $('retItem').textContent = `${productName(i)} · ${i.size} · ${som(i.unit_price)}`;
+  $('retItem').textContent = `${productName(i)} · ${sizeText(i.size)} · ${som(i.unit_price)}`;
   rf.quantity.max = left;
   rf.quantity.value = 1;
   rf.new_size.replaceChildren(...(i.sizes ? i.sizes.split(',') : sizesFor(i.category)).filter((s) => s !== i.size).map((s) => el('option', { value: s, textContent: s })));

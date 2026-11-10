@@ -287,11 +287,13 @@ html.kiosk .start-more button { min-height: 3.5rem; font-size: var(--text-lg); }
 html.kiosk .filter .chip { min-height: 2.75rem; padding-inline: var(--s-3); font-size: var(--text-md); }
 .catalog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: var(--s-3); margin-bottom: var(--s-5); }
 html.kiosk .catalog-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-4); }
-.tile { display: grid; grid-template-rows: auto auto auto 1fr; justify-items: start; align-content: start; gap: var(--s-1); height: auto; min-height: 0; padding: 0 0 var(--s-3); overflow: hidden; text-align: left; white-space: normal; border-radius: var(--r-lg); background: var(--surface); }
+.tile { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto 1fr; justify-items: start; align-content: start; gap: var(--s-1); height: auto; min-height: 0; padding: 0 0 var(--s-3); overflow: hidden; text-align: left; white-space: normal; border-radius: var(--r-lg); background: var(--surface); }
 .tile img, .tile .ph { display: grid; place-items: center; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; background: var(--sunken); color: var(--ink-3); margin-bottom: var(--s-1); }
 .tile > :not(img, .ph) { padding-inline: var(--s-3); }
 .tile .name { font-weight: var(--weight-medium); line-height: var(--leading-snug); }
 .tile .price { text-align: left; }
+/* The old price sits on its own line: side by side they are wider than a phone's tile and pushed the card out of its column. */
+.tile .price s { display: block; margin-right: 0; }
 .item-page { display: grid; gap: var(--s-4); margin-bottom: var(--s-5); }
 @media (min-width: 40em) { .item-page { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
 .item-photo { display: grid; place-items: center; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; border-radius: var(--r-lg); background: var(--sunken); color: var(--ink-3); }
