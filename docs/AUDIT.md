@@ -157,3 +157,14 @@ The user asked for more features after phase 3. Checked this time: wishlist and 
 | Loyalty and rewards | Deferred twice for lack of identity | **Task 34**: cashback points on the Telegram profile |
 | Instalments at checkout | Click, Payme, cashier | **Task 35**: monthly price shown, contract on the store's own terminal. The Nasiya API needs a merchant agreement: defer |
 | AI image try-on, billing, children's sizes | — | **Defer**: the photo rule, legal terms, and a real store's size chart |
+
+## Phase 5 — shopping malls (2026-11-10)
+
+The user's direction changed: the main customer is a shopping mall. A mall has many shops; each shop needs its own admin page, products and categories, and the mall needs its own admin page. What exists: organisations (brand → stores) with owner, manager and staff roles already give each shop its own admin, team, products and orders (task 22). What is missing:
+
+| Need | Today | Verdict |
+|---|---|---|
+| A shop adds the categories it wants, then picks one per product with photo, price and details | Five fixed categories in code and a DB CHECK | **Task 36**: categories per organisation with an optional outfit role and a size kind; product details |
+| The mall as a tenant above shops, with its own admin page | Only super sees more than one organisation | **Task 37**: `malls`, a `mall` admin role limited to summary numbers, shop invites |
+| One entry for the whole mall | A kiosk and QR per store | **Task 37**: mall kiosk and phone screen with a shop directory and search across shops; cart and payment stay per shop |
+| One cart and one payment across shops | — | **Defer**: needs a mall-level merchant account and money split between shops |

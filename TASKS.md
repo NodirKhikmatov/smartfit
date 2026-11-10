@@ -356,3 +356,32 @@ Instalments (Uzum Nasiya, Alif Nasiya) are a common way to pay in Uzbekistan, an
 Done when:
 - Tests: the monthly amount (integer so'm, rounded up); the setting being off; an unknown term rejected; the flag reaching the order, the staff app and the report.
 - Browser check: item page and cart on the phone at 375, the order in the staff app and admin.
+
+# Phase 5 — shopping malls (see `docs/AUDIT.md` › Phase 5)
+
+The user's direction (2026-11-10): focus on shopping malls. A mall has many shops; each shop has its own admin page, its own products and its own categories, and the mall has an admin page of its own. The Phase 4 rules above apply to these tasks too. Tasks 36 and 37 run before tasks 33–35.
+
+## [ ] 36. Each shop's own categories, with photo, price and details
+Today the category is one of five fixed values (`outerwear`, `top`, `bottom`, `shoes`, `accessory`: a constant in `src/admin/routes.js` and `public/admin/admin.js`, and a CHECK on `products.category`). A shop in a mall sells what it sells: "Ko'ylaklar", "Sumkalar", "Bolalar kiyimi", "Atirlar". Each shop must be able to add the categories it wants.
+- **Categories belong to the organisation** (the shop's brand, so all its stores share them): name in Uzbek and Russian, an optional photo, a sort order, shown or hidden.
+- **Outfit role:** each category optionally says what part of an outfit it is: outerwear, top, bottom, shoes, accessory, or none. The recommender keeps working on roles, so the engine's rules don't change. A category with no role never joins an outfit; it shows in the catalogue, the item page, search and the task 30 "Nima kerak?" chips.
+- **Size kind per category:** clothes (XS–XXL), shoes (36–45), one size, or the shop's own list of sizes (for example 28–36 or 98–164). Stock stays per size.
+- **Migration:** every existing organisation gets the five built-in categories with their roles, and every product points at its category. New organisations start with the same five and can rename, hide or add to them. Down migration restores the old column.
+- **Admin, "Kategoriyalar" page:** add, rename, reorder, hide, set role, size kind and photo. A category with products can be hidden but not deleted. Owners manage categories; managers and staff only use them.
+- **Product form:** choose one of the shop's categories, upload the photo, set the price and discount, a description in Uzbek and Russian, and up to 10 free details (name → value, for example "Mato → 100% paxta", "Brend → …"), shown on the item page. Temperature range and waterproof are required only for categories with an outfit role.
+- **Everywhere the fixed list was used:** product filters, CSV import and its sample file (category by name; an unknown name is an error that lists the shop's categories), the stock sync API, catalogue filters in the customer app, "Nima kerak?" chips, missed demand and the Talab page, labels in the staff app.
+Done when:
+- Tests: the migration up and down with existing data; category CRUD and its validation; org isolation (shop A can't see, use or edit shop B's categories; the isolation walk and route walk pass); a product can't take another shop's category; delete refused while products exist; a role-less category never appears in an outfit but appears in the catalogue and single-item results; custom sizes with stock > 0 only; CSV import by category name; recommendations for the demo stores unchanged.
+- Browser check: admin at 1280 and 375 (add "Sumkalar" with a photo, add a product in it with details), then the phone at 375, uz/ru: the new category in the catalogue and in "Nima kerak?", the details on the item page.
+
+## [ ] 37. Malls: a mall admin page, a shop directory and a mall kiosk
+One mall holds many shops (organisations). Each shop already has its own admin, team, products and orders (task 22). What is missing is the mall itself.
+- **Model:** `malls` (name, city, address, coordinates, logo). A store may belong to one mall, with its floor and unit number and a logo. Several malls can exist, each with its own shops.
+- **Roles:** a new `mall` admin role, created by super. A mall admin edits the mall's profile, invites a shop into the mall (creates the organisation and its owner invite link, like super's "Tashkilot qo'shish", but tied to this mall), sets a shop's floor and unit, hides a shop from the directory, and sees per-shop summary numbers (kiosk visits, orders count, kiosk online). A mall admin can't read or edit a shop's products, prices, orders or customers: each shop's data stays the shop's.
+- **Shop admins** are unchanged: owner, manager and staff see only their own shop.
+- **Customer entry:** `/kiosk?mall=<id>` and `/m?mall=<id>` open the mall screen: the shop directory (logo, floor, the shop's categories), and a search over the in-stock products of every shop in the mall. Choosing a shop or a product continues in that shop's normal flow (size, outfits, cart). The cart and the order stay per shop, because each shop takes its own payment; leaving a shop with items in the cart asks first.
+- **Admin:** super gets "Savdo markazlari" (malls and their admins). The mall admin gets a mall dashboard and a printable mall QR.
+- **Seed:** one demo mall holding the two demo shops' Tashkent stores, so the demo shows the mall screen.
+Done when:
+- Tests: mall CRUD by super only; the mall admin's scope (the mall's shops only, summary numbers only, 403/404 on any shop data route and on another mall; the isolation walk and route walk pass); inviting a shop puts it in the mall; the directory lists only visible shops of that mall; mall search returns only stock > 0 items from that mall's shops; a cart never mixes two shops; migration up and down.
+- Browser check: kiosk at 1080×1920 and phone at 375, uz/ru: mall screen → shop → outfits → cart; mall search → item page; the mall admin dashboard at 1280 and 375.
