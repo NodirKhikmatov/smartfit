@@ -297,3 +297,61 @@ Done when:
   - old full-outfit requests unchanged
 - Browser check: kiosk at 1080×1920 and phone at 375, uz/ru, "only a jacket" and "jacket + shoes", plus the "Bor kiyimimga mos" path.
 Notes: **API** `POST /api/recommend` takes `want: [categories]` (a non-empty array of outerwear/top/bottom/shoes/accessory, each once, else 400 `field.want`; answered in category order) and `own: [{category, color, style?}]` (≤ 5; colour from the 16 fixed colours = the i18n `COLORS` list, style classic/casual/sport or none; `own` without `want` → 400 `field.own`). Only the wanted sizes are required (top for outerwear/top, bottom for bottom; shoes stay optional like the outfit flow: no shoe size → the card shows the in-stock sizes to pick, decided rather than forcing a size; accessories need none). No `want` → the old path, answer unchanged plus `mode: 'outfit'` (a test compares it with `ruleOutfits`). With `want` → `{mode: 'single', groups: [{category, items, over_budget}], outfits: [], bundle_percent: 0, relaxed, source, style_guess, rec}`. **Engine** (`singleItems`/`ruleSingles`, pure + the R1 window fallback): the same `filterCandidates` (free stock > 0 in the asked size, task 23 fit offset and task 29 fit preference) and `rankPool` (in-window first, waterproof first in rain, cheapest first with a budget, else closest temperature midpoint); per item `unit_price ≤ budget`; a category with nothing in budget shows its cheapest items with `over_budget` = cheapest − budget; `own` re-ranks with the outfit `pickScore` (same style +2, a second bright colour +50), so it only reorders; top 6 per category (`MAX_SINGLE`); each item gets its cheapest cheaper unshown item of the category (`alternative`, null if none) and up to 3 task 25 `pairWith` items (from the same candidates; clothes without the customer's size come with their in-stock sizes). The window widens ±3/±6 °C until every category has 3 in-budget items. **Claude**: single mode has its own prompt (`SINGLE_PROMPT`, Uzbek) and tool `submit_ranking {product_ids, style_guess}` with WANT and OWN in the data, sees only the items the rules chose, and `applyRanking` only reorders them (unknown, repeated, non-integer IDs ignored; nothing added or dropped; none of its IDs shown → rules); same 8 s deadline, per-IP cap and warn-only fallback. **Cart/promos**: single items use the normal cart; the single log row stores `outfits: []`, so the task 26 bundle can never match (tested with a crafted `outfit` claim and a store at 20 %); totals from the server. **Logging** (migration `020_single_mode`): `mode` (outfit|single, null = unknown/older) on `recommendation_logs`, `funnel_events` (the app sends it on the steps after the form, never on `start`; anything else → 400) and `missed_demand` (from `/recommend`; single mode logs only the wanted categories). No personal data added. **Sales split**: `salesByMode` (paid, not cancelled orders by their results screen's mode; no results screen = "katalog"; a log from before task 30 = outfit) → `/stats` `sales`, one line under the funnel on the admin dashboard and Statistika page ("Savdo: to'liq obraz — N ta, X so'm · alohida kiyim — … · katalog — …"), and a line in the weekly Telegram report. **App**: the form starts with "Nima kerak?" chips (To'liq obraz, the default, or any categories; decided: on the form, the first flow step, not the attract screen). Shoes/accessories only → height and weight hide and the size step is skipped (results straight away); outerwear/top → only the top parts of the size step (usual top, tape chest), bottom → only jeans waist / tape waist + hips; an upper-body photo with only a top wanted skips the "only the top was measured" prompt. Results: heading "Siz uchun tanlandi", only the needed − / + steppers (labelled "Ustki kiyim" when only outerwear is wanted), one section per category with item cards (the outfit card with one item: photo, price, add, cabin; plus "Arzonroq variant" and "Shu bilan yaxshi ketadi" links to the item page, never auto-added), an empty state and an over-budget notice per category. "Bor kiyimimga mos" box on single results: up to 3 owned items picked from chips (type, colour, optional style), removable; each change asks the server again. Refresh keeps `want` and `own` (route whitelist: known categories and short strings only; the server re-checks the lists). Also fixed `.look.n1` (a one-photo collage filled only the top half; it hit the old partial card too). **Tests**: new `test/single.test.js` (10): want/own validation and size requirements, stock > 0 in the asked size for items/variants/pairs (sold-out and fully reserved sizes vanish), weather order per category at −10/15/30 °C and rain (pure + API windows), per-item budget and fallback, own reorders but keeps the stock rule, no bundle on single items, size step per category (`sizeNeeds`/`sizesReady`/`toRequest`/route), mode logging with no personal columns, the AI re-rank and its fallbacks, the sales split incl. pre-030 logs and the weekly line, old outfit answers unchanged. Updated: three migration-down chains (020), the demand column lists, the weekly report line numbers, flow route keys, i18n family `kiosk.style`. 259 pass on SQLite and on Postgres 16 (README docker command, container stopped). **Browser check** on :3071 with a scratch copy of the dev DB: phone 375 ru "only a jacket" (usual size L, only the top chips; 6 outerwear cards with pairs; refresh keeps it); "Bor kiyimimga mos" with red classic trousers moved the yellow raincoat from first to last; kiosk 1080×1920 uz "jacket + shoes" (shoes only hides height/weight; tape shows only chest; 6 + 6 cards, shoe cards in 42; jacket + shoes in the cart at full price, 930 000 so'm from the server; a pair opens its item page and back returns to the results); phone 375 uz, no page overflow; whole outfit unchanged (3 outfits, two steppers, no own box); admin dashboard/Statistika sales line; no failed requests on a clean load. Found and fixed during the check: the results heading still said "obrazlar", the stepper said "Ko'ylak / futbolka" for a jacket, the one-photo collage, and the `start` funnel event carrying the previous customer's mode. **Follow-up (same task)**: the Talab page has a "Tanlov bo'yicha" table, the funnel per mode (`funnelStats` `per_mode`: a visit counts under its first logged mode; one that never chose is in neither row), and every owned item's style counts in the single-item score (a style none of them has +2), not just the first one's; both tested, browser-checked at 1280 and 375. **Left as is**: the AI re-rank sees the 6 rule picks per category, not the whole pool; single-item screens show no bundle hint by design.
+
+# Phase 4 — retention and in-store conversion (see `docs/AUDIT.md` › Phase 4)
+
+Rules for every task in this phase:
+- Prefix node and npm commands with `. ~/.nvm/nvm.sh && nvm use >/dev/null && ` because the shell defaults to Node 20.
+- All UI text goes through the i18n keys, in Uzbek and Russian. No inline script or style and no external assets (CSP).
+- Only items with stock > 0 are suggested or sold. The customer's photo never leaves the browser. Prices are integer so'm.
+- New admin endpoints are scoped by organisation and store with the existing `canSee` / `inStores` helpers, and each gets an isolation test (the task 22 isolation walk and the task 19 route walk must still pass).
+- Run `npm test` on SQLite and on Postgres (the docker command is in the README), then stop the container.
+- Browser checks run on port 3071 with a scratch copy of the DB. Leave the dev DB and port 3070 alone.
+- Commit on main. There is no remote, so nothing is pushed.
+
+## [ ] 31. "Kelganda xabar bering": back-in-stock alert
+Task 24 records missed demand, but the customer who wanted that size is lost.
+- On the item page, and on a result card whose size is out of stock, a "Kelganda xabar bering" button hands off to the Telegram bot the same way the profile does (task 27). It stores a waiting request: profile, product, size, store.
+- When that product and size goes from 0 to above 0 by any path (admin edit, CSV import, stock sync API, a return), the customer gets one Telegram message with a link to the item page. One message per request, and none while stock is 0.
+- The customer sees and cancels requests on the profile page, and "delete my data" removes them.
+- Admin Talab page: people waiting per product and size, next to the restock suggestion.
+Done when:
+- Tests: each restock path sends exactly one message; no message at stock 0; cancel; deletion with the profile; org isolation of the admin list.
+- Browser check: phone at 375, uz/ru, the button on an out-of-stock size and the request on the profile page.
+
+## [ ] 32. QR labels on garments
+A customer holding a garment in the shop has no quick way to ask "is my size here, and what goes with it".
+- Admin: pick products and print a sheet of QR labels (reuse `src/qr.js`). Each code opens that item's page for that store on the phone. There is no in-app scanner: the phone's own camera opens the link.
+- The item page opened from a label shows sizes in stock, price, "goes well with", the fitting-room request and add to cart. All of these exist already.
+- Log a scan event. Admin report: items scanned often but rarely bought.
+Done when:
+- Tests: the label link (the product must belong to that store and be visible), the scan log, the report and its org isolation.
+- Browser check: the print sheet, and a label link opened on the phone at 375.
+
+## [ ] 33. Occasion: "Qayerga kiyasiz?"
+Stylist apps ask the occasion. Today only the weather and the budget shape the outfit.
+- Optional chips on the start form: kundalik, ish, bayram/to'y, sport, sayohat.
+- The rule engine weighs the product styles that fit the occasion, the Claude stylist gets the occasion in its prompt, and `POST /api/recommend` validates it against the fixed list.
+- It works for whole outfits and for single items (task 30). It is logged, and the admin Talab page shows demand per occasion.
+Done when:
+- Tests: the occasion changes the ranking; an unknown value is rejected; the stock > 0 rule still holds; the rule-based fallback works without a Claude key; requests without an occasion are unchanged.
+- Browser check: kiosk at 1080×1920 and phone at 375, uz/ru.
+
+## [ ] 34. Cashback points
+Loyalty was deferred because there was no customer identity. The Telegram profile (task 27) now gives one.
+- Organisation setting: cashback percent (0–20, off by default) and the largest share of an order that points can pay.
+- A customer with a profile earns points when an order is paid or handed over, loses them when it is returned, and can spend them at checkout. Points are integer so'm in a ledger table, and the server computes everything, as it does for all totals.
+- Balance and history on the profile page and in the bot. Admin: total outstanding points and a per-customer list.
+Done when:
+- Tests: earn, spend, the cap, clawback on return, no double earn when a status is set twice, spending more than the balance, a promo code together with points, org isolation.
+- Browser check: checkout with points on the phone at 375, the profile page, the admin setting and list.
+
+## [ ] 35. "Muddatli to'lov" at the cashier
+Instalments (Uzum Nasiya, Alif Nasiya) are a common way to pay in Uzbekistan, and a store has its own terminal for them. An API integration needs a merchant agreement, so it is out of scope: add it to the README Launch checklist.
+- Store setting: on/off, the terms offered (for example 3, 6 and 12 months) and a markup percent per term.
+- The item page and the cart show "oyiga ~X so'm × N oy", computed by the server.
+- A payment option "Muddatli to'lov (kassada)": a pay-at-the-cashier order flagged with the chosen term, so staff see it in the staff app and in admin. The contract itself is made on the store's terminal.
+- Admin: the share of instalment orders and their average total.
+Done when:
+- Tests: the monthly amount (integer so'm, rounded up); the setting being off; an unknown term rejected; the flag reaching the order, the staff app and the report.
+- Browser check: item page and cart on the phone at 375, the order in the staff app and admin.

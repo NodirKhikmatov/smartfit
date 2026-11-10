@@ -144,3 +144,16 @@ The user asked to look at similar apps and add what Smart Fit is missing. Produc
 | Staff tablets: fitting-room alerts, pick lists | Fitting requests in admin and Telegram only | **Task 28**: staff PWA with the fitting-room queue, order pick list, "collected/handed over" |
 | AR or AI image try-on | — | **Defer**: needs the photo sent to a paid image API, which breaks the "photo never stored" rule and needs the user's key and consent text |
 | Loyalty points, billing | — | **Defer** (as before) |
+
+## Phase 4 — retention and in-store conversion (2026-11-10)
+
+The user asked for more features after phase 3. Checked this time: wishlist and back-in-stock tools (Growave, Wish Keeper), clienteling apps (Clientbook, Endear), endless-aisle and smart fitting-room vendors (Cloudshelf, Crave Retail, Keonn), and instalment payments in Uzbekistan (Uzum Nasiya, Alif Nasiya). Sources are vendor pages and secondary summaries, so these are feature ideas, not proven results.
+
+| What they have | Smart Fit today | Verdict |
+|---|---|---|
+| Back-in-stock alerts | Missed demand is counted (task 24), the customer is lost | **Task 31**: "Kelganda xabar bering" through the Telegram bot |
+| Scan a garment to see sizes, matches and call staff (RFID mirrors, endless aisle) | The item page exists, but only from the catalogue | **Task 32**: printed QR labels per product, a scan log and a "scanned but not bought" report. RFID needs hardware: defer |
+| Occasion as a stylist input | Weather, budget and size only | **Task 33**: "Qayerga kiyasiz?" in the rules and the Claude prompt |
+| Loyalty and rewards | Deferred twice for lack of identity | **Task 34**: cashback points on the Telegram profile |
+| Instalments at checkout | Click, Payme, cashier | **Task 35**: monthly price shown, contract on the store's own terminal. The Nasiya API needs a merchant agreement: defer |
+| AI image try-on, billing, children's sizes | — | **Defer**: the photo rule, legal terms, and a real store's size chart |
