@@ -213,12 +213,15 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
 
   // "Kabinaga olib keling": staff bring these items in these sizes to the cabin. { rec, cabin, items: [{ product_id, size }] }.
   // Goes to the admin orders screen and the store's Telegram chat (notifier loop), and counts as tried for the pilot.
+  // Task 32: from a garment label's item page there is no results screen, so `scan` (the label scan token) stands in for rec.
   r.post('/fitting', async (req, res) => {
     const b = req.body ?? {};
-    if (typeof b.rec !== 'string' || !REC.test(b.rec)) throw fail(400, 'err.bad_request');
+    const byScan = b.rec === undefined;
+    const token = byScan ? b.scan : b.rec;
+    if (typeof token !== 'string' || !REC.test(token)) throw fail(400, 'err.bad_request');
     if (!Number.isInteger(b.cabin) || b.cabin < 1 || b.cabin > MAX_CABIN) throw fail(400, 'err.cabin', { max: MAX_CABIN });
     if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > 6) throw fail(400, 'err.invalid', { field: 'field.items' });
-    const row = await db('recommendation_logs').where({ token: b.rec }).first('id', 'store_id', 'tried_at');
+    const row = byScan ? await db('qr_scans').where({ token }).first('id', 'store_id') : await db('recommendation_logs').where({ token }).first('id', 'store_id', 'tried_at');
     if (!row) throw fail(404, 'err.rec_not_found');
     const items = [];
     for (const i of b.items) {
@@ -231,10 +234,11 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       if (!free) throw fail(409, 'err.out_of_stock', { product: p, size: i.size === 'ONE' ? 'common.size_one' : i.size });
       items.push({ product_id: i.product_id, size: i.size });
     }
-    const [{ n }] = await db('fitting_requests').where({ recommendation_id: row.id, status: 'new' }).count({ n: '*' });
+    const own = byScan ? { scan_id: row.id } : { recommendation_id: row.id };
+    const [{ n }] = await db('fitting_requests').where({ ...own, status: 'new' }).count({ n: '*' });
     if (Number(n) >= MAX_OPEN_FITTING) throw fail(429, 'err.fitting_busy');
-    const [{ id }] = await db('fitting_requests').insert({ store_id: row.store_id, recommendation_id: row.id, cabin: b.cabin, items: JSON.stringify(items) }).returning('id');
-    if (!row.tried_at) await db('recommendation_logs').where({ id: row.id }).whereNull('tried_at').update({ tried_at: new Date().toISOString() });
+    const [{ id }] = await db('fitting_requests').insert({ store_id: row.store_id, ...own, cabin: b.cabin, items: JSON.stringify(items) }).returning('id');
+    if (!byScan && !row.tried_at) await db('recommendation_logs').where({ id: row.id }).whereNull('tried_at').update({ tried_at: new Date().toISOString() });
     res.status(201).json({ id, cabin: b.cabin });
   });
   return r;

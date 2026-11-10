@@ -75,6 +75,7 @@ async function orgBRecords() {
   await db('products').where({ id: product.id }).update({ sku: 'ORGB-ONLY-1' });
   await db('missed_demand').insert({ store_id: b1, product_id: product.id, size: 'L', session: 'b'.repeat(32), source: 'recommend' });
   await db('funnel_events').insert({ store_id: b1, visit: 'c'.repeat(32), step: 'order' });
+  await db('qr_scans').insert({ token: 'd'.repeat(32), store_id: b1, product_id: product.id }); // task 32: a label scan
   const promo = (await admin('POST', '/promos', { code: 'ORGBPROMO', kind: 'percent', value: 10, store_id: b1 }, ownerB)).body; // task 26
   return { product, order, fitting, invite, key, member, promo };
 }
@@ -97,6 +98,7 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
     'GET /me': async () => assert.equal((await admin('GET', '/me', undefined, ownerA)).body.organization_id, orgA),
     'GET /stores': async () => assert.deepEqual((await admin('GET', '/stores', undefined, ownerA)).body.map((s) => s.id).sort(), [a1, a2].sort()),
     'GET /stores/:id/qr': async () => refused(await admin('GET', `/stores/${b1}/qr`, undefined, ownerA)),
+    'GET /labels': async () => refused(await admin('GET', `/labels?ids=${B.product.id}`, undefined, ownerA)), // task 32
     'GET /products': async () => {
       noB(await admin('GET', '/products?limit=100', undefined, ownerA));
       const r = await admin('GET', `/products?store_id=${b1}`, undefined, ownerA);
@@ -153,6 +155,7 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       assert.equal(r.body.items.length, 0, '?store_id cannot widen the scope');
       assert.equal(r.body.funnel.total.start, 0);
       assert.equal(r.body.funnel.per_kiosk.length, 0);
+      assert.equal(r.body.scans.length, 0, 'no org B label scans');
     },
     'GET /demand/export': async () => {
       for (const q of ['', `?store_id=${b1}`]) {

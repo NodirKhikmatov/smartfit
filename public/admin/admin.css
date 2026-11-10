@@ -103,6 +103,12 @@ dialog.drawer.left .side-inner { flex: 1; }
 .toolbar { display: flex; flex-wrap: wrap; gap: var(--s-3); align-items: end; margin-bottom: var(--s-4); }
 .toolbar .grow { flex: 1; min-width: 12rem; }
 .toolbar input[type=date] { min-width: 9.5rem; }
+/* Task 32: QR label picking on the products list */
+.label-bar { display: flex; flex-wrap: wrap; align-items: end; gap: var(--s-3); padding: var(--s-3); margin-bottom: var(--s-4); }
+.label-bar #labelCount { flex: 1; min-width: 10rem; align-self: center; font-weight: var(--weight-medium); }
+.label-bar input { width: 5rem; }
+.products-table .pick-col { width: 2.75rem; padding-inline-end: 0; }
+.products-table .pick-col input { width: 1.25rem; height: 1.25rem; margin: 0; }
 .section-title { display: flex; align-items: center; gap: var(--s-2); margin: var(--s-4) 0 var(--s-3); font-size: var(--text-md); }
 .lead { max-width: var(--measure); margin-bottom: var(--s-5); }
 .actions.start { justify-content: flex-start; }

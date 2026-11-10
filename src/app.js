@@ -19,6 +19,7 @@ import { createFunnelRouter } from './demand.js';
 import { createCatalogRouter } from './catalog.js';
 import { VENDOR, MODEL } from './vendor.js';
 import { createProfileRouter } from './profile.js';
+import { createScanRoute } from './labels.js';
 
 // X1: same-origin only, plus OpenStreetMap tiles for the delivery map. 'wasm-unsafe-eval' lets MediaPipe compile its wasm
 // (it can't run JS from strings). No 'unsafe-inline': styles are files or CSSOM, scripts are modules.
@@ -103,6 +104,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   app.use(createLandingRouter()); // / and /landing/*
   // Customer app: one page for the kiosk and the phone; app.js picks the mode from the path.
   const customer = fileURLToPath(new URL('../public/app', import.meta.url));
+  app.get('/q/:store/:product', createScanRoute(db, { limit: bucket('scan') })); // task 32: garment QR label → item page
   app.get(['/kiosk', '/m'], (req, res) => res.sendFile('index.html', { root: customer }));
   // Kiosk PWA: the service worker at the root (its scope must cover /kiosk) and a manifest that starts at this store's kiosk.
   app.get('/kiosk-sw.js', (req, res) => res.set('Cache-Control', 'no-cache').sendFile('sw.js', { root: customer }));

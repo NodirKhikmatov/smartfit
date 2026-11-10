@@ -32,6 +32,7 @@ const savedCart = (t) => {
 };
 let current = 'start';
 let request = null; // POST /api/recommend body
+let scanToken = null; // task 32: opened from a garment label; lets the item page ask for a fitting room (memory only)
 let body = null; // { gender, height, weight } for POST /api/size
 let sizeInfo = null; // last /api/size answer: confidence for the results screen
 let sizeInput = null; // task 29: the usual size or tape numbers sent to /api/size (memory only; saved to a profile on request)
@@ -861,7 +862,7 @@ function card(heading, items, total, reason, swap) {
 }
 
 // "Kabinaga olib keling": staff bring the outfit in the picked sizes to the customer's cabin (also counts as tried).
-function fittingBox(items, card) {
+function fittingBox(items, card, from = { rec: request?.rec }) {
   const box = el('div', { className: 'fit' });
   const msg = el('p', { className: 'field-error', role: 'alert' });
   const open = el('button', { type: 'button', className: 'ghost wide' }, icon('hanger'), t('kiosk.fit.btn'));
@@ -888,7 +889,7 @@ function fittingBox(items, card) {
       input.setAttribute('aria-invalid', 'false');
       send.disabled = true;
       try {
-        await api('/recommend/fitting', { rec: request.rec, cabin, items: items.map((p) => ({ product_id: p.id, size: sizeOf(p) })) });
+        await api('/recommend/fitting', { ...from, cabin, items: items.map((p) => ({ product_id: p.id, size: sizeOf(p) })) });
         box.replaceChildren(el('p', { className: 'notice', role: 'status' }, icon('check'), t('kiosk.fit.sent', { cabin })));
       } catch (err) {
         msg.textContent = err.message;
@@ -1076,7 +1077,8 @@ function renderItem(p, pairs) {
         el('p', { className: 'meta', textContent: [cat(p.category), colorName(p.color), p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }),
         ...(p.description ? [el('p', { textContent: p.description })] : []),
         fitHint(p), pick, other,
-        addButton([{ ...p, size: null }], page, 'primary wide', 'kiosk.add.btn', null))),
+        addButton([{ ...p, size: null }], page, 'primary wide', 'kiosk.add.btn', null),
+        ...(scanToken ? [fittingBox([{ ...p, size: null }], page, { scan: scanToken })] : []))), // task 32: in the shop, from a label
     ...(pairs.length ? [el('section', { className: 'pairs' }, el('h2', { textContent: t('kiosk.item.pairs') }), el('div', { className: 'catalog-grid' }, ...pairs.map(tile)))] : []),
   );
 }
@@ -1630,8 +1632,10 @@ if (saved) {
   }
 }
 budgetChips();
-// ?item=<id> (task 31: the bot's "back in stock" link) opens that item page.
+// ?item=<id> (task 31: the bot's "back in stock" link; task 32: a garment's QR label, with &scan=) opens that item page.
 const linkItem = Number(params.get('item'));
+if (!kiosk && /^[a-f0-9]{32}$/.test(params.get('scan') ?? '')) scanToken = params.get('scan');
+params.delete('scan');
 if (storeId > 0 && Number.isInteger(linkItem) && linkItem > 0) {
   go('item', { replace: true, data: { item: linkItem } });
   params.delete('item'); // once: a later refresh restores the saved route instead

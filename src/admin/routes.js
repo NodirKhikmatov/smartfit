@@ -1,5 +1,6 @@
 import express from 'express';
 import { qrSvg, publicBase } from '../qr.js';
+import { labelPath, scanStats } from '../labels.js';
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
@@ -183,6 +184,7 @@ const pick = (v, allowed, field) => {
 const ORDER_STATUSES = ['new', 'packing', 'shipping', 'delivered', 'cancelled'];
 export const RETURN_REASONS = ['too_small', 'too_big', 'disliked', 'defect'];
 const EXPORT_MAX = 10000;
+const LABELS_MAX = 100; // task 32: one print sheet
 // '+998901234567' → '998 90 123 45 67': readable, and Excel keeps it as text (no leading '+', no 12-digit number).
 const phoneText = (p) => String(p ?? '').replace(/^\+?998(\d{2})(\d{3})(\d{2})(\d{2})$/, '998 $1 $2 $3 $4');
 const PRODUCT_SORT = { created: 'p.id', name: 'p.name', price: 'coalesce(p.discount_price, p.price)', stock: 'coalesce(s.free, 0)' };
@@ -282,6 +284,21 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     if (!store) throw fail(404, 'err.store_not_found');
     const url = `${publicBase(req)}/m?store=${store.id}`;
     res.json({ name: store.name, url, svg: qrSvg(url, 8) });
+  });
+
+  // Task 32: QR labels for garments. GET /labels?ids=1,2,3 (at most 100, each in the caller's stores, else 404) →
+  // { items: [{ id, name, name_ru, sku, store_name, url, svg }] } in the order asked; url opens that item's page there.
+  r.get('/labels', async (req, res) => {
+    const ids = [...new Set(String(req.query.ids ?? '').split(',').filter(Boolean).map(Number))];
+    if (!ids.length || ids.length > LABELS_MAX || !ids.every((id) => Number.isInteger(id) && id > 0 && id <= 2147483647)) throw fail(400, 'err.invalid', { field: 'field.items' });
+    const rows = await scoped(req.admin).whereIn('products.id', ids).join('stores as st', 'st.id', 'products.store_id')
+      .select('products.id', 'products.store_id', 'products.name', 'products.name_ru', 'products.sku', 'st.name as store_name');
+    if (rows.length !== ids.length) throw fail(404, 'err.product_not_found');
+    const base = publicBase(req);
+    res.json({ items: ids.map((id) => rows.find((p) => p.id === id)).map((p) => {
+      const url = base + labelPath(p.store_id, p.id);
+      return { ...p, url, svg: qrSvg(url, 4) };
+    }) });
   });
 
   // Paged list: ?q&category&store_id&filter=low|out|no_image&sort=created|name|price|stock&dir=asc|desc&limit&offset
@@ -798,7 +815,10 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   };
   r.get('/demand', async (req, res) => {
     const { days, keys, from, scope } = demandWindow(req);
-    res.json({ days, items: await demandItems(db, scope, { from }), funnel: await funnelStats(db, scope, { from, keys }), methods: await methodStats(db, scope, { from }) });
+    res.json({
+      days, items: await demandItems(db, scope, { from }), funnel: await funnelStats(db, scope, { from, keys }), methods: await methodStats(db, scope, { from }),
+      scans: await scanStats(db, scope, { from }), // task 32: garment labels scanned often but rarely bought
+    });
   });
   r.get('/demand/export', async (req, res) => {
     const { days, from, scope } = demandWindow(req);

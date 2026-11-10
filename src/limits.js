@@ -20,6 +20,7 @@ export function limitConfig() {
     kiosk: env('RATE_KIOSK_PER_MIN', 30), // heartbeat: 1/min per kiosk
     pin: env('RATE_PIN_PER_MIN', 5), // staff exit PIN tries: a 4-digit PIN takes ~33 h to guess from one IP
     funnel: env('RATE_FUNNEL_PER_MIN', 120), // ≤ 5 events per customer visit, every device on the shop IP shares it
+    scan: env('RATE_SCAN_PER_MIN', 120), // task 32: garment label scans (logged; over the limit still redirected, not logged)
     demo: env('RATE_DEMO_PER_MIN', 3), // landing page "Demo so'rash" form
     promo: env('RATE_PROMO_PER_MIN', 20), // task 26: promo code tries (right or wrong), on top of the cart bucket
     profile: env('RATE_PROFILE_PER_MIN', 20), // task 27: new profile links / kiosk login QRs, the profile page
