@@ -3,6 +3,7 @@ import { loadPose, measure, framing, framingHint } from './pose.js';
 import { keypad } from './keypad.js';
 import { kioskShell, attract, kioskDevice, randomId } from './kiosk.js';
 import { CLOTHES, SHOES, JEANS, WANT, nextError, fieldError, toRequest, sizeNeeds, sizesReady, cleanWant, setCategories, categoryRoles, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
+import { mallScreen } from './mall.js';
 import { icon, confirmDialog, showAfter, skeletonCard, toast } from '/shared/ui.js';
 import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName, COLORS, STYLES } from '/shared/i18n.js';
 
@@ -11,6 +12,10 @@ const kiosk = location.pathname.startsWith('/kiosk');
 document.documentElement.classList.add(kiosk ? 'kiosk' : 'mobile');
 const params = new URLSearchParams(location.search);
 const storeId = Number(params.get('store'));
+// Task 37: ?mall=ID. Without a store it is the mall screen (directory + search); with one, that shop's flow inside the mall.
+const mallId = Number(params.get('mall'));
+const inMall = Number.isInteger(mallId) && mallId > 0;
+const mallHome = inMall && !(storeId > 0);
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
@@ -93,6 +98,7 @@ initLang();
 if (kiosk) keypad();
 // Language switch on the start screen. Whatever is already drawn (weather, cart button, results) is redrawn in place.
 const switcher = langSwitch(() => {
+  if (mallHome) return mall.redraw();
   for (const id of ['cartError', 'checkoutError']) $(id).textContent = '';
   store ? renderWeather() : loadStore(); // loadStore redraws a start error (no store, offline) in the new language
   if (store) renderWantChips();
@@ -1587,6 +1593,23 @@ function applyProfile(p) {
   go('results');
 }
 
+// Task 37: back to the mall screen. The cart is this shop's (each shop takes its own payment), so leaving the shop with
+// items in it asks first and then gives the held stock back.
+$('mallBtn').hidden = !inMall || mallHome;
+document.documentElement.classList.toggle('in-mall', inMall && !mallHome);
+$('mallBtn').onclick = async () => {
+  if (cart?.items.length && !(await confirmDialog({ title: t('kiosk.mall.leave_title'), text: t('kiosk.mall.leave_text'), ok: t('kiosk.mall.leave_ok'), cancel: t('kiosk.leave.stay') }))) return;
+  leaveShop(false);
+};
+async function leaveShop(idle) {
+  const c = cart;
+  setCart(null);
+  clearRoute();
+  if (idle) setLang('uz'); // the next customer starts in Uzbek
+  if (c) await api(`/cart/${c.token}`, null, 'DELETE').catch(() => {});
+  location.replace(`${location.pathname}?mall=${mallId}`);
+}
+
 // Back to start keeps the cart; only the kiosk idle reset clears it for the next customer.
 // Icon button, so it is not mistaken for the cart (U15); with items in the cart it asks first.
 $('home').onclick = async () => {
@@ -1596,6 +1619,12 @@ $('home').onclick = async () => {
 };
 
 function reset() {
+  if (mallHome) { // the mall screen: clear the search, back to Uzbek (no reload: the idle timer fires on an untouched screen too)
+    setLang('uz');
+    switcher.sync();
+    return mall.reset();
+  }
+  if (inMall) return leaveShop(true); // a mall kiosk's next customer starts at the mall screen
   stopHandoff();
   stopLogin();
   $('doneBody').replaceChildren(); // its profile QR must not wait for the next customer
@@ -1625,59 +1654,68 @@ function reset() {
 }
 if (kiosk) {
   watchIdle(document, { onIdle: () => { reset(); attract(true); } });
-  kioskShell({ storeId, api });
+  kioskShell({ storeId, mallId: inMall ? mallId : 0, api });
   attract(true);
 }
 
-// Refresh: restore the saved screen and the form's numbers (never a photo, name or phone), then ask the server again.
-const saved = loadRoute();
-if (saved) {
-  for (const [k, v] of Object.entries(saved.form)) {
-    if (k === 'want') continue;
-    const f = form.elements[k];
-    if (f instanceof RadioNodeList) for (const r of f) r.checked = r.value === v;
-    else f.value = v;
-  }
-  setCategories(saved.roles);
-  restoredWant = saved.form.want;
-  for (const b of wantBoxes()) b.checked = !restoredWant;
-  applyNeeds();
-  const r = toRequest(saved.form, storeId);
-  if (r) {
-    ({ body, request } = r);
-    if (request.want && saved.own.length) request.own = saved.own;
-    if (sizesReady(saved.sizes, request.want)) {
-      const n = sizeNeeds(request.want);
-      for (const k of ['top', 'bottom']) if (n[k]) request.sizes[k] = saved.sizes[k];
-      Object.assign(request, { method: saved.method, fit: saved.fit });
-      sizeInfo = { manual: saved.manual };
+const mall = mallHome ? mallScreen({ mallId, api }) : null;
+if (mallHome) {
+  clearRoute(); // a shop's saved screen must not open in the next shop picked here
+  mall.show();
+}
+else startShop();
+
+function startShop() {
+  // Refresh: restore the saved screen and the form's numbers (never a photo, name or phone), then ask the server again.
+  const saved = loadRoute();
+  if (saved) {
+    for (const [k, v] of Object.entries(saved.form)) {
+      if (k === 'want') continue;
+      const f = form.elements[k];
+      if (f instanceof RadioNodeList) for (const r of f) r.checked = r.value === v;
+      else f.value = v;
+    }
+    setCategories(saved.roles);
+    restoredWant = saved.form.want;
+    for (const b of wantBoxes()) b.checked = !restoredWant;
+    applyNeeds();
+    const r = toRequest(saved.form, storeId);
+    if (r) {
+      ({ body, request } = r);
+      if (request.want && saved.own.length) request.own = saved.own;
+      if (sizesReady(saved.sizes, request.want)) {
+        const n = sizeNeeds(request.want);
+        for (const k of ['top', 'bottom']) if (n[k]) request.sizes[k] = saved.sizes[k];
+        Object.assign(request, { method: saved.method, fit: saved.fit });
+        sizeInfo = { manual: saved.manual };
+      }
     }
   }
+  budgetChips();
+  // ?item=<id> (task 31: the bot's "back in stock" link; task 32: a garment's QR label, with &scan=) opens that item page.
+  const linkItem = Number(params.get('item'));
+  if (!kiosk && /^[a-f0-9]{32}$/.test(params.get('scan') ?? '')) scanToken = params.get('scan');
+  params.delete('scan');
+  if (storeId > 0 && Number.isInteger(linkItem) && linkItem > 0) {
+    go('item', { replace: true, data: { item: linkItem } });
+    params.delete('item'); // once: a later refresh restores the saved route instead
+    history.replaceState(history.state, '', `${location.pathname}?${params}`);
+  } else go(storeId > 0 ? allowedScreen(saved?.screen ?? 'start', { ...appState(), itemOk: !!saved?.item }) : 'start', { replace: true, data: { item: saved?.item } });
+  loadStore();
+  const handoffToken = params.get('handoff');
+  if (!kiosk && handoffToken) {
+    // Opened from the kiosk's QR: take over that cart once, then drop the one-time token from the address bar.
+    params.delete('handoff');
+    history.replaceState(history.state, '', `${location.pathname}?${params}`);
+    const own = savedCart();
+    api('/cart/claim', { handoff: handoffToken }).then((c) => {
+      if (own) api(`/cart/${own}`, null, 'DELETE').catch(() => {}); // the phone's own earlier cart gives its stock back
+      setCart(c);
+      toast(t('kiosk.handoff.claimed'));
+      go('cart');
+    }, (err) => {
+      $('startError').textContent = err.message;
+      if (savedCart()) api('/cart/' + savedCart()).then((c) => setCart(c.store_id === storeId ? c : null), () => setCart(null));
+    });
+  } else if (savedCart()) api('/cart/' + savedCart()).then((c) => setCart(c.store_id === storeId ? c : null), () => setCart(null));
 }
-budgetChips();
-// ?item=<id> (task 31: the bot's "back in stock" link; task 32: a garment's QR label, with &scan=) opens that item page.
-const linkItem = Number(params.get('item'));
-if (!kiosk && /^[a-f0-9]{32}$/.test(params.get('scan') ?? '')) scanToken = params.get('scan');
-params.delete('scan');
-if (storeId > 0 && Number.isInteger(linkItem) && linkItem > 0) {
-  go('item', { replace: true, data: { item: linkItem } });
-  params.delete('item'); // once: a later refresh restores the saved route instead
-  history.replaceState(history.state, '', `${location.pathname}?${params}`);
-} else go(storeId > 0 ? allowedScreen(saved?.screen ?? 'start', { ...appState(), itemOk: !!saved?.item }) : 'start', { replace: true, data: { item: saved?.item } });
-loadStore();
-const handoffToken = params.get('handoff');
-if (!kiosk && handoffToken) {
-  // Opened from the kiosk's QR: take over that cart once, then drop the one-time token from the address bar.
-  params.delete('handoff');
-  history.replaceState(history.state, '', `${location.pathname}?${params}`);
-  const own = savedCart();
-  api('/cart/claim', { handoff: handoffToken }).then((c) => {
-    if (own) api(`/cart/${own}`, null, 'DELETE').catch(() => {}); // the phone's own earlier cart gives its stock back
-    setCart(c);
-    toast(t('kiosk.handoff.claimed'));
-    go('cart');
-  }, (err) => {
-    $('startError').textContent = err.message;
-    if (savedCart()) api('/cart/' + savedCart()).then((c) => setCart(c.store_id === storeId ? c : null), () => setCart(null));
-  });
-} else if (savedCart()) api('/cart/' + savedCart()).then((c) => setCart(c.store_id === storeId ? c : null), () => setCart(null));

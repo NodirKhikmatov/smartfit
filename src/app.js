@@ -14,6 +14,7 @@ import { fail, langOf, errorBody } from './admin/routes.js';
 import { limitConfig, rateLimit } from './limits.js';
 import { createKioskRouter } from './kiosk.js';
 import { createDemoRouter } from './admin/orgs.js';
+import { createMallRouter } from './admin/malls.js';
 import { createLandingRouter } from './landing.js';
 import { createFunnelRouter } from './demand.js';
 import { createCatalogRouter } from './catalog.js';
@@ -78,6 +79,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/cart', bucket('cart'), createCartRouter(db, { methods, link, maxOpenCarts: lim.openCarts, promoLimit: bucket('promo') }));
   api.post('/kiosk/exit', bucket('pin'));
   api.use('/kiosk', bucket('kiosk'), createKioskRouter(db));
+  api.use('/malls', bucket('mall'), createMallRouter(db)); // task 37: mall directory and search
   api.use('/catalog', bucket('catalog'), createCatalogRouter(db, { link, maxOpen: lim.openCarts })); // task 25
   api.use('/funnel', bucket('funnel'), createFunnelRouter(db)); // task 24: drop-off by step
   api.use('/orders', createOrderRouter(db, { methods, link }));
@@ -109,10 +111,11 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   // Kiosk PWA: the service worker at the root (its scope must cover /kiosk) and a manifest that starts at this store's kiosk.
   app.get('/kiosk-sw.js', (req, res) => res.set('Cache-Control', 'no-cache').sendFile('sw.js', { root: customer }));
   app.get('/kiosk.webmanifest', (req, res) => {
-    const store = Number(req.query.store);
+    const store = Number(req.query.store), mall = Number(req.query.mall);
+    const ok = (n) => Number.isInteger(n) && n > 0;
     res.type('application/manifest+json').set('Cache-Control', 'no-cache').send(JSON.stringify({
       name: 'Smart Fit', short_name: 'Smart Fit', lang: 'uz', display: 'fullscreen', background_color: '#f6f3ee', theme_color: '#1f5a46',
-      start_url: Number.isInteger(store) && store > 0 ? `/kiosk?store=${store}` : '/kiosk', scope: '/kiosk',
+      start_url: ok(store) ? `/kiosk?store=${store}` : ok(mall) ? `/kiosk?mall=${mall}` : '/kiosk', scope: '/kiosk', // task 37: a mall kiosk starts at its mall
       icons: [{ src: '/shared/favicon.svg', sizes: 'any', type: 'image/svg+xml' }, { src: '/shared/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
     }));
   });

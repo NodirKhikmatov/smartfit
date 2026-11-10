@@ -249,6 +249,15 @@ test('every mutating admin route writes an audit row', async () => {
     await createAdmin(db, { email: `walk${Date.now()}@smartfit.uz`, password: 'walk-pass-1', storeId: tashkent, role: 'manager' });
     return db('admins').orderBy('id', 'desc').first();
   };
+  const newMall = () => admin('POST', '/malls', { name: `Walk mall ${Date.now()}`, city: 'Toshkent', address: 'Navoiy 1', admin_email: `mall${Date.now()}@smartfit.uz` }, superToken);
+  let mallTok = null;
+  const mallToken = async () => {
+    if (!mallTok) {
+      await createAdmin(db, { email: 'walk.mall@smartfit.uz', password: 'mall-pass-1', mallId: (await db('malls').orderBy('id').first()).id });
+      mallTok = await login('walk.mall@smartfit.uz', 'mall-pass-1');
+    }
+    return mallTok;
+  };
   const recipes = {
     'POST /products': ['product.create', () => admin('POST', '/products', { name: 'Yangi', category: 'top', gender: 'male', color: 'qora', price: 90000, temp_min: 0, temp_max: 25 }, ownerToken)],
     'PATCH /products/:id': ['product.update', async () => admin('PATCH', `/products/${(await product()).id}`, { price: 95000, stock: { M: 1 } }, ownerToken)],
@@ -318,6 +327,18 @@ test('every mutating admin route writes an audit row', async () => {
       return admin('DELETE', `/categories/${c.id}/image`, undefined, ownerToken);
     }],
     'POST /orgs': ['org.create', () => admin('POST', '/orgs', { name: 'Audit brand', owner_email: `org${Date.now()}@smartfit.uz` }, superToken)],
+    // Task 37: malls (super) and the mall admin's own mall.
+    'POST /malls': ['mall.create', () => newMall()],
+    'PATCH /malls/:id': ['mall.update', async () => admin('PATCH', `/malls/${(await newMall()).body.id}`, { name: `Yangi ${Date.now()}`, store_ids: [] }, superToken)],
+    'DELETE /malls/:id': ['mall.delete', async () => admin('DELETE', `/malls/${(await newMall()).body.id}`, undefined, superToken)],
+    'POST /malls/:id/invites': ['team.invite', async () => admin('POST', `/malls/${(await newMall()).body.id}/invites`, { email: `mall2${Date.now()}@smartfit.uz` }, superToken)],
+    'PATCH /mall': ['mall.update', async () => admin('PATCH', '/mall', { name: `Demo ${Date.now()}` }, await mallToken())],
+    'POST /mall/logo': ['mall.logo', async () => admin('POST', '/mall/logo', undefined, await mallToken(), { raw: png, type: 'image/png' })],
+    'DELETE /mall/logo': ['mall.logo', async () => admin('DELETE', '/mall/logo', undefined, await mallToken())],
+    'POST /mall/shops': ['org.create', async () => admin('POST', '/mall/shops', { name: 'Mall brand', owner_email: `shop${Date.now()}@smartfit.uz` }, await mallToken())],
+    'PATCH /mall/stores/:id': ['mall.store', async () => admin('PATCH', `/mall/stores/${tashkent}`, { floor: String(Date.now() % 1e6) }, await mallToken())],
+    'POST /mall/stores/:id/logo': ['mall.store', async () => admin('POST', `/mall/stores/${tashkent}/logo`, undefined, await mallToken(), { raw: png, type: 'image/png' })],
+    'DELETE /mall/stores/:id/logo': ['mall.store', async () => admin('DELETE', `/mall/stores/${tashkent}/logo`, undefined, await mallToken())],
     'PATCH /demo-requests/:id': ['demo.handle', async () => {
       const [{ id }] = await db('demo_requests').insert({ name: 'Aziz', phone: '+998901234567', company: 'Moda', lang: 'uz' }).returning('id');
       return admin('PATCH', `/demo-requests/${id}`, { handled: true }, superToken);

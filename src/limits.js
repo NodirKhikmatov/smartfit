@@ -16,6 +16,7 @@ export function limitConfig() {
     size: env('RATE_SIZE_PER_MIN', 30),
     cart: env('RATE_CART_PER_MIN', 300),
     catalog: env('RATE_CATALOG_PER_MIN', 300), // catalogue browsing, item pages and other-store reservations
+    mall: env('RATE_MALL_PER_MIN', 300), // task 37: the mall screen's directory and search (a mall's kiosks share one IP)
     login: env('RATE_LOGIN_PER_MIN', 20),
     kiosk: env('RATE_KIOSK_PER_MIN', 30), // heartbeat: 1/min per kiosk
     pin: env('RATE_PIN_PER_MIN', 5), // staff exit PIN tries: a 4-digit PIN takes ~33 h to guess from one IP

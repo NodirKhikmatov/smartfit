@@ -14,6 +14,7 @@
 <body>
 <header class="topbar">
   <button id="back" class="icon-btn ghost" hidden data-i18n-aria-label="common.back" data-i18n-title="common.back"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-left"></use></svg></button>
+  <button id="mallBtn" class="ghost mall-btn" hidden data-i18n-aria-label="kiosk.mall.back" data-i18n-title="kiosk.mall.back"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#store"></use></svg><span data-i18n="kiosk.mall.back"></span></button>
   <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg><span id="storeName">Smart Fit</span></div>
   <div id="langBox"></div>
   <button id="cartBtn" hidden aria-live="polite"></button>
@@ -169,6 +170,27 @@
     <div class="row">
       <button class="ghost" id="changeSizes"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#edit"></use></svg><span data-i18n="kiosk.results.change"></span></button>
     </div>
+  </section>
+
+  <section data-screen="mall" hidden class="mall">
+    <div class="mall-head">
+      <img id="mallLogo" class="mall-logo" alt="" hidden>
+      <div>
+        <h1 tabindex="-1" id="mallName" data-i18n="kiosk.mall.title"></h1>
+        <p class="meta" id="mallWhere"></p>
+      </div>
+    </div>
+    <form id="mallSearch" class="mall-search card" role="search" novalidate>
+      <label for="mallQ" data-i18n="kiosk.mall.search_label"></label>
+      <div class="mall-search-row">
+        <input id="mallQ" name="q" type="search" maxlength="60" autocomplete="off" enterkeyhint="search" data-i18n-placeholder="kiosk.mall.search_ph">
+        <button class="primary" type="submit"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#search"></use></svg><span data-i18n="kiosk.mall.search_go"></span></button>
+      </div>
+    </form>
+    <p class="meta" id="mallStatus" role="status"></p>
+    <div class="catalog-grid" id="mallResults"></div>
+    <h2 id="mallShopsTitle"></h2>
+    <ul class="store-list" id="mallShops" aria-labelledby="mallShopsTitle"></ul>
   </section>
 
   <section data-screen="catalog" hidden>

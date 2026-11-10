@@ -74,6 +74,24 @@ html.kiosk .attract .go { min-height: 4.5rem; font-size: var(--text-xl); }
 .store-link > span { flex: 1; display: grid; }
 .store-link > .icon:first-child { color: var(--accent); }
 
+/* Task 37: the mall screen (directory + search) and the topbar's way back to it */
+.mall-head { display: flex; align-items: center; gap: var(--s-4); margin-bottom: var(--s-4); }
+.mall-head h1 { margin: 0; }
+.mall-head p { margin: var(--s-1) 0 0; }
+.mall-logo { width: 4rem; height: 4rem; object-fit: contain; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--line); flex: none; }
+.mall-search { display: grid; gap: var(--s-2); margin-bottom: var(--s-3); }
+.mall-search label { font-weight: var(--weight-medium); }
+.mall-search-row { display: flex; gap: var(--s-2); }
+.mall-search-row input { flex: 1; min-width: 0; }
+[data-screen="mall"] h2 { margin: var(--s-5) 0 0; }
+.shop-link { gap: var(--s-3); padding-block: var(--s-2); }
+.shop-link .shop-logo { width: 3rem; height: 3rem; flex: none; display: grid; place-items: center; object-fit: contain; border-radius: var(--r-md); background: var(--sunken); color: var(--accent); }
+.shop-link .cats { white-space: normal; }
+.store-list .empty { list-style: none; }
+.tile .shop { color: var(--accent); }
+.mall-btn { flex: none; }
+html.kiosk .shop-link .shop-logo { width: 4rem; height: 4rem; }
+
 /* ---------- Form */
 html.kiosk [data-screen="done"] { max-width: 44rem; margin-inline: auto; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: var(--s-4); align-items: start; }
@@ -344,6 +362,8 @@ a.button.wide { margin: var(--s-3) 0; }
 
 /* ---------- Phone: price under the name so item text keeps its width (U9). */
 @media (max-width: 30em) {
+  .mall-btn span { display: none; } /* the icon alone on a phone; its aria-label keeps the name */
+  html.in-mall .topbar .wordmark > .icon { display: none; } /* the mall button sits next to it: the shop name gets the room */
   [data-screen] h1, .attract h1 { font-size: var(--text-3xl); }
   .card { padding: var(--s-4); }
   .outfit { padding: 0; }

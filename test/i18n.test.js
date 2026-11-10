@@ -15,7 +15,7 @@ const srcFiles = (dir = 'src') => readdirSync(new URL(`../${dir}`, import.meta.u
 
 // Every file with user-facing text. i18n.js counts only below the dictionary (its helpers use keys too).
 const PAGES = ['public/app/index.html', 'public/app/order.html', 'public/app/profile.html', 'public/admin/index.html', 'public/landing/index.html', 'public/staff/index.html'];
-const SCRIPTS = ['public/app/app.js', 'public/app/idle.js', 'public/app/pose.js', 'public/app/flow.js', 'public/app/keypad.js', 'public/app/kiosk.js', 'public/app/order.js', 'public/app/profile.js', 'public/admin/admin.js', 'public/admin/util.js', 'public/admin/charts.js', 'public/shared/ui.js', 'public/landing/landing.js', 'public/staff/staff.js', ...srcFiles()];
+const SCRIPTS = ['public/app/app.js', 'public/app/idle.js', 'public/app/pose.js', 'public/app/flow.js', 'public/app/keypad.js', 'public/app/kiosk.js', 'public/app/mall.js', 'public/app/order.js', 'public/app/profile.js', 'public/admin/admin.js', 'public/admin/util.js', 'public/admin/charts.js', 'public/shared/ui.js', 'public/landing/landing.js', 'public/staff/staff.js', ...srcFiles()];
 const i18nSrc = read('public/shared/i18n.js');
 const sources = Object.fromEntries([...PAGES, ...SCRIPTS].map((f) => [f, read(f)]));
 sources['public/shared/i18n.js#helpers'] = i18nSrc.slice(i18nSrc.indexOf('export const DICT'));

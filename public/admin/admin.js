@@ -174,7 +174,7 @@ function fillCatFilter() {
   pf.category.replaceChildren(el('option', { value: '', textContent: t('common.all') }), ...list.map((c) => el('option', { value: c.id, textContent: catText(c) })));
 }
 
-const roleName = (r) => t({ super: 'adm.role_super', owner: 'adm.role_owner', manager: 'adm.role_manager', staff: 'adm.role_staff' }[r]);
+const roleName = (r) => t({ super: 'adm.role_super', owner: 'adm.role_owner', manager: 'adm.role_manager', staff: 'adm.role_staff', mall: 'adm.role_mall' }[r]);
 
 async function show() {
   me = null;
@@ -184,7 +184,9 @@ async function show() {
   $('app').hidden = !me;
   if (!me) return;
   if (me.role === 'staff') return location.replace('/staff/'); // task 28: the shop-floor role has only the staff app
-  stores = await call('/stores');
+  // Task 37: a mall admin has no store at all and only the mall page (the server refuses everything else).
+  const mallRole = me.role === 'mall';
+  stores = mallRole ? [] : await call('/stores');
   const sup = many();
   scope = sup && stores.some((s) => String(s.id) === store.get('sfAdminStore')) ? store.get('sfAdminStore') : '';
   $('scope').replaceChildren(el('option', { value: '', textContent: t('adm.all_stores') }), ...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
@@ -196,12 +198,16 @@ async function show() {
   $('userRole').textContent = roleName(me.role);
   $('avatar').textContent = me.email[0].toUpperCase();
   $('storeWrap').hidden = !sup;
-  $('navOrgs').hidden = me.role !== 'super';
+  $('navOrgs').hidden = $('navMalls').hidden = me.role !== 'super';
   $('navCats').hidden = !['owner', 'super'].includes(me.role); // managers only use the categories
-  await loadCats();
+  for (const li of $('nav').children) if (!li.id || li.id === 'navSettings') li.hidden = mallRole;
+  $('navMall').hidden = !mallRole;
+  $('userMenu').querySelector('a[href="#/settings"]').hidden = mallRole;
+  document.querySelector('.side-inner > .wordmark').href = mallRole ? '#/mall' : '#/dashboard';
+  if (!mallRole) await loadCats();
   $('form').store_id.replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
   render();
-  pollBadge();
+  if (!mallRole) pollBadge();
 }
 
 $('login').addEventListener('submit', async (e) => {
@@ -255,6 +261,8 @@ const PAGES = {
   qr: { title: 'adm.route.qr', load: loadQr },
   settings: { title: 'adm.route.settings', load: loadSettings },
   orgs: { title: 'adm.route.orgs', load: loadOrgs },
+  malls: { title: 'adm.route.malls', load: loadMalls },
+  mall: { title: 'adm.route.mall', load: loadMall, poll: () => loadMall(true) },
   welcome: { title: 'adm.route.welcome', load: loadWelcome },
 };
 const ACTIONS = {
@@ -272,8 +280,10 @@ function render() {
   route = parseHash(location.hash);
   // A new owner has no store yet: everything but the wizard and their account waits for it. Only owners add stores.
   const welcome = me.role === 'owner' && !stores.length;
-  if ((welcome && !['welcome', 'settings'].includes(route.route)) || (route.route === 'welcome' && me.role !== 'owner') || (route.route === 'orgs' && me.role !== 'super') || (route.route === 'categories' && !['owner', 'super'].includes(me.role))) {
-    route = parseHash(welcome ? '#/welcome' : '#/dashboard');
+  const mallRole = me.role === 'mall';
+  if ((welcome && !['welcome', 'settings'].includes(route.route)) || (route.route === 'welcome' && me.role !== 'owner') || (['orgs', 'malls'].includes(route.route) && me.role !== 'super')
+    || (route.route === 'categories' && !['owner', 'super'].includes(me.role)) || (mallRole !== (route.route === 'mall'))) {
+    route = parseHash(welcome ? '#/welcome' : mallRole ? '#/mall' : '#/dashboard');
     history.replaceState(null, '', buildHash(route.route));
   }
   const name = route.route;
@@ -303,6 +313,7 @@ window.addEventListener('hashchange', () => {
 const seenKey = () => `sfSeenOrder:${me.id}`;
 let latestOrder = 0;
 async function pollBadge() {
+  if (me?.role === 'mall') return; // no orders of their own
   try {
     const since = Number(store.get(seenKey())) || 0;
     const r = await call(`/orders/unseen?since=${since}`);
@@ -1781,23 +1792,32 @@ function orgStep(done) {
   $('orgCopy').hidden = !done;
   $('orgCancel').textContent = t(done ? 'common.close' : 'common.cancel');
 }
-$('orgBtn').onclick = () => {
+// Task 37: the same dialog invites a shop into the mall for a mall admin (POST /mall/shops).
+let orgFor = 'orgs';
+function openOrg(kind, opener) {
+  orgFor = kind;
   of2.reset();
   orgStep(false);
   $('orgDlgError').textContent = '';
+  $('orgTitle').textContent = t(kind === 'shops' ? 'adm.mall.invite' : 'adm.orgs.add');
+  $('orgAsk').querySelector('p').textContent = t(kind === 'shops' ? 'adm.mall.invite_text' : 'adm.orgs.add_text');
+  of2.name.previousElementSibling.textContent = t(kind === 'shops' ? 'field.shop_name' : 'field.org_name');
+  $('orgDlg').opener = opener;
   $('orgDlg').showModal();
-};
+}
+$('orgBtn').onclick = () => openOrg('orgs', $('orgBtn'));
+$('shopInviteBtn').onclick = () => openOrg('shops', $('shopInviteBtn'));
 $('orgCancel').onclick = () => $('orgDlg').close();
 $('orgDlg').addEventListener('close', () => {
   $('orgUrl').value = ''; // the owner's link is shown once
-  if (!$('orgDone').hidden) loadOrgs();
-  $('orgBtn').focus();
+  if (!$('orgDone').hidden) (orgFor === 'shops' ? loadMall(true) : loadOrgs());
+  ($('orgDlg').opener ?? $('orgBtn')).focus();
 });
 of2.onsubmit = async (e) => {
   e.preventDefault();
   $('orgDlgError').textContent = '';
   try {
-    const r = await call('/orgs', { method: 'POST', body: { name: of2.name.value.trim(), owner_email: of2.owner_email.value.trim() } });
+    const r = await call(orgFor === 'shops' ? '/mall/shops' : '/orgs', { method: 'POST', body: { name: of2.name.value.trim(), owner_email: of2.owner_email.value.trim() } });
     $('orgUrl').value = r.invite.url;
     $('orgExpiry').textContent = t('adm.team.link_expiry', { at: fmt.dateTime(r.invite.expires_at) });
     orgStep(true);
@@ -1902,7 +1922,7 @@ async function showInvite(tok) {
   f.hidden = false;
   try {
     const r = await call('/invite/check', { method: 'POST', body: { token: tok } });
-    $('inviteFor').textContent = t('adm.inv.for', { email: r.email, role: roleName(r.role), store: r.store_name || r.org_name });
+    $('inviteFor').textContent = t('adm.inv.for', { email: r.email, role: roleName(r.role), store: r.store_name || r.org_name || r.mall_name });
     f.username.value = r.email;
     f.password.focus();
   } catch (err) {
@@ -1924,3 +1944,239 @@ async function showInvite(tok) {
 }
 
 if (!inviteFromHash()) show();
+
+// ---------- Task 37: malls. Super: "Savdo markazlari" (malls, their shops and admins). Mall admin: their mall's
+// dashboard (summary numbers per shop, the directory entries, shop invites, the mall QR). Names are DB text: textContent only.
+
+let malls = [], editingMall = null, mallMode = 'create';
+const iconBtn = (ic, label, onclick) => el('button', { type: 'button', className: 'icon-btn ghost', title: label, ariaLabel: label, onclick }, icon(ic));
+const placeOf = (s) => [s.floor && t('adm.mall.floor', { n: s.floor }), s.unit && t('adm.mall.unit', { n: s.unit })].filter(Boolean).join(' · ');
+
+async function loadMalls() {
+  const seq = (loads.malls = (loads.malls || 0) + 1);
+  const stop = skeletonRows($('mallRows'), 4, 3);
+  try {
+    const list = await call('/malls');
+    stop();
+    if (seq !== loads.malls) return;
+    malls = list;
+    stateBox($('mallsError'));
+    if (!malls.length) return emptyRow($('mallRows'), 4, { ic: 'map-pin', title: t('adm.malls.empty'), text: t('adm.malls.empty_text') });
+    $('mallRows').replaceChildren(...malls.map((m) => el('tr', {},
+      el('td', {}, el('strong', { textContent: m.name }), el('div', { className: 'sizes', textContent: `${m.city}, ${m.address}` })),
+      el('td', { textContent: m.stores.map((s) => s.name).join(', ') || '—' }),
+      el('td', { className: 'hide-sm', textContent: [...m.admins.map((a) => (a.disabled ? `${a.email} (${t('adm.team.disabled')})` : a.email)),
+        m.invites && t('adm.malls.invites', { n: m.invites })].filter(Boolean).join(', ') || '—' }),
+      el('td', { className: 'row-actions' },
+        iconBtn('edit', t('adm.mall.edit_named', { name: m.name }), () => openMall('edit', m)),
+        iconBtn('user', t('adm.malls.invite_admin'), () => openMall('invite', m)),
+        iconBtn('trash', t('common.delete'), () => deleteMall(m))))));
+  } catch (err) {
+    stop();
+    if (seq === loads.malls) { $('mallRows').replaceChildren(); stateBox($('mallsError'), err, () => loadMalls()); }
+  }
+}
+async function deleteMall(m) {
+  if (!(await confirmDialog({ title: t('adm.malls.delete_title', { name: m.name }), text: t('adm.malls.delete_text'), ok: t('common.delete'), danger: true }))) return;
+  try {
+    await call(`/malls/${m.id}`, { method: 'DELETE' });
+    toast(t('adm.malls.deleted'), { tone: 'ok' });
+    loadMalls();
+  } catch (err) { toast(err.message, { tone: 'danger' }); }
+}
+
+// One dialog, four modes: create (super: profile + admin email → link), edit (super: profile + its stores),
+// invite (super: another admin link), self (mall admin: their profile + logo).
+const mf = $('mallForm');
+const MALL_PARTS = { create: ['profile', 'email'], edit: ['profile', 'stores'], invite: ['email'], self: ['profile', 'logo'] };
+function mallStep(done) {
+  $('mallAsk').hidden = done;
+  $('mallDone').hidden = !done;
+  $('mallSave').hidden = done;
+  $('mallCopy').hidden = !done;
+  $('mallCancel').textContent = t(done ? 'common.close' : 'common.cancel');
+}
+function openMall(mode, m = null) {
+  mallMode = mode;
+  editingMall = m;
+  mf.reset();
+  mallStep(false);
+  $('mallDlgError').textContent = $('mallImgError').textContent = '';
+  for (const part of mf.querySelectorAll('[data-mall]')) part.hidden = !MALL_PARTS[mode].includes(part.dataset.mall);
+  $('mallDlgTitle').textContent = mode === 'create' ? t('adm.malls.add') : mode === 'invite' ? t('adm.malls.invite_admin') : t('adm.mall.edit');
+  $('mallDlgText').textContent = mode === 'create' ? t('adm.malls.add_text') : mode === 'invite' ? t('adm.malls.invite_text', { name: m.name }) : '';
+  $('mallSave').textContent = t(mode === 'create' || mode === 'invite' ? 'adm.orgs.create' : 'adm.form.save');
+  mf.email.required = MALL_PARTS[mode].includes('email');
+  if (m) for (const k of ['name', 'city', 'address', 'lat', 'lon']) mf[k].value = m[k] ?? '';
+  if (mode === 'edit') {
+    // Every store: ticked when in this mall; a store in another mall can't be ticked here (it leaves that one first).
+    const elsewhere = new Map(malls.filter((x) => x.id !== m.id).flatMap((x) => x.stores.map((s) => [s.id, x.name])));
+    $('mallStores').replaceChildren(...stores.map((s) => el('label', { className: 'check' },
+      el('input', { type: 'checkbox', name: 'store', value: s.id, checked: m.stores.some((x) => x.id === s.id), disabled: elsewhere.has(s.id) }),
+      el('span', { textContent: elsewhere.has(s.id) ? `${s.name} — ${elsewhere.get(s.id)}` : s.name }))));
+  }
+  if (mode === 'self') showMallLogo(m.logo_url);
+  $('mallDlg').showModal();
+}
+$('mallAddBtn').onclick = () => openMall('create');
+$('mallEditBtn').onclick = () => mallData && openMall('self', mallData.mall);
+$('mallCancel').onclick = () => $('mallDlg').close();
+$('mallDlg').addEventListener('close', () => {
+  $('mallUrl').value = ''; // the admin's link is shown once
+  if (!$('mallDone').hidden) loadMalls();
+});
+mf.onsubmit = async (e) => {
+  e.preventDefault();
+  $('mallDlgError').textContent = '';
+  const profile = Object.fromEntries(['name', 'city', 'address', 'lat', 'lon'].map((k) => [k, mf[k].value.trim() || null]));
+  try {
+    if (mallMode === 'create' || mallMode === 'invite') {
+      const r = mallMode === 'create'
+        ? (await call('/malls', { method: 'POST', body: { ...profile, admin_email: mf.email.value.trim() } })).invite
+        : await call(`/malls/${editingMall.id}/invites`, { method: 'POST', body: { email: mf.email.value.trim() } });
+      $('mallUrl').value = r.url;
+      $('mallExpiry').textContent = t('adm.team.link_expiry', { at: fmt.dateTime(r.expires_at) });
+      mallStep(true);
+      $('mallUrl').focus();
+      $('mallUrl').select();
+      return;
+    }
+    if (mallMode === 'edit') {
+      const ids = [...mf.querySelectorAll('input[name=store]:checked')].map((i) => Number(i.value));
+      await call(`/malls/${editingMall.id}`, { method: 'PATCH', body: { ...profile, store_ids: ids } });
+      loadMalls();
+    } else {
+      await call('/mall', { method: 'PATCH', body: profile });
+      loadMall();
+    }
+    $('mallDlg').close();
+    toast(t('adm.form.saved'), { tone: 'ok' });
+  } catch (err) { $('mallDlgError').textContent = err.message; }
+};
+$('mallCopy').onclick = () => navigator.clipboard?.writeText($('mallUrl').value)
+  .then(() => toast(t('adm.qr.copied'), { tone: 'ok' }), () => toast(t('common.error'), { tone: 'danger' }));
+
+// Logo uploads (the mall's, a shop's directory logo): same limits as product photos.
+async function uploadLogo(fileInput, errBox, path) {
+  const file = fileInput.files[0];
+  errBox.textContent = '';
+  if (!file) return void (errBox.textContent = t('adm.form.image_pick'));
+  if (file.size > 2 * 1024 * 1024) return void (errBox.textContent = t('adm.form.image_big'));
+  try {
+    const r = await call(path, { method: 'POST', raw: file, type: file.type || 'application/octet-stream' });
+    fileInput.value = '';
+    loadMall(true);
+    return r.logo_url;
+  } catch (err) { errBox.textContent = err.message; }
+}
+async function removeLogo(errBox, path) {
+  try {
+    await call(path, { method: 'DELETE' });
+    loadMall(true);
+    return true;
+  } catch (err) { errBox.textContent = err.message; }
+}
+function showMallLogo(url) {
+  $('mallImg').hidden = $('mallImgRemove').hidden = !url;
+  if (url) $('mallImg').src = url;
+}
+$('mallImgUpload').onclick = async () => {
+  const url = await uploadLogo($('mallImgFile'), $('mallImgError'), '/mall/logo');
+  if (url) showMallLogo(url);
+};
+$('mallImgRemove').onclick = async () => (await removeLogo($('mallImgError'), '/mall/logo')) && showMallLogo(null);
+
+// The mall admin's dashboard (#/mall?days=30).
+let mallData = null, mallQr = null, editingEntry = null;
+async function loadMall(quiet = false) {
+  const seq = (loads.mall = (loads.mall || 0) + 1);
+  const days = route.params.days === '30' ? 30 : 7;
+  seg($('mallDays'), [['7', t('adm.stats.days', { n: 7 })], ['30', t('adm.stats.days', { n: 30 })]], String(days), (v) => setParams({ ...route.params, days: v === '7' ? '' : v }));
+  const stop = quiet ? () => {} : skeletonRows($('mallShopRows'), 6, 3);
+  try {
+    const [d, qr] = await Promise.all([call(`/mall?days=${days}`), mallQr ?? call('/mall/qr')]);
+    stop();
+    if (seq !== loads.mall) return;
+    mallData = d;
+    mallQr = qr;
+    stateBox($('mallError'));
+    drawMall(d, qr);
+  } catch (err) {
+    stop();
+    if (seq === loads.mall) { $('mallShopRows').replaceChildren(); stateBox($('mallError'), err, () => loadMall()); }
+  }
+}
+function drawMall({ mall, days, totals, shops, pending }, qr) {
+  const n = (v) => fmt.num(v);
+  $('mallKpis').replaceChildren(
+    kpi({ label: t('adm.mall.k_shops'), value: n(totals.shops) }),
+    kpi({ label: t('adm.mall.k_visits', { n: days }), value: n(totals.visits), sub: t('adm.mall.kiosk_n', { n: totals.kiosk_visits }) }),
+    kpi({ label: t('adm.mall.k_orders', { n: days }), value: n(totals.orders) }),
+    kpi({ label: t('adm.mall.k_kiosks'), value: n(totals.kiosks_online) }));
+  if (!shops.length) emptyRow($('mallShopRows'), 6, { ic: 'store', title: t('adm.mall.empty'), text: t('adm.mall.empty_text') });
+  else $('mallShopRows').replaceChildren(...shops.map((s) => el('tr', {},
+    el('td', {}, el('span', { className: 'prod' },
+      s.logo_url ? el('img', { className: 'thumb', src: s.logo_url, alt: '' }) : el('span', { className: 'thumb ph' }, icon('store')),
+      el('span', {}, el('button', { type: 'button', className: 'name-btn', textContent: s.name, onclick: () => openEntry(s) }),
+        el('span', { className: 'sizes' }, s.org_name !== s.name ? s.org_name : null, s.hidden ? el('span', { className: 'badge', textContent: t('adm.mall.hidden') }) : null)))),
+    el('td', { className: 'hide-sm', textContent: placeOf(s) || '—' }),
+    el('td', { className: 'num', title: t('adm.mall.visits_split', { kiosk: s.visits.kiosk, phone: s.visits.phone }) }, n(s.visits.kiosk + s.visits.phone),
+      el('div', { className: 'sizes', textContent: t('adm.mall.kiosk_n', { n: s.visits.kiosk }) })),
+    el('td', { className: 'num', textContent: n(s.orders) }),
+    el('td', { className: 'hide-sm' }, s.kiosks.count
+      ? el('span', { className: `badge ${s.kiosks.online ? 'ok' : 'warn'}`, textContent: t('adm.mall.online_of', { n: s.kiosks.online, of: s.kiosks.count }) })
+      : el('span', { className: 'muted', textContent: '—' })),
+    el('td', { className: 'row-actions' }, iconBtn('edit', t('adm.mall.entry_named', { name: s.name }), () => openEntry(s))))));
+  $('mallPending').replaceChildren(...(pending.length ? [el('h3', { className: 'section-title', textContent: t('adm.mall.pending') }),
+    el('ul', { className: 'plain-list' }, ...pending.map((p) => el('li', {}, el('strong', { textContent: p.name }), ' — ',
+      el('span', { className: 'muted', textContent: t(p.invite_open ? 'adm.mall.pending_open' : 'adm.mall.pending_expired') }))))] : []));
+  $('mallProfile').replaceChildren(...[
+    mall.logo_url && el('img', { className: 'cat-photo', src: mall.logo_url, alt: '' }),
+    el('p', {}, el('strong', { textContent: mall.name })),
+    el('p', { className: 'muted', textContent: `${mall.city}, ${mall.address}` }),
+    mall.lat != null && el('p', { className: 'muted num', textContent: `${mall.lat}, ${mall.lon}` })].filter(Boolean));
+  const img = el('div', { className: 'qr-img' });
+  img.innerHTML = qr.svg; // generated by our server from the mall URL (path data only)
+  img.firstElementChild?.setAttribute('aria-hidden', 'true');
+  const copy = (url) => navigator.clipboard?.writeText(url).then(() => toast(t('adm.qr.copied')), () => toast(t('common.error'), { tone: 'danger' }));
+  $('mallQr').replaceChildren(img, el('p', { className: 'muted qr-url', textContent: qr.url }),
+    el('div', { className: 'actions' },
+      el('button', { type: 'button', onclick: () => copy(qr.url) }, t('adm.qr.copy')),
+      el('button', { type: 'button', className: 'primary', onclick: () => printQr({ ...qr, name: mall.name }) }, icon('print'), t('adm.qrdlg.print'))),
+    el('p', { className: 'hint', textContent: t('adm.mall.kiosk_link') }), el('p', { className: 'muted qr-url', textContent: qr.kiosk_url }),
+    el('div', { className: 'actions' }, el('button', { type: 'button', onclick: () => copy(qr.kiosk_url) }, t('adm.qr.copy'))));
+}
+
+// A shop's directory entry: floor, unit, shown or hidden, its logo.
+const ef = $('entryForm');
+function showEntryLogo(url) {
+  $('entryImg').hidden = $('entryImgRemove').hidden = !url;
+  if (url) $('entryImg').src = url;
+}
+function openEntry(s) {
+  editingEntry = s;
+  ef.reset();
+  $('entryError').textContent = $('entryImgError').textContent = '';
+  $('entryTitle').textContent = s.name;
+  ef.floor.value = s.floor ?? '';
+  ef.unit.value = s.unit ?? '';
+  ef.hidden.checked = s.hidden;
+  showEntryLogo(s.logo_url);
+  $('entryDlg').showModal();
+}
+$('entryCancel').onclick = () => $('entryDlg').close();
+ef.onsubmit = async (e) => {
+  e.preventDefault();
+  $('entryError').textContent = '';
+  try {
+    await call(`/mall/stores/${editingEntry.id}`, { method: 'PATCH', body: { floor: ef.floor.value.trim() || null, unit: ef.unit.value.trim() || null, hidden: ef.hidden.checked } });
+    $('entryDlg').close();
+    toast(t('adm.form.saved'), { tone: 'ok' });
+    loadMall(true);
+  } catch (err) { $('entryError').textContent = err.message; }
+};
+$('entryImgUpload').onclick = async () => {
+  const url = await uploadLogo($('entryImgFile'), $('entryImgError'), `/mall/stores/${editingEntry.id}/logo`);
+  if (url) showEntryLogo(url);
+};
+$('entryImgRemove').onclick = async () => (await removeLogo($('entryImgError'), `/mall/stores/${editingEntry.id}/logo`)) && showEntryLogo(null);

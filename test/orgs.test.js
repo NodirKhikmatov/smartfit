@@ -243,6 +243,21 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       refused(await admin('PATCH', `/promos/${mine.id}`, { store_id: b1 }, ownerA)); // can't move a code into org B's store
       await db('promo_codes').where({ id: mine.id }).del();
     },
+    // Task 37: malls are super's; a mall's own routes are the mall admin's. A shop owner gets neither, even in that mall.
+    'GET /malls': async () => refused(await admin('GET', '/malls', undefined, ownerA)),
+    'POST /malls': async () => refused(await admin('POST', '/malls', { name: 'X', city: 'T', address: 'A', admin_email: 'm@smartfit.uz' }, ownerA)),
+    'PATCH /malls/:id': async () => refused(await admin('PATCH', '/malls/1', { store_ids: [] }, ownerA)),
+    'DELETE /malls/:id': async () => refused(await admin('DELETE', '/malls/1', undefined, ownerA)),
+    'POST /malls/:id/invites': async () => refused(await admin('POST', '/malls/1/invites', { email: 'm@smartfit.uz' }, ownerA)),
+    'GET /mall': async () => refused(await admin('GET', '/mall', undefined, ownerA)),
+    'PATCH /mall': async () => refused(await admin('PATCH', '/mall', { name: 'X' }, ownerA)),
+    'GET /mall/qr': async () => refused(await admin('GET', '/mall/qr', undefined, ownerA)),
+    'POST /mall/logo': async () => refused(await admin('POST', '/mall/logo', undefined, ownerA, { raw: png, type: 'image/png' })),
+    'DELETE /mall/logo': async () => refused(await admin('DELETE', '/mall/logo', undefined, ownerA)),
+    'POST /mall/shops': async () => refused(await admin('POST', '/mall/shops', { name: 'X', owner_email: 'x3@smartfit.uz' }, ownerA)),
+    'PATCH /mall/stores/:id': async () => refused(await admin('PATCH', `/mall/stores/${b1}`, { hidden: true }, ownerA)),
+    'POST /mall/stores/:id/logo': async () => refused(await admin('POST', `/mall/stores/${b1}/logo`, undefined, ownerA, { raw: png, type: 'image/png' })),
+    'DELETE /mall/stores/:id/logo': async () => refused(await admin('DELETE', `/mall/stores/${b1}/logo`, undefined, ownerA)),
     'GET /orgs': async () => refused(await admin('GET', '/orgs', undefined, ownerA)),
     'POST /orgs': async () => refused(await admin('POST', '/orgs', { name: 'X', owner_email: 'x2@smartfit.uz' }, ownerA)),
     'GET /demo-requests': async () => refused(await admin('GET', '/demo-requests', undefined, ownerA)),
@@ -265,6 +280,10 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
   assert.equal((await db('admins').where({ id: B.member.id }).first()).disabled_at, null);
   assert.equal((await db('sync_keys').where({ id: B.key.id }).first()).revoked_at, null);
   assert.equal((await db('promo_codes').where({ id: B.promo.id }).first()).value, 10);
+  const bStore = await db('stores').where({ id: b1 }).first();
+  assert.equal(Boolean(bStore.mall_hidden), false);
+  assert.equal(bStore.logo_url, null);
+  assert.ok(await db('malls').where({ id: 1 }).first(), 'the demo mall is still there');
 });
 
 test('an owner works across every store of their organisation; a manager stays in one store', async () => {
@@ -331,7 +350,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 23; i > 12; i--) await m.migrate.down(); // 023 … 013
+    for (let i = 24; i > 12; i--) await m.migrate.down(); // 024 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

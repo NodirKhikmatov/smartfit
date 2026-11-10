@@ -5,6 +5,10 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { builtinRows } from './migrations/023_categories.js';
 
+// Task 37: one demo mall holding both demo shops, so /kiosk?mall=1 shows the mall screen. The demo has one store per
+// brand, so the Samarqand brand's store joins it too (a second Tashkent store would change every demo-store test).
+export const DEMO_MALL = { name: 'Demo Savdo Markazi', city: 'Toshkent', address: "Amir Temur ko'chasi, 15", lat: 41.2995, lon: 69.2401 };
+const MALL_ENTRY = [{ mall_floor: '1', mall_unit: '104' }, { mall_floor: '2', mall_unit: '215' }];
 export const STORES = [
   { name: 'Smart Fit Toshkent', city: 'Toshkent', lat: 41.2995, lon: 69.2401, address: 'Amir Temur ko\'chasi, 15', delivery_fee: 25000, free_delivery_threshold: 1000000 },
   { name: 'Smart Fit Samarqand', city: 'Samarqand', lat: 39.6542, lon: 66.9597, address: 'Registon ko\'chasi, 7', delivery_fee: 20000, free_delivery_threshold: 800000 },
@@ -127,7 +131,7 @@ export function stockFor(item, size, storeIdx, sizeCount) {
 const imageName = (storeIdx, sku) => `demo-s${storeIdx + 1}-${sku.toLowerCase()}.svg`;
 
 // Children before parents (SQLite deletes row by row, with foreign keys on).
-const WIPE = ['fitting_requests', 'payment_transactions', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'categories', 'admins', 'stores', 'organizations'];
+const WIPE = ['fitting_requests', 'payment_transactions', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'categories', 'admins', 'stores', 'organizations', 'malls'];
 
 // uploadDir: where /uploads is served from. Without it (tests) image_url is still set, but no file is copied.
 export async function seed(db, { uploadDir } = {}) {
@@ -144,9 +148,10 @@ export async function seed(db, { uploadDir } = {}) {
     else for (const t of WIPE) await trx(t).truncate(); // knex's SQLite truncate also clears the table's sqlite_sequence row
     // One demo organisation per store (task 22), so the two demo brands are isolated from each other like real tenants.
     // The landing page's demo links open /kiosk?store=1.
+    const [{ id: mallId }] = await trx('malls').insert(DEMO_MALL).returning('id');
     for (const [storeIdx, store] of STORES.entries()) {
       const [{ id: orgId }] = await trx('organizations').insert({ name: store.name }).returning('id');
-      const [{ id: storeId }] = await trx('stores').insert({ ...store, organization_id: orgId }).returning('id');
+      const [{ id: storeId }] = await trx('stores').insert({ ...store, organization_id: orgId, mall_id: mallId, ...MALL_ENTRY[storeIdx] }).returning('id');
       await trx('categories').insert(builtinRows(orgId));
       const catIds = Object.fromEntries((await trx('categories').where({ organization_id: orgId }).select('id', 'role')).map((c) => [c.role, c.id]));
       const code = 'TS'[storeIdx];

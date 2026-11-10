@@ -54,7 +54,9 @@
           <li><a href="#/qr" data-route="qr"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg><span data-i18n="adm.route.qr"></span></a></li>
           <li><a href="/staff/" data-route="staff"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#user"></use></svg><span data-i18n="adm.route.staff"></span></a></li>
           <li id="navOrgs" hidden><a href="#/orgs" data-route="orgs"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#store"></use></svg><span data-i18n="adm.route.orgs"></span></a></li>
-          <li class="nav-sep"><a href="#/settings" data-route="settings"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#settings"></use></svg><span data-i18n="adm.route.settings"></span></a></li>
+          <li id="navMalls" hidden><a href="#/malls" data-route="malls"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#map-pin"></use></svg><span data-i18n="adm.route.malls"></span></a></li>
+          <li id="navMall" hidden><a href="#/mall" data-route="mall"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#map-pin"></use></svg><span data-i18n="adm.route.mall"></span></a></li>
+          <li class="nav-sep" id="navSettings"><a href="#/settings" data-route="settings"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#settings"></use></svg><span data-i18n="adm.route.settings"></span></a></li>
         </ul>
       </nav>
       <div class="side-foot">
@@ -322,6 +324,59 @@
           </table>
         </div>
         <nav class="pager" id="demoPager" data-i18n-aria-label="adm.pager"></nav>
+      </section>
+
+      <!-- Task 37: malls and their admins (super-admin) -->
+      <section data-page="malls" hidden>
+        <div class="page-head">
+          <p class="muted" data-i18n="adm.malls.sub"></p>
+          <button type="button" class="primary" id="mallAddBtn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="adm.malls.add"></span></button>
+        </div>
+        <div id="mallsError"></div>
+        <div class="table-wrap">
+          <table class="table">
+            <caption class="visually-hidden" data-i18n="adm.route.malls"></caption>
+            <thead><tr><th data-i18n="field.mall_name"></th><th data-i18n="adm.mall.shops_col"></th><th class="hide-sm" data-i18n="adm.orgs.admins"></th><th><span class="visually-hidden" data-i18n="adm.actions"></span></th></tr></thead>
+            <tbody id="mallRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Task 37: the mall admin's dashboard: profile, per-shop summary numbers, the directory entries, the mall QR -->
+      <section data-page="mall" hidden>
+        <div class="page-head">
+          <p class="muted" data-i18n="adm.mall.sub"></p>
+          <div class="seg" role="group" data-i18n-aria-label="adm.stats.period" id="mallDays"></div>
+        </div>
+        <div id="mallError"></div>
+        <div class="kpis" id="mallKpis"></div>
+        <div class="dash-grid">
+          <section class="card panel span-2" aria-labelledby="mallShopsTitle">
+            <div class="panel-head">
+              <div><h2 id="mallShopsTitle" data-i18n="adm.mall.shops"></h2><p class="panel-sub" data-i18n="adm.mall.shops_sub"></p></div>
+              <button type="button" id="shopInviteBtn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="adm.mall.invite"></span></button>
+            </div>
+            <div class="table-wrap">
+              <table class="table">
+                <caption class="visually-hidden" data-i18n="adm.mall.shops"></caption>
+                <thead><tr><th data-i18n="adm.mall.shop"></th><th class="hide-sm" data-i18n="adm.mall.place"></th><th class="num" data-i18n="adm.mall.visits"></th><th class="num" data-i18n="adm.mall.orders"></th><th class="hide-sm" data-i18n="adm.mall.kiosks"></th><th><span class="visually-hidden" data-i18n="adm.actions"></span></th></tr></thead>
+                <tbody id="mallShopRows"></tbody>
+              </table>
+            </div>
+            <div id="mallPending"></div>
+          </section>
+          <section class="card panel" aria-labelledby="mallProfileTitle">
+            <div class="panel-head">
+              <div><h2 id="mallProfileTitle" data-i18n="adm.mall.profile"></h2></div>
+              <button type="button" class="icon-btn" id="mallEditBtn" data-i18n-title="adm.mall.edit" data-i18n-aria-label="adm.mall.edit"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#edit"></use></svg></button>
+            </div>
+            <div id="mallProfile"></div>
+          </section>
+          <section class="card panel qr-card" aria-labelledby="mallQrTitle">
+            <h2 id="mallQrTitle" data-i18n="adm.mall.qr"></h2>
+            <div id="mallQr"></div>
+          </section>
+        </div>
       </section>
 
       <!-- Onboarding wizard for a new owner: store profile → products from CSV → QR print (#/welcome?store=…&step=…) -->
@@ -604,6 +659,83 @@
       <button type="button" id="orgCancel" data-i18n="common.cancel"></button>
       <button class="primary" id="orgCreate" data-i18n="adm.orgs.create"></button>
       <button type="button" class="primary" id="orgCopy" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="adm.qr.copy"></span></button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Task 37: a mall (super: add / edit / another admin; mall admin: their mall's profile and logo) -->
+<dialog id="mallDlg" aria-labelledby="mallDlgTitle">
+  <form id="mallForm" method="dialog" novalidate>
+    <h2 id="mallDlgTitle"></h2>
+    <div id="mallAsk">
+      <p class="muted" id="mallDlgText"></p>
+      <div class="grid" data-mall="profile">
+        <label class="span-2"><span data-i18n="field.mall_name"></span> <input name="name" required maxlength="120" autocomplete="off"></label>
+        <label><span data-i18n="field.city"></span> <input name="city" required maxlength="80" autocomplete="off"></label>
+        <label><span data-i18n="field.address"></span> <input name="address" required maxlength="200" autocomplete="off"></label>
+        <label><span data-i18n="adm.mall.lat"></span> <input name="lat" inputmode="decimal" maxlength="20" autocomplete="off" aria-describedby="mallPointHint"></label>
+        <label><span data-i18n="adm.mall.lon"></span> <input name="lon" inputmode="decimal" maxlength="20" autocomplete="off" aria-describedby="mallPointHint"></label>
+      </div>
+      <p class="hint" id="mallPointHint" data-mall="profile" data-i18n="adm.mall.point_hint"></p>
+      <div class="grid" data-mall="email">
+        <label class="span-2"><span data-i18n="adm.malls.admin_email"></span> <input name="email" type="email" maxlength="200" autocomplete="off"></label>
+      </div>
+      <fieldset class="mall-stores" data-mall="stores">
+        <legend data-i18n="adm.malls.stores"></legend>
+        <p class="hint" data-i18n="adm.malls.stores_hint"></p>
+        <div class="check-list" id="mallStores"></div>
+      </fieldset>
+      <div data-mall="logo">
+    <div id="mallImgWrap">
+      <h3 data-i18n="adm.mall.logo"></h3>
+      <img id="mallImg" class="cat-photo" alt="" hidden>
+      <div class="bar">
+        <label class="grow"><span data-i18n="adm.form.image_hint"></span> <input id="mallImgFile" type="file" accept="image/jpeg,image/png,image/webp"></label>
+        <button type="button" id="mallImgUpload"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#upload"></use></svg><span data-i18n="adm.form.image_upload"></span></button>
+        <button type="button" class="danger" id="mallImgRemove"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trash"></use></svg><span data-i18n="adm.form.image_remove"></span></button>
+      </div>
+      <p class="error" id="mallImgError" role="alert"></p>
+    </div>
+      </div>
+    </div>
+    <div id="mallDone" hidden>
+      <p data-i18n="adm.malls.link_text"></p>
+      <label class="field"><span data-i18n="adm.team.link"></span> <input id="mallUrl" readonly></label>
+      <p class="hint" id="mallExpiry"></p>
+    </div>
+    <p class="error" id="mallDlgError" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="mallCancel" data-i18n="common.cancel"></button>
+      <button class="primary" id="mallSave"></button>
+      <button type="button" class="primary" id="mallCopy" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="adm.qr.copy"></span></button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Task 37: a shop's entry in the mall directory (mall admin) -->
+<dialog id="entryDlg" aria-labelledby="entryTitle">
+  <form id="entryForm" method="dialog" novalidate>
+    <h2 id="entryTitle"></h2>
+    <div class="grid">
+      <label><span data-i18n="field.floor"></span> <input name="floor" maxlength="20" autocomplete="off"></label>
+      <label><span data-i18n="field.unit"></span> <input name="unit" maxlength="20" autocomplete="off"></label>
+      <label class="check span-2"><input type="checkbox" name="hidden" aria-describedby="entryHideHint"> <span data-i18n="adm.mall.hide"></span></label>
+    </div>
+    <p class="hint" id="entryHideHint" data-i18n="adm.mall.hide_hint"></p>
+    <div id="entryImgWrap">
+      <h3 data-i18n="adm.mall.shop_logo"></h3>
+      <img id="entryImg" class="cat-photo" alt="" hidden>
+      <div class="bar">
+        <label class="grow"><span data-i18n="adm.form.image_hint"></span> <input id="entryImgFile" type="file" accept="image/jpeg,image/png,image/webp"></label>
+        <button type="button" id="entryImgUpload"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#upload"></use></svg><span data-i18n="adm.form.image_upload"></span></button>
+        <button type="button" class="danger" id="entryImgRemove"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trash"></use></svg><span data-i18n="adm.form.image_remove"></span></button>
+      </div>
+      <p class="error" id="entryImgError" role="alert"></p>
+    </div>
+    <p class="error" id="entryError" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="entryCancel" data-i18n="common.cancel"></button>
+      <button class="primary" id="entrySave" data-i18n="adm.form.save"></button>
     </div>
   </form>
 </dialog>

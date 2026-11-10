@@ -15,16 +15,16 @@ export const RESERVE_MS = 3 * 60 * 60 * 1000; // pay at that store's cashier wit
 const MAX_LIST = 200; // shortcut: one page (category order, newest first); add paging when a store has more items
 const SIZE = /^[A-Za-z0-9][A-Za-z0-9./-]{0,9}$/; // any size a shop may use (task 36: its own lists too)
 // Task 36: the category's name comes along for the tiles; products of a hidden category are not shown (visible()).
-const COLS = ['p.id', 'p.name', 'p.name_ru', 'p.category', 'p.category_id', 'p.sizes', 'c.name as category_name', 'c.name_ru as category_name_ru',
+export const COLS = ['p.id', 'p.name', 'p.name_ru', 'p.category', 'p.category_id', 'p.sizes', 'c.name as category_name', 'c.name_ru as category_name_ru',
   'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.image_url'];
 const free = 'quantity - reserved > 0';
-const inStock = (db) => db('product_stock as s').whereRaw('s.product_id = p.id').whereRaw(`s.${free}`);
-const genders = (g) => (g === 'unisex' ? ['male', 'female', 'unisex'] : [g, 'unisex']);
+export const inStock = (db) => db('product_stock as s').whereRaw('s.product_id = p.id').whereRaw(`s.${free}`);
+export const genders = (g) => (g === 'unisex' ? ['male', 'female', 'unisex'] : [g, 'unisex']);
 const posInt = (v) => Number.isInteger(v) && v > 0;
 const iso = (ms) => new Date(ms).toISOString();
 
 // Products → tiles with the sizes that have free stock now, in size order.
-async function withSizes(db, rows) {
+export async function withSizes(db, rows) {
   const stock = rows.length ? await db('product_stock').whereIn('product_id', rows.map((p) => p.id)).whereRaw(free).select('product_id', 'size') : [];
   return rows.map(({ temp_min, temp_max, style, ...p }) => ({
     ...p, unit_price: unitPrice(p), sizes: sizesOf(p).filter((s) => stock.some((x) => x.product_id === p.id && x.size === s)),

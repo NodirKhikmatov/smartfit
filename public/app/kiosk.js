@@ -7,12 +7,14 @@ export const PING_MS = 60_000;
 const HOLD_MS = 3000; // long-press on the logo that opens the staff PIN dialog
 const $ = (id) => document.getElementById(id);
 
-export function kioskShell({ storeId, api }) {
+// Task 37: a mall kiosk (mallId) installs as the mall's, sends no heartbeat (it is no shop's kiosk, even while it shows a
+// shop) and has no staff PIN exit (the PIN is a shop's).
+export function kioskShell({ storeId, mallId = 0, api }) {
   let staff = false; // after a correct PIN: no fullscreen or wake lock until the page is reloaded
   let lock = null;
 
-  if (storeId > 0) {
-    document.head.append(Object.assign(document.createElement('link'), { rel: 'manifest', href: `/kiosk.webmanifest?store=${storeId}` }));
+  if (storeId > 0 || mallId > 0) {
+    document.head.append(Object.assign(document.createElement('link'), { rel: 'manifest', href: `/kiosk.webmanifest?${mallId > 0 ? `mall=${mallId}` : `store=${storeId}`}` }));
   }
   navigator.serviceWorker?.register('/kiosk-sw.js', { scope: '/kiosk' }).catch(() => {}); // offline shell is a bonus, never a blocker
 
@@ -33,10 +35,11 @@ export function kioskShell({ storeId, api }) {
   document.addEventListener('keydown', () => attract(false), { capture: true });
 
   const device = kioskDevice();
-  const ping = () => storeId > 0 && device && api('/kiosk/ping', { store_id: storeId, device }).catch(() => {});
+  const ping = () => storeId > 0 && !mallId && device && api('/kiosk/ping', { store_id: storeId, device }).catch(() => {});
   ping();
   setInterval(ping, PING_MS);
 
+  if (mallId > 0) return;
   // Staff exit: hold the logo for 3 s, then the store's PIN (set in admin → Sozlamalar → Do'kon).
   const dlg = $('staffDlg'), f = $('staffForm');
   let timer;

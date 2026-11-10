@@ -100,7 +100,7 @@ docker stop smartfit-testpg
 | `DOMAIN` | `localhost` | docker compose only: the HTTPS domain Caddy serves and gets a certificate for. |
 | `NODE_ENV` | empty | `production` requires `ADMIN_TOKEN_SECRET` and blocks `npm run seed`. compose sets it. |
 | `TRUST_PROXY` | empty | Number of reverse proxies in front of the app. compose sets `1` (Caddy), so client IPs (login lock, rate limits, open-cart cap) and `https` (QR links) are right. Leave empty when the app is reached directly. |
-| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN`, `RATE_DEMO_PER_MIN`, `RATE_FUNNEL_PER_MIN`, `RATE_CATALOG_PER_MIN`, `RATE_PROMO_PER_MIN`, `RATE_PROFILE_PER_MIN`, `RATE_PROFILE_POLL_PER_MIN`, `RATE_SCAN_PER_MIN` | 60, 30, 300, 20, 30, 5, 3, 120, 300, 20, 20, 300, 120 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat, the kiosk exit PIN, the landing page's demo form, the customer funnel events (`/api/funnel`), the catalogue (`/api/catalog/*`), promo code tries (`POST /api/cart/:token/promo`), new profile links / kiosk login QRs and the profile page (`/api/profile/*`), the screens waiting for the bot (`GET /api/profile/token/*`), and garment QR label scans (`GET /q/*`; over the limit the phone is still redirected, the scan just isn't logged). Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
+| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN`, `RATE_DEMO_PER_MIN`, `RATE_FUNNEL_PER_MIN`, `RATE_CATALOG_PER_MIN`, `RATE_PROMO_PER_MIN`, `RATE_PROFILE_PER_MIN`, `RATE_PROFILE_POLL_PER_MIN`, `RATE_SCAN_PER_MIN`, `RATE_MALL_PER_MIN` | 60, 30, 300, 20, 30, 5, 3, 120, 300, 20, 20, 300, 120, 300 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat, the kiosk exit PIN, the landing page's demo form, the customer funnel events (`/api/funnel`), the catalogue (`/api/catalog/*`), promo code tries (`POST /api/cart/:token/promo`), new profile links / kiosk login QRs and the profile page (`/api/profile/*`), the screens waiting for the bot (`GET /api/profile/token/*`), garment QR label scans (`GET /q/*`; over the limit the phone is still redirected, the scan just isn't logged), and the mall screen's directory and search (`/api/malls/*`). Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
 | `MAX_OPEN_CARTS_PER_IP` | 30 | Live carts (each holds stock for 15 min) one client IP may have at once; the next new cart → `429 too_many_carts`. Unpaid other-store reservations (task 25, held 3 h) count against the same cap (`429 too_many_reserves`). `0` = off. |
 | `ERROR_WEBHOOK_URL` | empty | Optional error monitoring: every error log line is POSTed as JSON `{text, content, level, time}` (works with Slack, Discord and Mattermost incoming webhooks), at most 10 a minute. |
 
@@ -146,6 +146,26 @@ The usual way, all in the browser:
    shop-floor staff (Sozlamalar → Jamoa, role "Menejer" or "Sotuvchi"). The owner sees and manages every store of their organisation and nothing of any other.
 
 Demo requests from the landing page show under the same **Tashkilotlar** page ("Ko'rib chiqildi" marks one handled).
+
+## Shopping malls (several shops, one entry screen)
+
+A mall holds shops of different organisations; each shop keeps its own admin, team, products, prices, orders and
+payment. The mall gets its own admin, who sees the shops and summary numbers only.
+
+1. Super-admin → **Savdo markazlari** → "Savdo markazi qo'shish": name, city, address (map point optional) and the mall
+   admin's email → a one-time link for that admin. The edit dialog puts existing stores in the mall (a store is in one
+   mall at most); "Admin taklif qilish" makes another admin link. Only an empty mall can be deleted (its admins go with it).
+2. The mall admin (`/admin` → **Savdo markazi**) invites shops ("Do'kon taklif qilish": the shop's name and its owner's
+   email → the owner's link). The owner's first store, made in the usual wizard, joins the mall. Per shop the mall admin
+   sets the floor, unit and logo and can hide it from the directory, and sees customer visits (kiosk / phone), the paid
+   orders count and kiosks online, never sums, products, customers or the team. The page has the mall QR (`/m?mall=ID`)
+   and the link for the mall's own kiosks (`/kiosk?mall=ID`).
+3. Customers: `/kiosk?mall=ID` and `/m?mall=ID` show the shop directory and a search over every shop's in-stock items.
+   A shop or an item opens that shop's usual flow (`?store=&mall=`); the cart stays the shop's, and leaving the shop with
+   items in it asks first and empties it. A mall kiosk sends no shop heartbeat and has no staff PIN exit (close it from
+   the OS). A store outside any mall works exactly as before (`?store=`).
+
+The demo seed has one mall, "Demo Savdo Markazi" (id 1), holding both demo stores.
 
 ## Adding a store and its staff from the command line
 

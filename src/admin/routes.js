@@ -16,6 +16,7 @@ import { audit, diff } from './audit.js';
 import { kioskStatus } from '../kiosk.js';
 import { publicTeamRoutes, settingsRoutes, ROLES } from './settings.js';
 import { orgRoutes } from './orgs.js';
+import { mallRoutes } from './malls.js';
 import { promoRoutes } from './promos.js';
 import { fitOf } from '../size/size.js';
 import { demandItems, funnelStats, methodStats } from '../demand.js';
@@ -31,14 +32,16 @@ export const fail = (status, key, vars = {}) => Object.assign(new Error(key), { 
 export const langOf = (req) => (LANGS.includes(req.query?.lang) ? req.query.lang : req.acceptsLanguages(...LANGS) || 'uz');
 export const errorBody = (lang, err) => ({ code: err.publicKey.slice(4), error: errorText(lang, err.publicKey, err.vars) });
 
-export const publicAdmin = ({ id, email, role, store_id, organization_id }) => ({ id, email, role, store_id, organization_id });
+export const publicAdmin = ({ id, email, role, store_id, organization_id, mall_id }) => ({ id, email, role, store_id, organization_id, ...(role === 'mall' && { mall_id }) });
 
 // Store scope (task 22): admin.stores is null for a super-admin (every store), every store of the organisation for an
 // owner, and the one store for a manager. Every admin query that touches store data goes through these two.
+// Task 37: a mall admin has no store at all ([]): a shop's data is never theirs, even past the MALL_ROUTES gate.
 export const canSee = (admin, storeId) => admin.stores === null || admin.stores.includes(Number(storeId));
 export const inStores = (admin, q, col) => (admin.stores === null ? q : q.whereIn(col, admin.stores));
 export async function storesOf(db, admin) {
   if (admin.role === 'super') return null;
+  if (admin.role === 'mall') return [];
   if (admin.role === 'manager' || admin.role === 'staff') return [admin.store_id];
   return (await db('stores').where({ organization_id: admin.organization_id }).orderBy('id').select('id')).map((s) => s.id);
 }
@@ -178,6 +181,10 @@ const IMAGE_TYPES = [
 ];
 // What the staff role may call (task 28): its own account, the floor queue, fitting accept/done and order steps.
 export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/staff$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/orders\/\d+\/status$/];
+// What the mall role may call (task 37): its own account and its mall (profile, logo, QR, the shops' directory entries,
+// shop invites, summary numbers). Every product, order, customer, team and settings route is 403 for it.
+export const MALL_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^(GET|PATCH) \/mall$/, /^(POST|DELETE) \/mall\/logo$/, /^GET \/mall\/qr$/,
+  /^POST \/mall\/shops$/, /^PATCH \/mall\/stores\/\d+$/, /^(POST|DELETE) \/mall\/stores\/\d+\/logo$/];
 const STATS_TZ = 'Asia/Tashkent'; // every store is in Uzbekistan (UTC+5, no DST)
 export const DAY_MS = 86400000;
 export const dayKey = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: STATS_TZ });
@@ -268,6 +275,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     admin.stores = await storesOf(db, admin);
     // Task 28: the staff role reaches only the shop-floor routes; every other admin route is 403 for it, whatever it is.
     if (admin.role === 'staff' && !STAFF_ROUTES.some((re) => re.test(`${req.method} ${req.path}`))) throw fail(403, 'err.forbidden');
+    if (admin.role === 'mall' && !MALL_ROUTES.some((re) => re.test(`${req.method} ${req.path}`))) throw fail(403, 'err.forbidden');
     req.admin = admin;
     next();
   });
@@ -790,6 +798,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   orgRoutes(r, db);
   promoRoutes(r, db); // task 26
   categoryRoutes(r, db, { uploadDir }); // task 36
+  mallRoutes(r, db, { uploadDir }); // task 37
 
   // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.
   const inScope = (req, q, col = 'store_id') => {
@@ -978,10 +987,16 @@ export async function fittingView(db, rows) {
 
 // No store and no organisation = super-admin. An owner belongs to an organisation (store optional: their first store,
 // made in the onboarding wizard); a manager to one store. With a store, the organisation is that store's.
-export async function createAdmin(db, { email, password, storeId = null, orgId = null, role = storeId || orgId ? 'owner' : 'super' }) {
+// A mall admin (task 37) has a mall and neither store nor organisation.
+export async function createAdmin(db, { email, password, storeId = null, orgId = null, mallId = null, role = mallId ? 'mall' : storeId || orgId ? 'owner' : 'super' }) {
   email = String(email ?? '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Invalid email');
   if (typeof password !== 'string' || password.length < 8 || password.length > 200) throw new Error('Password must be 8–200 characters');
+  if (role === 'mall' || mallId !== null) {
+    if (role !== 'mall' || storeId !== null || orgId !== null || !(Number.isInteger(mallId) && (await db('malls').where({ id: mallId }).first('id')))) throw new Error('Invalid mall');
+    const [{ id }] = await db('admins').insert({ email, password_hash: await hashPassword(password), role, mall_id: mallId }).returning('id');
+    return id;
+  }
   if (storeId !== null) {
     const s = Number.isInteger(storeId) && storeId > 0 ? await db('stores').where({ id: storeId }).first('organization_id') : undefined;
     if (!s?.organization_id || (orgId !== null && orgId !== s.organization_id)) throw new Error('Invalid store_id');

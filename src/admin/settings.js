@@ -8,7 +8,7 @@ import { audit, diff, AUDIT_ENTITIES } from './audit.js';
 import { publicBase } from '../qr.js';
 import { stamp } from '../cart/cart.js';
 
-export const ROLES = ['super', 'owner', 'manager', 'staff'];
+export const ROLES = ['super', 'owner', 'manager', 'staff', 'mall'];
 const STORE_ROLES = ['manager', 'staff']; // bound to one store; an owner invites and manages these
 export const INVITE_TTL_MS = 48 * 60 * 60 * 1000;
 const SYNC_KEYS_MAX = 10; // live keys per store
@@ -29,15 +29,15 @@ const manages = (admin, target) => target.id !== admin.id && target.role !== 'su
 // Invite links work without a session: check shows who it is for, accept sets the password and signs in.
 export function publicTeamRoutes(r, db, { secret }) {
   const liveInvite = (q, token) => (typeof token === 'string' && /^[0-9a-f]{32}$/.test(token)
-    ? q('admin_invites as i').leftJoin('stores as s', 's.id', 'i.store_id').join('organizations as g', 'g.id', 'i.organization_id')
-      .where('i.token_hash', sha256(token)).whereNull('i.used_at').where('i.expires_at', '>', iso(Date.now())).first('i.*', 's.name as store_name', 'g.name as org_name')
+    ? q('admin_invites as i').leftJoin('stores as s', 's.id', 'i.store_id').leftJoin('organizations as g', 'g.id', 'i.organization_id').leftJoin('malls as m', 'm.id', 'i.mall_id')
+      .where('i.token_hash', sha256(token)).whereNull('i.used_at').where('i.expires_at', '>', iso(Date.now())).first('i.*', 's.name as store_name', 'g.name as org_name', 'm.name as mall_name')
     : undefined);
 
   // The token travels in the body (never in a path), so it can't land in the request log.
   r.post('/invite/check', async (req, res) => {
     const inv = await liveInvite(db, req.body?.token);
     if (!inv) throw fail(410, 'err.invite_invalid');
-    res.json({ email: inv.email, role: inv.role, store_name: inv.store_name, org_name: inv.org_name });
+    res.json({ email: inv.email, role: inv.role, store_name: inv.store_name, org_name: inv.org_name, ...(inv.mall_name && { mall_name: inv.mall_name }) });
   });
 
   r.post('/invite/accept', async (req, res) => {
@@ -48,7 +48,7 @@ export function publicTeamRoutes(r, db, { secret }) {
       // The conditional UPDATE claims the invite: of two parallel accepts only one gets the row.
       if (!inv || !(await trx('admin_invites').where({ id: inv.id }).whereNull('used_at').update({ used_at: iso(Date.now()) }))) throw fail(410, 'err.invite_invalid');
       if (await trx('admins').where({ email: inv.email }).first()) throw fail(409, 'err.email_taken');
-      const id = await createAdmin(trx, { email: inv.email, password, storeId: inv.store_id, orgId: inv.organization_id, role: inv.role });
+      const id = await createAdmin(trx, { email: inv.email, password, storeId: inv.store_id, orgId: inv.organization_id, mallId: inv.mall_id ?? null, role: inv.role });
       const a = await trx('admins').where({ id }).first();
       await audit(trx, a, { action: 'team.join', storeId: a.store_id, entityId: id, label: a.email, after: { role: a.role } });
       return a;
@@ -58,19 +58,19 @@ export function publicTeamRoutes(r, db, { secret }) {
 }
 
 // A one-time invite link (shown once; only its sha256 is stored). A fresh link replaces the open one for that email.
-export async function createInvite(req, q, { email, role, storeId, orgId }) {
+export async function createInvite(req, q, { email, role, storeId, orgId, mallId = null }) {
   if (await q('admins').where({ email }).first()) throw fail(409, 'err.email_taken');
   const token = randomBytes(16).toString('hex');
   const expires = Date.now() + INVITE_TTL_MS;
   const run = async (trx) => {
-    await trx('admin_invites').where({ email, organization_id: orgId }).whereNull('used_at').del();
-    const [{ id }] = await trx('admin_invites').insert({ token_hash: sha256(token), email, role, store_id: storeId, organization_id: orgId, created_by: req.admin.id, expires_at: iso(expires) }).returning('id');
+    await trx('admin_invites').where(mallId ? { email, mall_id: mallId } : { email, organization_id: orgId }).whereNull('used_at').del();
+    const [{ id }] = await trx('admin_invites').insert({ token_hash: sha256(token), email, role, store_id: storeId, organization_id: orgId, mall_id: mallId, created_by: req.admin.id, expires_at: iso(expires) }).returning('id');
     await audit(trx, req.admin, { action: 'team.invite', storeId, entityId: id, label: email, after: { email, role } });
     return id;
   };
   const id = q.isTransaction ? await run(q) : await q.transaction(run);
   // In the #fragment, so the token never reaches a server log when the link is opened.
-  return { id, email, role, store_id: storeId, organization_id: orgId, expires_at: iso(expires), url: `${publicBase(req)}/admin/#/invite?token=${token}` };
+  return { id, email, role, store_id: storeId, organization_id: orgId, ...(mallId && { mall_id: mallId }), expires_at: iso(expires), url: `${publicBase(req)}/admin/#/invite?token=${token}` };
 }
 
 // Store profile as the settings form edits it.
@@ -157,13 +157,17 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
     if (!orgId) throw fail(400, 'err.invalid', { field: 'field.org' });
     const s = validStore({ ...Object.fromEntries(STORE_COLS.map((k) => [k, b[k]])), delivery_fee: b.delivery_fee ?? 0, low_stock_threshold: b.low_stock_threshold ?? 1, bundle_percent: b.bundle_percent ?? 0 });
     if (Number((await db('stores').where({ organization_id: orgId }).count({ n: '*' }))[0].n) >= STORES_MAX) throw fail(409, 'err.stores_max', { max: STORES_MAX });
+    // Task 37: a shop a mall invited puts its first store in that mall (later stores may be anywhere).
+    const org = await db('organizations as g').leftJoin('malls as m', 'm.id', 'g.mall_id').where('g.id', orgId).first('m.id as mall_id');
+    const first = !(await db('stores').where({ organization_id: orgId }).first('id'));
+    const mall = org.mall_id && first ? { mall_id: org.mall_id } : {};
     const id = await db.transaction(async (trx) => {
-      const [{ id }] = await trx('stores').insert({ ...s, organization_id: orgId }).returning('id');
+      const [{ id }] = await trx('stores').insert({ ...s, organization_id: orgId, ...mall }).returning('id');
       if (req.admin.role === 'owner' && !req.admin.store_id) await trx('admins').where({ id: req.admin.id }).update({ store_id: id, updated_at: trx.fn.now() });
       await audit(trx, req.admin, { action: 'store.create', storeId: id, entityId: id, label: s.name, after: s });
       return id;
     });
-    res.status(201).json({ id, ...s, organization_id: orgId, kiosk_pin_set: false, can_edit: true });
+    res.status(201).json({ id, ...s, organization_id: orgId, mall_id: mall.mall_id ?? null, kiosk_pin_set: false, can_edit: true });
   });
 
   // Store scope for sync keys and audit: an owner sees their organisation's stores; ?store_id narrows further.

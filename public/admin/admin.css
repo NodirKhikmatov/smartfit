@@ -338,3 +338,11 @@ dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }
 .demo-table td { vertical-align: top; }
 .demo-table .msg { max-width: 24rem; white-space: pre-line; overflow-wrap: anywhere; }
 .demo-table tr.done td { color: var(--ink-3); }
+
+/* Task 37: malls */
+.check-list { display: grid; gap: var(--s-2); max-height: 16rem; overflow-y: auto; padding: var(--s-1) 0; }
+.mall-stores { border: 0; padding: 0; margin: var(--s-3) 0 0; }
+.mall-stores legend { font-weight: var(--weight-medium); padding: 0; }
+.plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+#mallPending:not(:empty) { margin-top: var(--s-4); }
+#mallProfile p { margin: 0 0 var(--s-1); overflow-wrap: anywhere; }
