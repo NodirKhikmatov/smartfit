@@ -184,8 +184,9 @@ test('API errors: same code in uz and ru, message in the asked language', async 
     const [uz, ru] = await both(path, opts);
     assert.equal(uz.status, status, path);
     assert.equal(ru.status, status, path);
-    assert.deepEqual(uz.body, { code, error: uzText }, `${path} uz`);
-    assert.deepEqual(ru.body, { code, error: ruText }, `${path} ru`);
+    const text = ({ code, error }) => ({ code, error }); // a sold-out 409 also names the item (task 31)
+    assert.deepEqual(text(uz.body), { code, error: uzText }, `${path} uz`);
+    assert.deepEqual(text(ru.body), { code, error: ruText }, `${path} ru`);
   }
   // Request data that names an Object.prototype member is just text, never a crash.
   const proto = await call('/api/admin/products', { method: 'POST', auth: token, lang: 'ru', body: { name: 'x', category: 'top', gender: 'unisex', color: 'oq', price: 1, temp_min: 0, temp_max: 1, store_id: storeId, stock: { constructor: 1 } } });

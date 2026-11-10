@@ -293,7 +293,8 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
         if (!(await hold(trx, product_id, size, 1))) {
           // Task 24: logged after the rollback (below) as missed demand, once per results screen or cart.
           throw Object.assign(fail(409, 'err.out_of_stock', { product: p, size: size === 'ONE' ? 'common.size_one' : size }),
-            { missed: { storeId: cart.store_id, session: typeof b.rec === 'string' && REC.test(b.rec) ? b.rec : cart.token, items: [{ product_id, size }] } });
+            { item: { product_id, size }, // task 31: the app offers "Kelganda xabar bering" for this size
+              missed: { storeId: cart.store_id, session: typeof b.rec === 'string' && REC.test(b.rec) ? b.rec : cart.token, items: [{ product_id, size }] } });
         }
         await trx('cart_items').insert({ cart_id: cart.id, product_id, size, quantity: 1 })
           .onConflict(['cart_id', 'product_id', 'size']).merge({ quantity: trx.raw('?? + 1', ['cart_items.quantity']) });

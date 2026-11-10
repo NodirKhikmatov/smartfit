@@ -3,6 +3,7 @@
 // belongs to one Telegram user in one organisation and keeps only numbers and sizes about the body, never a photo.
 // Kiosk login: the kiosk shows a one-time QR → the customer's own Telegram confirms with the contact → the kiosk
 // reads the sizes once. The profile page link goes only into the customer's own bot chat.
+// Task 31: "Kelganda xabar bering" uses the same deep link (a_…) to keep a waiting request for one sold-out size.
 import express from 'express';
 import { randomBytes, createHash } from 'node:crypto';
 import { qrSvg } from './qr.js';
@@ -11,15 +12,17 @@ import { SIZES, isFit } from './size/size.js';
 import { REC } from './recommend/routes.js';
 import { parseJson, setKey } from './cart/promo.js';
 import { stamp } from './cart/cart.js';
-import { t, LANGS } from '../public/shared/i18n.js';
+import { t, LANGS, productName } from '../public/shared/i18n.js';
 
 export const SAVE_MS = 10 * 60 * 1000; // time to open Telegram and share the contact
 export const LOGIN_MS = 3 * 60 * 1000; // the kiosk QR
 export const ACCESS_MS = 30 * 24 * 60 * 60 * 1000; // the profile page link; /profile in the bot gives a fresh one
 const MAX_LOOKS = 12;
+const MAX_ALERTS = 20; // waiting requests per profile; the oldest go first
 const TOKEN = /^[a-f0-9]{32}$/;
-const START = /^\/start(?:@\w+)?\s+([pk])_([a-f0-9]{32})$/;
-const KIND = { p: 'save', k: 'login' };
+const START = /^\/start(?:@\w+)?\s+([pka])_([a-f0-9]{32})$/;
+const KIND = { p: 'save', k: 'login', a: 'alert' };
+const PREFIX = { save: 'p', login: 'k', alert: 'a' };
 const iso = (ms) => new Date(ms).toISOString();
 const hash = (s) => createHash('sha256').update(s).digest('hex');
 const langOf = (v) => (LANGS.includes(v) ? v : 'uz');
@@ -49,14 +52,14 @@ const NUMBERS = Object.keys(bodyNumbers());
 // The kiosk and phone ask whether to show the buttons (store view `profile`); the routes exist only with a bot.
 export function createProfileRouter(db, { telegram, limit, pollLimit, now = Date.now }) {
   const r = express.Router();
-  const link = (kind, token) => `https://t.me/${telegram.username}?start=${kind === 'save' ? 'p' : 'k'}_${token}`;
+  const link = (kind, token) => `https://t.me/${telegram.username}?start=${PREFIX[kind]}_${token}`;
   async function storeOf(id) {
     const s = Number.isInteger(id) && id > 0 ? await db('stores').where({ id }).first('id', 'organization_id') : null;
     if (!s?.organization_id) throw fail(404, 'err.store_not_found');
     return s;
   }
   async function issue(kind, store, lang, data = null) {
-    const t0 = now(), token = randomBytes(16).toString('hex'), poll = randomBytes(16).toString('hex'), ms = kind === 'save' ? SAVE_MS : LOGIN_MS;
+    const t0 = now(), token = randomBytes(16).toString('hex'), poll = randomBytes(16).toString('hex'), ms = kind === 'login' ? LOGIN_MS : SAVE_MS;
     await db('profile_tokens').where('expires_at', '<', iso(t0 - 60 * 60 * 1000)).del(); // keep the table small
     await db('profile_tokens').insert({ token, poll, kind, organization_id: store.organization_id, store_id: store.id, lang, data: data && JSON.stringify(data), expires_at: iso(t0 + ms) });
     const url = link(kind, token);
@@ -81,6 +84,19 @@ export function createProfileRouter(db, { telegram, limit, pollLimit, now = Date
   r.post('/login', limit, async (req, res) => {
     const store = await storeOf(req.body?.store_id);
     res.status(201).json(await issue('login', store, langOf(req.body?.lang)));
+  });
+
+  // Task 31: { store_id, product_id, size, lang } → a deep link that keeps a waiting request for this size once the
+  // customer confirms in Telegram. Only for a size of this store's product that has no free stock now.
+  r.post('/alert', limit, async (req, res) => {
+    const b = req.body ?? {};
+    const store = await storeOf(b.store_id);
+    const p = Number.isInteger(b.product_id) ? await db('products').where({ id: b.product_id, store_id: store.id }).first('id') : null;
+    if (!p) throw fail(404, 'err.product_not_found');
+    const s = typeof b.size === 'string' ? await db('product_stock').where({ product_id: p.id, size: b.size }).first('quantity', 'reserved') : null;
+    if (!s) throw fail(400, 'err.bad_request');
+    if (s.quantity - s.reserved > 0) throw fail(409, 'err.alert_in_stock');
+    res.status(201).json(await issue('alert', store, langOf(b.lang), { product_id: p.id, size: b.size }));
   });
 
   // Polled by the screen that showed the link, with its own secret (not the one in the QR). A finished login hands
@@ -123,11 +139,22 @@ export function createProfileRouter(db, { telegram, limit, pollLimit, now = Date
     const orders = await db('orders as o').join('stores as s', 's.id', 'o.store_id').where('s.organization_id', p.organization_id)
       .where('o.phone', p.phone).orderBy('o.id', 'desc').limit(50)
       .select('o.number', 'o.created_at', 'o.status', 'o.payment_status', 'o.fulfillment', 'o.total', 'o.notify_token', 's.name as store_name');
+    const alerts = await db('stock_alerts as a').join('products as pr', 'pr.id', 'a.product_id').join('stores as s', 's.id', 'a.store_id')
+      .where('a.profile_id', p.id).whereNull('a.notified_at').orderBy('a.id', 'desc')
+      .select('a.id', 'a.size', 'a.created_at', 'pr.id as product_id', 'pr.name', 'pr.name_ru', 'pr.image_url', 's.name as store_name');
     res.json({
       organization: org?.name ?? '', name: p.name, phone: p.phone, lang: p.lang, consent_at: stamp(p.consent_at),
       ...Object.fromEntries(NUMBERS.map((k) => [k, p[k]])), looks,
+      alerts: alerts.map((a) => ({ ...a, created_at: stamp(a.created_at) })),
       orders: orders.map(({ notify_token, created_at, ...o }) => ({ ...o, created_at: stamp(created_at), url: notify_token ? `/order/${notify_token}` : null })),
     });
+  });
+
+  r.delete('/me/:token/alerts/:id', limit, async (req, res) => {
+    const p = await byAccess(req.params.token);
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || !(await db('stock_alerts').where({ id, profile_id: p.id }).del())) throw fail(404, 'err.not_found');
+    res.status(204).end();
   });
 
   r.delete('/me/:token', limit, async (req, res) => {
@@ -150,6 +177,7 @@ export async function deleteProfiles(db, ids) {
         .update({ customer_name: '—', address: null, lat: null, lon: null, telegram_chat_id: null });
     }
     await trx('profile_tokens').whereIn('profile_id', ids).del();
+    await trx('stock_alerts').whereIn('profile_id', ids).del();
     await trx('customer_looks').whereIn('profile_id', ids).del();
     return trx('customer_profiles').whereIn('id', ids).del();
   });
@@ -164,6 +192,18 @@ async function newAccess(db, profileId, base, now) {
   const token = randomBytes(16).toString('hex');
   await db('customer_profiles').where({ id: profileId }).update({ access_hash: hash(token), access_expires_at: iso(now + ACCESS_MS) });
   return pageUrl(base, token);
+}
+
+// Task 31: keep (or re-arm) the waiting request a_… token carried; returns the bot's confirmation in the token's language.
+async function addAlert(trx, profileId, row, now) {
+  const { product_id, size } = parseJson(row.data, {});
+  const p = await trx('products').where({ id: product_id, store_id: row.store_id }).first('name', 'name_ru');
+  if (!p) return null; // deleted meanwhile
+  await trx('stock_alerts').insert({ profile_id: profileId, store_id: row.store_id, product_id, size, lang: row.lang, created_at: iso(now) })
+    .onConflict(['profile_id', 'product_id', 'size']).merge({ notified_at: null, lang: row.lang, created_at: iso(now) });
+  const keep = trx('stock_alerts').where({ profile_id: profileId }).whereNull('notified_at').orderBy('id', 'desc').limit(MAX_ALERTS).select('id');
+  await trx('stock_alerts').where({ profile_id: profileId }).whereNull('notified_at').whereNotIn('id', keep).del();
+  return t('kiosk.bot.alert_saved', { name: productName(p, row.lang), size: size === 'ONE' ? t('common.size_one', {}, row.lang) : size }, row.lang);
 }
 
 // Bot messages for task 27. Returns true when the message was about profiles (so the order bot leaves it alone).
@@ -184,7 +224,18 @@ export async function handleProfileMessage(db, m, send, { now = Date.now(), base
       .where({ 'k.token': token, 'k.state': 'opened', 'k.telegram_user_id': from }).where('k.expires_at', '>', iso(now))
       .first('k.kind', 'k.lang', 's.name as store', 'o.name as org');
     if (!row || row.kind !== KIND[start[1]]) return send(chat, t('kiosk.bot.expired', {}, userLang)).then(() => true);
-    const ask = row.kind === 'save' ? t('kiosk.bot.consent', { org: row.org }, row.lang) : t('kiosk.bot.login', { store: row.store }, row.lang);
+    if (row.kind === 'alert') {
+      // Already has a profile here (consent given before): keep the request now, no contact needed again.
+      const done = await db.transaction(async (trx) => {
+        const k = await trx('profile_tokens').where({ token, state: 'opened', telegram_user_id: from }).first();
+        if (!k) return null;
+        const p = await trx('customer_profiles').where({ organization_id: k.organization_id, telegram_user_id: from }).first('id');
+        if (!p || !(await trx('profile_tokens').where({ id: k.id, state: 'opened' }).update({ state: 'done', profile_id: p.id }))) return null;
+        return (await addAlert(trx, p.id, k, now)) ?? t('kiosk.bot.expired', {}, row.lang);
+      });
+      if (done) return send(chat, done).then(() => true);
+    }
+    const ask = row.kind !== 'login' ? t('kiosk.bot.consent', { org: row.org }, row.lang) : t('kiosk.bot.login', { store: row.store }, row.lang);
     await send(chat, ask, contactKeyboard(row.lang));
     return true;
   }
@@ -218,12 +269,13 @@ export async function handleProfileMessage(db, m, send, { now = Date.now(), base
       const keep = trx('customer_looks').where({ profile_id: id }).orderBy('id', 'desc').limit(MAX_LOOKS).select('id');
       await trx('customer_looks').where({ profile_id: id }).whereNotIn('id', keep).del();
       await trx('profile_tokens').where({ id: row.id }).update({ state: 'done', profile_id: id });
-      return { kind: 'save', id, url: await newAccess(trx, id, base, now) };
+      const alert = row.kind === 'alert' ? await addAlert(trx, id, row, now) : null;
+      return { kind: 'save', id, alert, url: await newAccess(trx, id, base, now) };
     });
     if (!result) return true;
     const lang = row.lang;
     if (result.kind === 'login') await send(chat, t(result.found ? 'kiosk.bot.logged_in' : 'kiosk.bot.no_profile', {}, lang), NO_KEYBOARD);
-    else await send(chat, [t('kiosk.bot.saved', {}, lang), result.url && t('kiosk.bot.page', { url: result.url }, lang), t('kiosk.bot.delete_hint', {}, lang)].filter(Boolean).join('\n\n'), NO_KEYBOARD);
+    else await send(chat, [result.alert ?? t('kiosk.bot.saved', {}, lang), result.url && t('kiosk.bot.page', { url: result.url }, lang), t('kiosk.bot.delete_hint', {}, lang)].filter(Boolean).join('\n\n'), NO_KEYBOARD);
     return true;
   }
 

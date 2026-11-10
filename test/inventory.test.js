@@ -48,6 +48,7 @@ test('migration 010: unique SKU per store, threshold default 1, existing lows pr
   try {
     await m.migrate.latest();
     await seed(m);
+    await m.migrate.down(); // 021
     await m.migrate.down(); // 020
     await m.migrate.down(); // 019
     await m.migrate.down(); // 018

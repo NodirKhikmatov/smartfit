@@ -29,26 +29,36 @@ const range = (q, col, from, to) => {
 
 // Missed demand by product and size in [from, to), most missed first, with units sold in the same window, free stock
 // now and the restock suggestion. scope(q, col) narrows to the caller's stores.
-export async function demandItems(db, scope, { from, to = null, limit = 200 }) {
-  const missed = await range(scope(db('missed_demand as m'), 'm.store_id'), 'm.created_at', dbTime(from), to && dbTime(to))
-    .join('products as p', 'p.id', 'm.product_id').join('stores as st', 'st.id', 'm.store_id')
-    .groupBy('m.product_id', 'm.size', 'p.name', 'p.name_ru', 'p.category', 'p.sku', 'm.store_id', 'st.name')
-    .select('m.product_id', 'm.size', 'p.name', 'p.name_ru', 'p.category', 'p.sku', 'm.store_id', 'st.name as store_name')
+// Task 31: `waiting` = customers with an open "Kelganda xabar bering" request for that size (any age, so a size with
+// only old requests is listed too). Each request comes from a sold-out view that was also logged as missed, so the
+// suggestion counts the larger of the two, not their sum.
+const KEYS = ['product_id', 'size', 'p.name', 'p.name_ru', 'p.category', 'p.sku', 'store_id', 'st.name'];
+const named = (q, t) => q.join('products as p', 'p.id', `${t}.product_id`).join('stores as st', 'st.id', `${t}.store_id`)
+  .groupBy(KEYS.map((k) => (k.includes('.') ? k : `${t}.${k}`)))
+  .select(`${t}.product_id`, `${t}.size`, 'p.name', 'p.name_ru', 'p.category', 'p.sku', `${t}.store_id`, 'st.name as store_name');
+export async function demandItems(db, scope, { from, to = null, limit = 200, waiting: withWaiting = true }) {
+  const missed = await named(range(scope(db('missed_demand as m'), 'm.store_id'), 'm.created_at', dbTime(from), to && dbTime(to)), 'm')
     .count({ missed: '*' })
     .orderBy([{ column: 'missed', order: 'desc' }, { column: 'm.product_id' }, { column: 'm.size' }]).limit(limit);
-  if (!missed.length) return [];
-  const ids = [...new Set(missed.map((x) => x.product_id))];
+  const waiting = withWaiting ? await named(scope(db('stock_alerts as a'), 'a.store_id').whereNull('a.notified_at'), 'a').count({ waiting: '*' }) : [];
+  const key = (x) => `${x.product_id}:${x.size}`;
+  const waitBy = new Map(waiting.map((x) => [key(x), Number(x.waiting)]));
+  const listed = new Set(missed.map(key));
+  const all = [...missed, ...waiting.filter((x) => !listed.has(key(x))).map(({ waiting: _, ...x }) => ({ ...x, missed: 0 }))];
+  if (!all.length) return [];
+  const ids = [...new Set(all.map((x) => x.product_id))];
   const sold = await range(db('order_items as i').join('orders as o', 'o.id', 'i.order_id'), 'o.paid_at', iso(from), to && iso(to))
     .whereIn('i.product_id', ids).where('o.payment_status', 'paid').whereNot('o.status', 'cancelled')
     .groupBy('i.product_id', 'i.size').select('i.product_id', 'i.size').sum({ units: 'i.quantity' });
   const stock = await db('product_stock').whereIn('product_id', ids).select('product_id', 'size', db.raw('quantity - reserved as free'));
-  const key = (x) => `${x.product_id}:${x.size}`;
   const soldBy = new Map(sold.map((x) => [key(x), Number(x.units)]));
   const stockBy = new Map(stock.map((x) => [key(x), Number(x.free)]));
-  return missed.map((x) => {
-    const row = { ...x, missed: Number(x.missed), sold: soldBy.get(key(x)) ?? 0, stock: stockBy.get(key(x)) ?? 0 };
-    return { ...row, suggest: restock(row) };
+  const rows = all.map((x) => {
+    const row = { ...x, missed: Number(x.missed), waiting: waitBy.get(key(x)) ?? 0, sold: soldBy.get(key(x)) ?? 0, stock: stockBy.get(key(x)) ?? 0 };
+    return { ...row, suggest: restock({ ...row, missed: Math.max(row.missed, row.waiting) }) };
   });
+  const need = (x) => Math.max(x.missed, x.waiting);
+  return rows.sort((a, b) => need(b) - need(a) || a.product_id - b.product_id || (a.size < b.size ? -1 : a.size > b.size ? 1 : 0)).slice(0, limit);
 }
 
 // Funnel drop-off: a visit counts at every step up to the furthest one it reached (a refresh mid-way starts a new visit

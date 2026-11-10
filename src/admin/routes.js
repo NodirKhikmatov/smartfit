@@ -806,8 +806,8 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const tr = (key) => t(key, {}, lang);
     const items = await demandItems(db, scope, { from, limit: EXPORT_MAX });
     const csv = toCsv([
-      [tr('adm.demand.product'), tr('field.sku'), tr('common.store'), tr('adm.demand.size'), tr('adm.demand.missed'), tr('adm.demand.sold'), tr('adm.demand.stock'), tr('adm.demand.suggest')],
-      ...items.map((x) => [(lang === 'ru' && x.name_ru) || x.name, x.sku, x.store_name, x.size === 'ONE' ? tr('common.size_one') : x.size, x.missed, x.sold, x.stock, x.suggest]),
+      [tr('adm.demand.product'), tr('field.sku'), tr('common.store'), tr('adm.demand.size'), tr('adm.demand.missed'), tr('adm.demand.waiting'), tr('adm.demand.sold'), tr('adm.demand.stock'), tr('adm.demand.suggest')],
+      ...items.map((x) => [(lang === 'ru' && x.name_ru) || x.name, x.sku, x.store_name, x.size === 'ONE' ? tr('common.size_one') : x.size, x.missed, x.waiting, x.sold, x.stock, x.suggest]),
     ]);
     res.type('text/csv; charset=utf-8').attachment(`talab-${days}d-${dayKey(Date.now())}.csv`).send(csv);
   });

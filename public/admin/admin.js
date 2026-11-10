@@ -989,7 +989,7 @@ async function loadDemand() {
   const seq = (loads.demand = (loads.demand || 0) + 1);
   const p = route.params, days = demandDays();
   seg($('demandDays'), [7, 14, 30].map((n) => [String(n), t('adm.stats.days', { n })]), String(days), (v) => setParams({ ...p, days: v === '14' ? '' : v }));
-  const stop = skeletonRows($('demandRows'), 6);
+  const stop = skeletonRows($('demandRows'), 7);
   let d;
   try { d = await call('/demand?' + qs(scoped({ days }))); } catch (err) {
     stop();
@@ -1001,13 +1001,14 @@ async function loadDemand() {
   stateBox($('demandError'));
   const f = d.funnel, withStore = showStore();
   $('demandRange').textContent = t('adm.stats.range', { from: day(f.per_day[0].day), to: day(f.per_day.at(-1).day), n: d.days });
-  if (!d.items.length) emptyRow($('demandRows'), 6, { ic: 'check', title: t('adm.demand.empty'), text: t('adm.demand.empty_text') });
+  if (!d.items.length) emptyRow($('demandRows'), 7, { ic: 'check', title: t('adm.demand.empty'), text: t('adm.demand.empty_text') });
   else $('demandRows').replaceChildren(...d.items.map((x) => el('tr', {},
     el('td', {}, el('span', { className: 'demand-name' }, el('strong', { textContent: productName(x) }),
       el('span', { className: 'sizes', textContent: [x.sku || cat(x.category), withStore && x.store_name].filter(Boolean).join(' · ') }),
-      el('span', { className: 'show-sm', textContent: `${t('adm.demand.size')}: ${sizeText(x.size)}` }))), // phones: the size column hides
+      el('span', { className: 'show-sm', textContent: [`${t('adm.demand.size')}: ${sizeText(x.size)}`, x.waiting && `${t('adm.demand.waiting')}: ${x.waiting}`].filter(Boolean).join(' · ') }))), // phones: size and waiting columns hide
     el('td', { className: 'hide-sm', textContent: sizeText(x.size) }),
     el('td', { className: 'num', textContent: x.missed }),
+    el('td', { className: 'num hide-sm', textContent: x.waiting }), // task 31: "Kelganda xabar bering" requests still open
     el('td', { className: 'num hide-sm', textContent: x.sold }),
     el('td', { className: 'num hide-sm', textContent: x.stock }),
     el('td', { className: 'num' }, el('strong', { textContent: x.suggest })))));

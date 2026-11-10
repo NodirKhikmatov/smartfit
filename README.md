@@ -47,6 +47,10 @@ What phase 3 (tasks 23–28, features seen in similar products) added:
 - **Promotions (26):** promo codes per store or organisation and a "whole outfit" bundle discount, computed by the server.
 - **Customer profile through Telegram (27):** the shared contact verifies the phone (no SMS); sizes and body numbers
   (never the photo), saved looks, order history, kiosk login by QR, "delete my data".
+- **"Kelganda xabar bering" (31):** on a sold-out size (item page, or a result card whose size just sold out) the customer
+  asks the bot to tell them; one Telegram message with the item link when that size has free stock again, whatever
+  raised it (admin edit, CSV, sync API, a return, a cancelled order). Waiting requests on the profile page (cancel) and
+  per product and size on Admin → Talab.
 - **Staff app (28):** `/staff/` for the shop floor (see below) and a new `staff` role.
 
 Stack: Node.js 22 + Express 5, Knex with PostgreSQL in production (SQLite file in development), vanilla JS frontend,
@@ -327,6 +331,8 @@ the 2-week pilot.
 **Telegram**
 - [ ] Bot created with @BotFather, `TELEGRAM_BOT_TOKEN` + `TELEGRAM_BOT_USERNAME` set; order on a phone → Start →
       change the status in admin → the message arrives.
+- [ ] Back-in-stock (task 31) with the live bot and `PUBLIC_URL` set: sold-out size on the phone → "Kelganda xabar
+      bering" → Start + share the contact → raise the stock in admin → one message arrives, its link opens the item page.
 
 **Store process**
 - [ ] Return and exchange terms written and shown to delivery customers (risk: wrong size delivered).

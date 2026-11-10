@@ -171,7 +171,7 @@ async function api(path, body, method = body ? 'POST' : 'GET') {
   const headers = { 'accept-language': getLang(), ...(body && { 'content-type': 'application/json' }) };
   const res = await fetch('/api' + path, { method, headers, ...(body && { body: JSON.stringify(body) }) });
   const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || t('common.error')), { status: res.status, code: data.code });
+  if (!res.ok) throw Object.assign(new Error(data.error || t('common.error')), { status: res.status, code: data.code, item: data.item });
   return data;
 }
 
@@ -835,12 +835,16 @@ function addButton(items, card, className = 'primary wide', label = 'kiosk.add.b
       setCart(await api('/cart/items', { token: cart?.token, store_id: storeId, items: todo, rec, ...(rec && { outfit: items.map((p) => p.id) }) }));
     } catch (err) {
       msg.textContent = err.message;
+      // Task 31: that size just sold out → offer to wait for it (once per card).
+      const gone = err.code === 'out_of_stock' && store?.profile && items.find((p) => p.id === err.item?.product_id);
+      if (gone && !wrap.querySelector('.alert-box')) wrap.append(alertBox(gone, err.item.size));
     }
     sync();
   };
   syncs.add(sync);
   sync();
-  return el('div', { className: 'add' }, b, msg);
+  const wrap = el('div', { className: 'add' }, b, msg);
+  return wrap;
 }
 
 function card(heading, items, total, reason, swap) {
@@ -1089,8 +1093,9 @@ async function elsewhere(p, size, box) {
   }
   if (box.dataset.size !== size) return; // another size was picked meanwhile
   const head = el('p', { className: 'notice warn', role: 'status' }, icon('info'), el('span', { textContent: t('kiosk.item.size_out', { size: sizeName(size) }) }));
-  if (!r.stores.length) return box.replaceChildren(head, el('p', { className: 'meta', textContent: t('kiosk.item.nowhere') }));
-  box.replaceChildren(head, el('h3', { textContent: t('kiosk.item.elsewhere') }), el('ul', { className: 'store-stock' }, ...r.stores.map((s) => {
+  const wait = store?.profile ? [alertBox(p, size)] : []; // task 31, only with the Telegram bot
+  if (!r.stores.length) return box.replaceChildren(head, el('p', { className: 'meta', textContent: t('kiosk.item.nowhere') }), ...wait);
+  box.replaceChildren(head, ...wait, el('h3', { textContent: t('kiosk.item.elsewhere') }), el('ul', { className: 'store-stock' }, ...r.stores.map((s) => {
     const li = el('li', {}, el('div', {}, el('strong', { textContent: s.name }), el('div', { className: 'meta', textContent: [s.city, s.address].filter(Boolean).join(', ') })),
       el('span', { className: 'stock-count', textContent: t('kiosk.item.count', { n: s.count }) }));
     const b = el('button', { type: 'button', className: 'secondary wide' }, icon('store'), t('kiosk.item.reserve'));
@@ -1457,15 +1462,23 @@ function profileNumbers() {
   return { ...body, ...(request && { top: request.sizes.top, bottom: request.sizes.bottom, shoes: request.sizes.shoes, fit: request.fit }),
     ...(m && { shoulder: m.shoulder_cm, hip: m.hip_cm }), ...(u && { jeans: u.waist }), ...(tp && { chest: tp.chest, waist: tp.waist, hips: tp.hip }) };
 }
+// The same bot hand-off for "Profilimni saqlash" (task 27) and "Kelganda xabar bering" (task 31): path + body make the
+// one-time link, `saved` is what the box says once the customer finished in Telegram.
 function profileBox(looks = null) {
-  const box = el('div', { className: 'card profile-box' });
-  const intro = () => box.replaceChildren(el('p', { className: 'muted', textContent: t('kiosk.profile.save_hint') }),
-    el('button', { type: 'button', className: 'secondary wide', onclick: open }, icon('user'), el('span', { textContent: t('kiosk.profile.save') })));
+  return tgBox({ className: 'card profile-box', hint: 'kiosk.profile.save_hint', label: 'kiosk.profile.save', ic: 'user', saved: 'kiosk.profile.saved',
+    path: '/profile/link', body: () => ({ store_id: storeId, lang: getLang(), ...profileNumbers(), ...(looks && { rec: request?.rec, looks }) }) });
+}
+const alertBox = (p, size) => tgBox({ className: 'alert-box', hint: 'kiosk.alert.hint', label: 'kiosk.alert.btn', ic: 'clock', saved: 'kiosk.alert.saved',
+  path: '/profile/alert', body: () => ({ store_id: storeId, product_id: p.id, size, lang: getLang() }) });
+function tgBox({ className, hint, label, ic, saved, path, body }) {
+  const box = el('div', { className });
+  const intro = () => box.replaceChildren(el('p', { className: 'muted', textContent: t(hint) }),
+    el('button', { type: 'button', className: 'secondary wide', onclick: open }, icon(ic), el('span', { textContent: t(label) })));
   async function open(e) {
     e.currentTarget.disabled = true;
     let r;
     try {
-      r = await api('/profile/link', { store_id: storeId, lang: getLang(), ...profileNumbers(), ...(looks && { rec: request?.rec, looks }) });
+      r = await api(path, body());
     } catch (err) {
       intro();
       return toast(err.message, { tone: 'danger' });
@@ -1477,7 +1490,7 @@ function profileBox(looks = null) {
     box.replaceChildren(el('p', { className: 'meta', textContent: t('kiosk.profile.consent') }), ...goTo, el('p', { className: 'meta', role: 'status', textContent: t('kiosk.profile.waiting') }));
     pollProfile(r.poll, (s) => {
       if (!box.isConnected) return stopProfilePoll();
-      if (s.state === 'done') box.replaceChildren(el('div', { className: 'notice' }, icon('check'), el('p', { textContent: t('kiosk.profile.saved') })));
+      if (s.state === 'done') box.replaceChildren(el('div', { className: 'notice' }, icon('check'), el('p', { textContent: t(saved) })));
       else if (s.state === 'expired') box.replaceChildren(el('p', { className: 'meta', textContent: t('kiosk.profile.expired') }), el('button', { type: 'button', className: 'secondary', onclick: open }, t('kiosk.profile.again')));
     });
   }
@@ -1617,7 +1630,13 @@ if (saved) {
   }
 }
 budgetChips();
-go(storeId > 0 ? allowedScreen(saved?.screen ?? 'start', { ...appState(), itemOk: !!saved?.item }) : 'start', { replace: true, data: { item: saved?.item } });
+// ?item=<id> (task 31: the bot's "back in stock" link) opens that item page.
+const linkItem = Number(params.get('item'));
+if (storeId > 0 && Number.isInteger(linkItem) && linkItem > 0) {
+  go('item', { replace: true, data: { item: linkItem } });
+  params.delete('item'); // once: a later refresh restores the saved route instead
+  history.replaceState(history.state, '', `${location.pathname}?${params}`);
+} else go(storeId > 0 ? allowedScreen(saved?.screen ?? 'start', { ...appState(), itemOk: !!saved?.item }) : 'start', { replace: true, data: { item: saved?.item } });
 loadStore();
 const handoffToken = params.get('handoff');
 if (!kiosk && handoffToken) {

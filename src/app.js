@@ -125,7 +125,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
     const status = err.status || err.statusCode || 500;
     if (status >= 500) console.error(err);
     const key = status >= 500 ? 'err.server' : err.type === 'entity.too.large' ? 'err.too_large' : err.publicKey || 'err.bad_request';
-    res.status(status).json(errorBody(langOf(req), { publicKey: key, vars: err.vars }));
+    res.status(status).json({ ...errorBody(langOf(req), { publicKey: key, vars: err.vars }), ...(status === 409 && err.item && { item: err.item }) });
   });
 
   return app;

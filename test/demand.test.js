@@ -150,8 +150,8 @@ test('restock suggestion: missed + sold in the window − free stock, never belo
 
   const csv = await admin('GET', '/demand/export');
   assert.equal(csv.status, 200);
-  assert.ok(csv.body.startsWith('"Kiyim";"SKU (artikul)";"Do\'kon";"O\'lcham";"So\'ralgan";"Sotilgan";"Qoldiq";"Buyurtma qilish"'), csv.body.slice(0, 120));
-  assert.ok(csv.body.includes(`"${top.name}";"${top.sku}"`) && csv.body.includes(`"L";"3";"1";"${row.stock}";"${row.suggest}"`), csv.body);
+  assert.ok(csv.body.startsWith('"Kiyim";"SKU (artikul)";"Do\'kon";"O\'lcham";"So\'ralgan";"Kutmoqda";"Sotilgan";"Qoldiq";"Buyurtma qilish"'), csv.body.slice(0, 120));
+  assert.ok(csv.body.includes(`"${top.name}";"${top.sku}"`) && csv.body.includes(`"L";"3";"0";"1";"${row.stock}";"${row.suggest}"`), csv.body);
   assert.ok((await admin('GET', '/demand/export', undefined, 'ru')).body.includes('"Спрашивали"'));
 });
 

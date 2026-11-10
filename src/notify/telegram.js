@@ -9,6 +9,7 @@ import { fittingView, dayStart, DAY_MS, salesByMode } from '../admin/routes.js';
 import { demandItems, funnelStats } from '../demand.js';
 import { dbTime } from '../recommend/routes.js';
 import { handleProfileMessage } from '../profile.js';
+import { t, productName } from '../../public/shared/i18n.js';
 
 const DONE = ['delivered', 'cancelled']; // nothing more to say after these
 const START = /^\/start(?:@\w+)?\s+([a-f0-9]{32})$/;
@@ -119,6 +120,33 @@ export async function flushLowStock(db, telegram) {
   }
 }
 
+// Task 31: "Kelganda xabar bering" → the customer's own bot chat (a private chat id is the Telegram user id), once per
+// request. Outbox by state like the others, so every path that frees stock counts (admin edit, CSV, sync API, a return,
+// a cancelled order or an expired cart hold): a waiting request whose size has free stock now is sent and marked; none
+// is sent while the size has 0 free. 403/400 (bot blocked) → marked, no endless retries; network/5xx → next round.
+export function stockAlertText(a, base = process.env.PUBLIC_URL) {
+  const size = a.size === 'ONE' ? t('common.size_one', {}, a.lang) : a.size;
+  const head = t('kiosk.bot.back', { store: a.store_name, name: productName(a, a.lang), size }, a.lang);
+  return base ? `${head}\n${base.replace(/\/+$/, '')}/m?store=${a.store_id}&item=${a.product_id}` : head;
+}
+export async function flushStockAlerts(db, telegram, base = process.env.PUBLIC_URL) {
+  if (!telegram) return;
+  const rows = await db('stock_alerts as a').join('customer_profiles as c', 'c.id', 'a.profile_id')
+    .join('products as p', 'p.id', 'a.product_id').join('stores as s', 's.id', 'a.store_id')
+    .join('product_stock as ps', (j) => j.on('ps.product_id', 'a.product_id').andOn('ps.size', 'a.size'))
+    .whereNull('a.notified_at').whereRaw('ps.quantity - ps.reserved > 0').orderBy('a.id').limit(100)
+    .select('a.id', 'a.size', 'a.store_id', 'a.product_id', 'c.telegram_user_id', 'a.lang', 'p.name', 'p.name_ru', 's.name as store_name');
+  for (const a of rows) {
+    try {
+      await telegram(a.telegram_user_id, stockAlertText(a, base));
+    } catch (err) {
+      console.error(`telegram: stock alert ${a.id} not sent:`, err.message);
+      if (err.code !== 403 && err.code !== 400) continue; // try again next round
+    }
+    await db('stock_alerts').where({ id: a.id }).whereNull('notified_at').update({ notified_at: new Date().toISOString() });
+  }
+}
+
 // Landing-page demo requests (task 22) → the product owner's chat (TELEGRAM_OWNER_CHAT_ID). Outbox like the others:
 // without a chat id nothing is sent or marked, so requests wait until it is set; they also show in the super-admin.
 export async function flushDemoRequests(db, telegram, chatId = process.env.TELEGRAM_OWNER_CHAT_ID?.trim()) {
@@ -163,7 +191,7 @@ export async function weeklyReport(db, store, week) {
     .orderBy([{ column: 'units', order: 'desc' }, { column: 'i.product_id' }]).limit(3);
   const scope = (q, col) => q.where(col, store.id);
   const { total: f } = await funnelStats(db, scope, { from, to });
-  const missed = await demandItems(db, scope, { from, to, limit: 5 });
+  const missed = await demandItems(db, scope, { from, to, limit: 5, waiting: false });
   const free = 'ps.quantity - ps.reserved';
   const low = await db('product_stock as ps').join('products as p', 'p.id', 'ps.product_id').where('p.store_id', store.id)
     .whereRaw(`${free} <= ?`, [store.low_stock_threshold]).orderByRaw(`${free}, p.name, ps.id`).select('p.name', 'ps.size', db.raw(`${free} as free`));
@@ -234,6 +262,7 @@ export function startNotifications(db, { telegram = telegramConfig(), sms = smsS
     await flushNotifications(db, { telegram: send, sms }).catch((err) => console.error('notify failed:', err.message));
     await flushFitting(db, send).catch((err) => console.error('fitting notify failed:', err.message));
     await flushLowStock(db, send).catch((err) => console.error('low-stock notify failed:', err.message));
+    await flushStockAlerts(db, send).catch((err) => console.error('stock alert notify failed:', err.message));
     await flushDemoRequests(db, send).catch((err) => console.error('demo request notify failed:', err.message));
     await flushWeeklyReport(db, send).catch((err) => console.error('weekly report failed:', err.message));
     busy = false;

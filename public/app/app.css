@@ -323,6 +323,9 @@ html.kiosk .catalog-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap
 .profile-box { margin-top: var(--s-5); text-align: left; }
 .profile-box > :last-child { margin-bottom: 0; }
 .profile-box .tgqr { margin-bottom: var(--s-2); }
+.alert-box { margin: var(--s-3) 0; }
+.alert-box > p { margin: 0 0 var(--s-2); }
+.alert-box .tgqr { margin-bottom: var(--s-2); }
 .track section h2 { font-size: var(--text-lg); margin-bottom: var(--s-2); }
 .track .sum .muted { color: var(--ink-3); }
 
@@ -354,3 +357,10 @@ a.button.wide { margin: var(--s-3) 0; }
   .filter .chip { flex: none; }
   .item-photo { aspect-ratio: auto; height: 40dvh; }
 }
+
+/* Task 31: the profile page's waiting list */
+.alert-list { list-style: none; margin: 0; padding: 0; }
+.alerts { margin: var(--s-4) 0; }
+.alert-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); padding: var(--s-2) 0; border-top: 1px solid var(--line); }
+.alert-list li:first-child { border-top: 0; }
+.alert-list li > span { display: flex; flex-direction: column; min-width: 0; }

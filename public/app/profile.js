@@ -11,8 +11,8 @@ let profile = null, error = '';
 initLang();
 $('langBox').replaceChildren(langSwitch(() => render(), { short: true }));
 
-async function call(method = 'GET') {
-  const res = await fetch(`/api/profile/me/${token}`, { method, headers: { 'accept-language': getLang() } });
+async function call(method = 'GET', path = '') {
+  const res = await fetch(`/api/profile/me/${token}${path}`, { method, headers: { 'accept-language': getLang() } });
   const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || t('common.error'));
   return data;
@@ -58,6 +58,12 @@ function render() {
         el('p', { className: 'meta', textContent: `${l.store.name} · ${fmt.dateTime(l.created_at)}` }),
         ...l.items.map((i) => row(i.in_stock ? productName(i) : `${productName(i)} · ${t('kiosk.profile.sold_out')}`, fmt.som(i.unit_price), i.in_stock ? '' : 'muted')),
       ]) : [el('p', { className: 'muted', textContent: t('kiosk.profile.looks_none') })])),
+    // Task 31: sizes waited for ("Kelganda xabar bering"); each can be cancelled.
+    el('section', { className: 'card alerts' }, el('h2', { textContent: t('kiosk.profile.alerts') }),
+      ...(p.alerts.length ? [el('ul', { className: 'alert-list' }, ...p.alerts.map((a) => el('li', {},
+        el('span', {}, el('strong', { textContent: productName(a) }), el('span', { className: 'meta', textContent: `${sizeName(a.size)} · ${a.store_name} · ${fmt.dateTime(a.created_at)}` })),
+        el('button', { type: 'button', className: 'secondary', ariaLabel: t('kiosk.profile.alert_cancel_aria', { name: productName(a), size: sizeName(a.size) }), onclick: (e) => cancel(a, e.currentTarget) },
+          t('kiosk.profile.alert_cancel')))))] : [el('p', { className: 'muted', textContent: t('kiosk.profile.alerts_none') })])),
     el('section', { className: 'card' }, el('h2', { textContent: t('kiosk.profile.orders') }),
       ...(p.orders.length ? [el('ul', { className: 'store-list' }, ...p.orders.map((o) => el('li', {},
         el(o.url ? 'a' : 'div', { className: 'button store-link', ...(o.url && { href: o.url }) }, icon('receipt'),
@@ -66,6 +72,18 @@ function render() {
     el('p', { className: 'meta', textContent: t('kiosk.profile.consent_at', { date: fmt.dateTime(p.consent_at) }) }),
     el('button', { type: 'button', className: 'danger wide', onclick: remove }, icon('trash'), el('span', { textContent: t('kiosk.profile.delete') })),
   );
+}
+
+async function cancel(a, btn) {
+  btn.disabled = true;
+  try {
+    await call('DELETE', `/alerts/${a.id}`);
+  } catch (err) {
+    btn.disabled = false;
+    return $('body').prepend(el('p', { className: 'error', role: 'alert', textContent: err.message }));
+  }
+  profile.alerts = profile.alerts.filter((x) => x !== a);
+  render();
 }
 
 async function remove() {
