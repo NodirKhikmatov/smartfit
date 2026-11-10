@@ -187,6 +187,42 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       noB(await admin('GET', '/audit?limit=100', undefined, ownerA));
       assert.equal((await admin('GET', `/audit?store_id=${b1}`, undefined, ownerA)).body.total, 0);
     },
+    // Task 36: categories belong to the organisation; org B's are never listed, changed, deleted or used by org A.
+    'GET /categories': async () => {
+      for (const q of ['', `?organization_id=${orgB}`, `?store_id=${b1}`]) {
+        const r = await admin('GET', `/categories${q}`, undefined, ownerA);
+        assert.equal(r.status, 200);
+        assert.ok(r.body.length && r.body.every((c) => c.organization_id === orgA), 'only org A categories');
+      }
+    },
+    'POST /categories': async () => {
+      const r = await admin('POST', '/categories', { name: 'A toifa', name_ru: 'A категория', size_kind: 'one', organization_id: orgB, store_id: b1 }, ownerA);
+      assert.equal(r.status, 201);
+      assert.equal(r.body.organization_id, orgA, 'an owner always adds to their own organisation');
+      await db('categories').where({ id: r.body.id }).del();
+    },
+    'PATCH /categories/:id': async () => {
+      const c = await db('categories').where({ organization_id: orgB }).first();
+      refused(await admin('PATCH', `/categories/${c.id}`, { name: 'Buzildi' }, ownerA));
+      assert.equal((await db('categories').where({ id: c.id }).first()).name, c.name);
+      // Nor can an org A product take it, by id or by its name.
+      const p = await db('products').whereIn('store_id', [a1, a2]).first();
+      assert.equal((await admin('PATCH', `/products/${p.id}`, { category_id: c.id }, ownerA)).status, 400);
+      assert.equal((await admin('POST', '/products', { name: 'X', category_id: c.id, gender: 'male', color: 'oq', price: 1000, temp_min: 0, temp_max: 30, store_id: a1 }, ownerA)).status, 400);
+    },
+    'DELETE /categories/:id': async () => {
+      const c = await db('categories').where({ organization_id: orgB }).orderBy('id', 'desc').first();
+      refused(await admin('DELETE', `/categories/${c.id}`, undefined, ownerA));
+      assert.ok(await db('categories').where({ id: c.id }).first());
+    },
+    'POST /categories/:id/image': async () => {
+      const c = await db('categories').where({ organization_id: orgB }).first();
+      refused(await admin('POST', `/categories/${c.id}/image`, undefined, ownerA, { raw: png, type: 'image/png' }));
+    },
+    'DELETE /categories/:id/image': async () => {
+      const c = await db('categories').where({ organization_id: orgB }).first();
+      refused(await admin('DELETE', `/categories/${c.id}/image`, undefined, ownerA));
+    },
     'GET /promos': async () => {
       for (const q of ['', `?organization_id=${orgB}`]) {
         const r = await admin('GET', `/promos${q}`, undefined, ownerA);
@@ -282,8 +318,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
     // An owner without a store is now allowed (made by an org invite).
     await m('admins').insert({ email: 'new.owner@old.uz', password_hash: pw, role: 'owner', organization_id: orgs[0].id });
     // Reachable through the API: the old owner signs in and sees both of their organisation's stores.
-    await m.migrate.up(); // 013
-    await m.migrate.up(); // 014: the app runs on the current schema
+    await m.migrate.latest(); // the app runs on the current schema (task 36: categories)
     const app = createApp(m, { telegram: null }).listen(0);
     await new Promise((r) => app.once('listening', r));
     try {
@@ -296,8 +331,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    await m.migrate.down(); // 014
-    await m.migrate.down(); // 013
+    for (let i = 23; i > 12; i--) await m.migrate.down(); // 023 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

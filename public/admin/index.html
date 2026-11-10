@@ -48,6 +48,7 @@
           <li><a href="#/orders" data-route="orders"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#receipt"></use></svg><span data-i18n="adm.route.orders"></span><span class="nav-badge" id="ordersBadge" hidden></span></a></li>
           <li><a href="#/cashier" data-route="cashier"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#cash"></use></svg><span data-i18n="adm.route.cashier"></span></a></li>
           <li><a href="#/products" data-route="products"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><span data-i18n="adm.route.products"></span></a></li>
+          <li id="navCats" hidden><a href="#/categories" data-route="categories"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#bag"></use></svg><span data-i18n="adm.route.categories"></span></a></li>
           <li><a href="#/stats" data-route="stats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.route.stats"></span></a></li>
           <li><a href="#/demand" data-route="demand"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trend-up"></use></svg><span data-i18n="adm.route.demand"></span></a></li>
           <li><a href="#/qr" data-route="qr"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg><span data-i18n="adm.route.qr"></span></a></li>
@@ -190,6 +191,18 @@
       </section>
 
       <!-- Stats -->
+      <section data-page="categories" hidden>
+        <p class="muted" data-i18n="adm.cats.sub"></p>
+        <div id="catsError"></div>
+        <div class="table-wrap">
+          <table class="table cats-table">
+            <caption class="visually-hidden" data-i18n="adm.route.categories"></caption>
+            <thead><tr><th data-i18n="field.name"></th><th class="hide-sm" data-i18n="field.cat_role"></th><th class="hide-sm" data-i18n="adm.cats.sizes"></th><th class="num" data-i18n="adm.cats.products"></th><th data-i18n="adm.cats.order"></th></tr></thead>
+            <tbody id="catRows"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section data-page="stats" hidden>
         <div class="page-head">
           <p class="muted" id="statsRange"></p>
@@ -639,6 +652,45 @@
   </form>
 </dialog>
 
+<dialog id="catDlg" aria-labelledby="catTitle">
+  <form id="catForm" method="dialog">
+    <h2 id="catTitle"></h2>
+    <div class="grid">
+      <label><span data-i18n="adm.cats.name_uz"></span> <input name="name" required maxlength="60"></label>
+      <label><span data-i18n="adm.cats.name_ru"></span> <input name="name_ru" lang="ru" required maxlength="60"></label>
+      <label><span data-i18n="field.cat_role"></span> <select name="role" aria-describedby="catRoleHint">
+        <option value="" data-i18n="adm.cats.role_none"></option><option value="outerwear" data-i18n="cat.outerwear"></option><option value="top" data-i18n="cat.top"></option>
+        <option value="bottom" data-i18n="cat.bottom"></option><option value="shoes" data-i18n="cat.shoes"></option><option value="accessory" data-i18n="cat.accessory"></option>
+      </select></label>
+      <label><span data-i18n="field.size_kind"></span> <select name="size_kind">
+        <option value="clothes" data-i18n="adm.cats.kind_clothes"></option><option value="shoes" data-i18n="adm.cats.kind_shoes"></option>
+        <option value="one" data-i18n="adm.cats.kind_one"></option><option value="custom" data-i18n="adm.cats.kind_custom"></option>
+      </select></label>
+      <label id="catSizesWrap" class="span-2"><span data-i18n="field.cat_sizes"></span> <input name="sizes" maxlength="400" autocomplete="off" spellcheck="false" data-i18n-placeholder="adm.cats.sizes_ph" aria-describedby="catSizesHint"></label>
+      <label class="check"><input name="hidden" type="checkbox"> <span data-i18n="adm.cats.hide"></span></label>
+    </div>
+    <p class="hint" id="catRoleHint" data-i18n="adm.cats.role_hint"></p>
+    <p class="hint" id="catSizesHint"></p>
+    <div id="catImgWrap">
+      <h3 data-i18n="adm.form.image"></h3>
+      <img id="catImg" class="cat-photo" alt="" hidden>
+      <div class="bar">
+        <label class="grow"><span data-i18n="adm.form.image_hint"></span> <input id="catImgFile" type="file" accept="image/jpeg,image/png,image/webp"></label>
+        <button type="button" id="catImgUpload"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#upload"></use></svg><span data-i18n="adm.form.image_upload"></span></button>
+        <button type="button" class="danger" id="catImgRemove"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trash"></use></svg><span data-i18n="adm.form.image_remove"></span></button>
+      </div>
+      <p class="error" id="catImgError" role="alert"></p>
+    </div>
+    <p class="hint" id="catImgNote" data-i18n="adm.cats.photo_after"></p>
+    <p class="error" id="catDlgError" role="alert"></p>
+    <div class="actions">
+      <button type="button" class="danger ghost push-left" id="catDelete"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trash"></use></svg><span data-i18n="common.delete"></span></button>
+      <button type="button" id="catCancel" data-i18n="common.cancel"></button>
+      <button class="primary" id="catSave" data-i18n="adm.form.save"></button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlg" aria-labelledby="formTitle">
   <form id="form" method="dialog">
     <h2 id="formTitle"></h2>
@@ -653,14 +705,21 @@
       <label><span data-i18n="adm.form.style"></span> <input name="style" maxlength="40"></label>
       <label><span data-i18n="adm.products.price"></span> <input name="price" type="number" min="1" step="1" required></label>
       <label><span data-i18n="adm.form.discount"></span> <input name="discount_price" type="number" min="1" step="1"></label>
-      <label><span data-i18n="adm.form.temp_min"></span> <input name="temp_min" type="number" step="1" required></label>
-      <label><span data-i18n="adm.form.temp_max"></span> <input name="temp_max" type="number" step="1" required></label>
+      <label data-outfit><span data-i18n="adm.form.temp_min"></span> <input name="temp_min" type="number" min="-60" max="60" step="1" required></label>
+      <label data-outfit><span data-i18n="adm.form.temp_max"></span> <input name="temp_max" type="number" min="-60" max="60" step="1" required></label>
       <label><span data-i18n="adm.form.shelf"></span> <input name="shelf_location" maxlength="40"></label>
       <label><span data-i18n="field.sku"></span> <input name="sku" maxlength="40" pattern="[A-Za-z0-9][A-Za-z0-9._\-\/]{0,39}" autocomplete="off" spellcheck="false"></label>
       <label><span data-i18n="field.barcode"></span> <input name="barcode" maxlength="40" pattern="[A-Za-z0-9][A-Za-z0-9._\-\/]{0,39}" autocomplete="off" spellcheck="false" inputmode="numeric"></label>
       <label id="storeWrap"><span data-i18n="common.store"></span> <select name="store_id"></select></label>
-      <label class="check"><input name="waterproof" type="checkbox"> <span data-i18n="adm.form.waterproof"></span></label>
+      <label class="check" data-outfit><input name="waterproof" type="checkbox"> <span data-i18n="adm.form.waterproof"></span></label>
+      <label class="span-2"><span data-i18n="field.description"></span> <textarea name="description" maxlength="300" rows="2"></textarea></label>
+      <label class="span-2"><span data-i18n="field.description_ru"></span> <textarea name="description_ru" lang="ru" maxlength="300" rows="2"></textarea></label>
     </div>
+    <p class="hint" id="roleNote" data-i18n="adm.form.no_role" hidden></p>
+    <h3 data-i18n="field.details"></h3>
+    <p class="hint" data-i18n="adm.form.details_hint"></p>
+    <div class="details" id="details"></div>
+    <button type="button" id="detailAdd"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="adm.form.detail_add"></span></button>
     <div id="imgWrap">
       <h3 data-i18n="adm.form.image"></h3>
       <img id="imgPreview" alt="" hidden>

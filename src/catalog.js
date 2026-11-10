@@ -3,8 +3,8 @@
 import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { fail, CATEGORIES } from './admin/routes.js';
-import { sizesFor } from './db/seed.js';
-import { unitPrice, pairWith } from './recommend/engine.js';
+import { sizesOf } from './db/seed.js';
+import { unitPrice, pairWith, visible } from './recommend/engine.js';
 import { fitOf } from './size/size.js';
 import { logMissed } from './demand.js';
 import { hold, customer, insertOrder, orderView, releaseExpired, storeOf } from './cart/cart.js';
@@ -13,8 +13,10 @@ import { qrSvg, publicBase } from './qr.js';
 
 export const RESERVE_MS = 3 * 60 * 60 * 1000; // pay at that store's cashier within 3 h, then the hold is released
 const MAX_LIST = 200; // shortcut: one page (category order, newest first); add paging when a store has more items
-const ALL_SIZES = [...new Set(CATEGORIES.flatMap(sizesFor))];
-const COLS = ['p.id', 'p.name', 'p.name_ru', 'p.category', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.image_url'];
+const SIZE = /^[A-Za-z0-9][A-Za-z0-9./-]{0,9}$/; // any size a shop may use (task 36: its own lists too)
+// Task 36: the category's name comes along for the tiles; products of a hidden category are not shown (visible()).
+const COLS = ['p.id', 'p.name', 'p.name_ru', 'p.category', 'p.category_id', 'p.sizes', 'c.name as category_name', 'c.name_ru as category_name_ru',
+  'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.image_url'];
 const free = 'quantity - reserved > 0';
 const inStock = (db) => db('product_stock as s').whereRaw('s.product_id = p.id').whereRaw(`s.${free}`);
 const genders = (g) => (g === 'unisex' ? ['male', 'female', 'unisex'] : [g, 'unisex']);
@@ -25,7 +27,7 @@ const iso = (ms) => new Date(ms).toISOString();
 async function withSizes(db, rows) {
   const stock = rows.length ? await db('product_stock').whereIn('product_id', rows.map((p) => p.id)).whereRaw(free).select('product_id', 'size') : [];
   return rows.map(({ temp_min, temp_max, style, ...p }) => ({
-    ...p, unit_price: unitPrice(p), sizes: sizesFor(p.category).filter((s) => stock.some((x) => x.product_id === p.id && x.size === s)),
+    ...p, unit_price: unitPrice(p), sizes: sizesOf(p).filter((s) => stock.some((x) => x.product_id === p.id && x.size === s)),
   })).filter((p) => p.sizes.length);
 }
 
@@ -39,6 +41,7 @@ export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {})
   const r = express.Router();
 
   // GET /:store?category=&gender=male|female&size=&min=&max= → { items }. Price filters the price the customer pays.
+  // category = one of the shop's category ids (task 36), or a role code (older clients).
   r.get('/:store', async (req, res) => {
     const store = await storeById(db, Number(req.params.store));
     const q = req.query;
@@ -49,14 +52,14 @@ export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {})
       return Number(v);
     };
     const category = one(q.category), gender = one(q.gender), size = one(q.size);
-    if (category && !CATEGORIES.includes(category)) throw fail(400, 'err.invalid', { field: 'field.category' });
+    if (category && !CATEGORIES.includes(category) && !/^\d{1,10}$/.test(category)) throw fail(400, 'err.invalid', { field: 'field.category' });
     if (gender && !['male', 'female'].includes(gender)) throw fail(400, 'err.invalid', { field: 'field.gender' });
-    if (size && !ALL_SIZES.includes(size)) throw fail(400, 'err.invalid', { field: 'field.size' });
+    if (size && !SIZE.test(size)) throw fail(400, 'err.invalid', { field: 'field.size' });
     const min = int(q.min, 'field.price'), max = int(q.max, 'field.price');
-    const rows = db('products as p').where('p.store_id', store.id)
+    const rows = visible(db('products as p')).where('p.store_id', store.id)
       .whereExists(size ? inStock(db).where('s.size', size) : inStock(db))
-      .orderByRaw(`case p.category ${CATEGORIES.map((c, i) => `when '${c}' then ${i}`).join(' ')} end, p.id desc`).limit(MAX_LIST).select(COLS);
-    if (category) rows.where('p.category', category);
+      .orderByRaw(`c.sort, case p.category ${CATEGORIES.map((c, i) => `when '${c}' then ${i}`).join(' ')} end, p.id desc`).limit(MAX_LIST).select(COLS);
+    if (category) /^\d+$/.test(category) ? rows.where('p.category_id', Number(category)) : rows.where('p.category', category);
     if (gender) rows.whereIn('p.gender', genders(gender));
     if (min !== null) rows.whereRaw('coalesce(p.discount_price, p.price) >= ?', [min]);
     if (max !== null) rows.whereRaw('coalesce(p.discount_price, p.price) <= ?', [max]);
@@ -65,18 +68,20 @@ export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {})
 
   // GET /:store/items/:id → { item, pairs }: the item with its in-stock sizes and fit hint, and 2–4 in-stock items
   // that go with it (rules; same store, matching gender). 404 when the item has no free stock in any size.
+  // Task 36: also every size it comes in (all_sizes), the Russian description and the shop's free details.
   r.get('/:store/items/:id', async (req, res) => {
     const store = await storeById(db, Number(req.params.store));
     const id = Number(req.params.id);
-    const row = posInt(id) ? await db('products as p').where({ 'p.id': id, 'p.store_id': store.id }).first(...COLS, 'p.description', 'p.shelf_location', 'p.fit_offset') : null;
+    const row = posInt(id) ? await visible(db('products as p')).where({ 'p.id': id, 'p.store_id': store.id })
+      .first(...COLS, 'p.description', 'p.description_ru', 'p.details', 'p.shelf_location', 'p.fit_offset') : null;
     const [item] = row ? await withSizes(db, [row]) : [];
     if (!item) throw fail(404, 'err.product_not_found');
-    const pool = await db('products as p').where('p.store_id', store.id).whereNot('p.id', id).whereIn('p.gender', genders(row.gender))
+    const pool = await visible(db('products as p')).where('p.store_id', store.id).whereNot('p.id', id).whereIn('p.gender', genders(row.gender))
       .whereExists(inStock(db)).orderBy('p.id').select(COLS);
     const pairs = pairWith(row, pool).map((p) => p.id);
-    const { fit_offset, ...rest } = item;
+    const { fit_offset, details, ...rest } = item;
     res.json({
-      item: { ...rest, fit_offset: (await fitOf(db, [row])).get(id).offset },
+      item: { ...rest, all_sizes: sizesOf(row), details: details ? JSON.parse(details) : [], fit_offset: (await fitOf(db, [row])).get(id).offset },
       pairs: await withSizes(db, pool.filter((p) => pairs.includes(p.id)).sort((a, b) => pairs.indexOf(a.id) - pairs.indexOf(b.id))),
     });
   });
@@ -87,9 +92,9 @@ export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {})
   r.post('/elsewhere', async (req, res) => {
     const b = req.body ?? {};
     const store = await storeById(db, b.store_id);
-    const p = posInt(b.product_id) ? await db('products').where({ id: b.product_id, store_id: store.id }).first('id', 'sku', 'category') : null;
+    const p = posInt(b.product_id) ? await db('products').where({ id: b.product_id, store_id: store.id }).first('id', 'sku', 'category', 'sizes') : null;
     if (!p) throw fail(404, 'err.product_not_found');
-    if (!sizesFor(p.category).includes(b.size)) throw fail(400, 'err.invalid', { field: 'field.size' });
+    if (!sizesOf(p).includes(b.size)) throw fail(400, 'err.invalid', { field: 'field.size' });
     const row = await db('product_stock').where({ product_id: p.id, size: b.size }).first(db.raw('quantity - reserved as n'));
     const here = Math.max(0, Number(row?.n ?? 0));
     if (!here) {
@@ -114,10 +119,10 @@ export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {})
     const client = clientKey(req.ip);
     const id = await db.transaction(async (trx) => {
       const p = posInt(b.product_id) ? await trx('products as p').join('stores as st', 'st.id', 'p.store_id').where('p.id', b.product_id)
-        .first('p.id', 'p.name', 'p.name_ru', 'p.category', 'p.price', 'p.discount_price', 'p.store_id', 'st.organization_id') : null;
+        .first('p.id', 'p.name', 'p.name_ru', 'p.category', 'p.sizes', 'p.price', 'p.discount_price', 'p.store_id', 'st.organization_id') : null;
       // Same answer for another organisation's item as for a missing one: the lookup never leaves the organisation.
       if (!p || from.organization_id == null || p.organization_id !== from.organization_id || p.store_id === from.id) throw fail(404, 'err.product_not_found');
-      if (!sizesFor(p.category).includes(b.size)) throw fail(400, 'err.invalid', { field: 'field.size' });
+      if (!sizesOf(p).includes(b.size)) throw fail(400, 'err.invalid', { field: 'field.size' });
       const store = await storeOf(trx, p.store_id);
       const c = customer({ ...b, fulfillment: 'pickup' }, store);
       // Inventory DoS guard (X2), shared with carts: one client can't hold stock in too many places at once.

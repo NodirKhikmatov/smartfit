@@ -3,6 +3,7 @@
 import { copyFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { builtinRows } from './migrations/023_categories.js';
 
 export const STORES = [
   { name: 'Smart Fit Toshkent', city: 'Toshkent', lat: 41.2995, lon: 69.2401, address: 'Amir Temur ko\'chasi, 15', delivery_fee: 25000, free_delivery_threshold: 1000000 },
@@ -110,6 +111,8 @@ const KEYS = ['sku', 'name', 'name_ru', 'category', 'gender', 'color', 'style', 
 export const CATALOGUE = ROWS.map((r) => Object.fromEntries(KEYS.map((k, i) => [k, r[i]])));
 
 export const sizesFor = (category) => (category === 'shoes' ? SHOES : category === 'accessory' ? ONE : CLOTHES);
+// Task 36: a product's sizes. A role-less product keeps its category's list in products.sizes; others go by role.
+export const sizesOf = (p) => (p.sizes ? p.sizes.split(',') : sizesFor(p.category));
 
 // Deterministic stock: middle sizes deepest, most sizes ≥ 2, and about 1 in 17 sizes sold out (exercises the stock > 0 rule).
 const DEPTH = { 6: [2, 3, 5, 5, 3, 2], 10: [2, 2, 3, 4, 4, 5, 5, 4, 3, 2], 1: [6] };
@@ -124,7 +127,7 @@ export function stockFor(item, size, storeIdx, sizeCount) {
 const imageName = (storeIdx, sku) => `demo-s${storeIdx + 1}-${sku.toLowerCase()}.svg`;
 
 // Children before parents (SQLite deletes row by row, with foreign keys on).
-const WIPE = ['fitting_requests', 'payment_transactions', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'admins', 'stores', 'organizations'];
+const WIPE = ['fitting_requests', 'payment_transactions', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'categories', 'admins', 'stores', 'organizations'];
 
 // uploadDir: where /uploads is served from. Without it (tests) image_url is still set, but no file is copied.
 export async function seed(db, { uploadDir } = {}) {
@@ -144,11 +147,13 @@ export async function seed(db, { uploadDir } = {}) {
     for (const [storeIdx, store] of STORES.entries()) {
       const [{ id: orgId }] = await trx('organizations').insert({ name: store.name }).returning('id');
       const [{ id: storeId }] = await trx('stores').insert({ ...store, organization_id: orgId }).returning('id');
+      await trx('categories').insert(builtinRows(orgId));
+      const catIds = Object.fromEntries((await trx('categories').where({ organization_id: orgId }).select('id', 'role')).map((c) => [c.role, c.id]));
       const code = 'TS'[storeIdx];
       for (const [i, { art, stores, ...p }] of CATALOGUE.entries()) {
         if (!stores.includes(code)) continue;
         const [{ id: productId }] = await trx('products')
-          .insert({ ...p, store_id: storeId, shelf_location: `${'ABCDE'[i % 5]}-${i + 1}`, image_url: `/uploads/products/${imageName(storeIdx, p.sku)}` })
+          .insert({ ...p, store_id: storeId, category_id: catIds[p.category], shelf_location: `${'ABCDE'[i % 5]}-${i + 1}`, image_url: `/uploads/products/${imageName(storeIdx, p.sku)}` })
           .returning('id');
         const sizes = sizesFor(p.category);
         await trx('product_stock').insert(sizes.map((size, s) => ({ product_id: productId, size, quantity: stockFor(i, s, storeIdx, sizes.length) })));

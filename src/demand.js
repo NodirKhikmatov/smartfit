@@ -32,10 +32,12 @@ const range = (q, col, from, to) => {
 // Task 31: `waiting` = customers with an open "Kelganda xabar bering" request for that size (any age, so a size with
 // only old requests is listed too). Each request comes from a sold-out view that was also logged as missed, so the
 // suggestion counts the larger of the two, not their sum.
-const KEYS = ['product_id', 'size', 'p.name', 'p.name_ru', 'p.category', 'p.sku', 'store_id', 'st.name'];
+// Task 36: the shop's category name comes along (category_name / _ru) for the Talab page.
+const KEYS = ['product_id', 'size', 'p.name', 'p.name_ru', 'p.category', 'c.name', 'c.name_ru', 'p.sku', 'store_id', 'st.name'];
 const named = (q, t) => q.join('products as p', 'p.id', `${t}.product_id`).join('stores as st', 'st.id', `${t}.store_id`)
+  .leftJoin('categories as c', 'c.id', 'p.category_id')
   .groupBy(KEYS.map((k) => (k.includes('.') ? k : `${t}.${k}`)))
-  .select(`${t}.product_id`, `${t}.size`, 'p.name', 'p.name_ru', 'p.category', 'p.sku', `${t}.store_id`, 'st.name as store_name');
+  .select(`${t}.product_id`, `${t}.size`, 'p.name', 'p.name_ru', 'p.category', 'c.name as category_name', 'c.name_ru as category_name_ru', 'p.sku', `${t}.store_id`, 'st.name as store_name');
 export async function demandItems(db, scope, { from, to = null, limit = 200, waiting: withWaiting = true }) {
   const missed = await named(range(scope(db('missed_demand as m'), 'm.store_id'), 'm.created_at', dbTime(from), to && dbTime(to)), 'm')
     .count({ missed: '*' })

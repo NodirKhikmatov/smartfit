@@ -156,9 +156,22 @@ initLang();
 $('loginLang').replaceChildren(langSwitch(() => location.reload()));
 $('menuLang').replaceChildren(langSwitch(() => location.reload(), { short: true }));
 $('setLang').replaceChildren(langSwitch(() => location.reload()));
-for (const v of CATEGORIES) {
-  $('productFilters').category.append(el('option', { value: v, textContent: cat(v) }));
-  $('form').category.append(el('option', { value: v, textContent: cat(v) }));
+
+// ---------- Categories (task 36): each organisation's own, from the server. Owners manage them on their page; the
+// product form and the filters pick from them. Names are shop text: always set as textContent, never as HTML.
+let cats = [];
+const catText = (c) => (getLang() === 'ru' && c.name_ru) || c.name;
+// A product or report row → its category's name (rows carry category_name/_ru; a row without a category its role).
+const catOf = (x) => (x.category_name ? (getLang() === 'ru' && x.category_name_ru) || x.category_name : catOf(x));
+const orgOfStore = (id) => stores.find((s) => String(s.id) === String(id))?.organization_id;
+const catsOf = (storeId) => cats.filter((c) => c.organization_id === orgOfStore(storeId));
+async function loadCats() {
+  try { cats = await call('/categories'); } catch { cats = []; }
+}
+// The products filter lists the categories of the picked store's organisation (a super-admin without a store: none).
+function fillCatFilter() {
+  const list = scope ? catsOf(scope) : me.role === 'super' ? [] : cats;
+  pf.category.replaceChildren(el('option', { value: '', textContent: t('common.all') }), ...list.map((c) => el('option', { value: c.id, textContent: catText(c) })));
 }
 
 const roleName = (r) => t({ super: 'adm.role_super', owner: 'adm.role_owner', manager: 'adm.role_manager', staff: 'adm.role_staff' }[r]);
@@ -184,6 +197,8 @@ async function show() {
   $('avatar').textContent = me.email[0].toUpperCase();
   $('storeWrap').hidden = !sup;
   $('navOrgs').hidden = me.role !== 'super';
+  $('navCats').hidden = !['owner', 'super'].includes(me.role); // managers only use the categories
+  await loadCats();
   $('form').store_id.replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
   render();
   pollBadge();
@@ -234,6 +249,7 @@ const PAGES = {
   orders: { title: 'adm.route.orders', load: loadOrders, poll: () => loadOrders(true) },
   cashier: { title: 'adm.route.cashier', load: loadCashier, poll: () => loadPending(true) },
   products: { title: 'adm.route.products', load: loadProducts },
+  categories: { title: 'adm.route.categories', load: loadCategories },
   stats: { title: 'adm.route.stats', load: loadStats },
   demand: { title: 'adm.route.demand', load: loadDemand },
   qr: { title: 'adm.route.qr', load: loadQr },
@@ -247,6 +263,7 @@ const ACTIONS = {
     el('button', { type: 'button', onclick: () => openImport() }, icon('upload'), el('span', { className: 'label', textContent: t('adm.products.import') })),
     el('button', { type: 'button', className: 'primary', onclick: () => openForm(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.products.add') })),
   ],
+  categories: [el('button', { type: 'button', className: 'primary', onclick: () => openCat(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.cats.add') }))],
   stats: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => exportStats() }, icon('download'))],
   demand: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => download('/demand/export?' + qs(scoped({ days: demandDays() })), `talab-${demandDays()}d.csv`) }, icon('download'))],
 };
@@ -255,7 +272,7 @@ function render() {
   route = parseHash(location.hash);
   // A new owner has no store yet: everything but the wizard and their account waits for it. Only owners add stores.
   const welcome = me.role === 'owner' && !stores.length;
-  if ((welcome && !['welcome', 'settings'].includes(route.route)) || (route.route === 'welcome' && me.role !== 'owner') || (route.route === 'orgs' && me.role !== 'super')) {
+  if ((welcome && !['welcome', 'settings'].includes(route.route)) || (route.route === 'welcome' && me.role !== 'owner') || (route.route === 'orgs' && me.role !== 'super') || (route.route === 'categories' && !['owner', 'super'].includes(me.role))) {
     route = parseHash(welcome ? '#/welcome' : '#/dashboard');
     history.replaceState(null, '', buildHash(route.route));
   }
@@ -362,7 +379,7 @@ async function loadDashboard(quiet) {
   $('dashTopSub').textContent = t('adm.stats.days', { n: days });
   $('dashTop').replaceChildren(...(d.top_sold.length ? d.top_sold.map((x) => el('li', {},
     thumb(x),
-    el('span', { className: 'rank-name' }, el('strong', { textContent: x.name ? productName(x) : t('adm.stats.deleted', { id: x.product_id }) }), el('span', { className: 'muted', textContent: cat(x.category) })),
+    el('span', { className: 'rank-name' }, el('strong', { textContent: x.name ? productName(x) : t('adm.stats.deleted', { id: x.product_id }) }), el('span', { className: 'muted', textContent: catOf(x) })),
     el('span', { className: 'rank-num num' }, el('strong', { textContent: t('adm.dash.units', { n: x.units }) }), el('span', { className: 'muted', textContent: short(x.revenue) })))) :
     [el('li', { className: 'li-empty' }, emptyState({ ic: 'bag', title: t('adm.dash.top_empty'), text: t('adm.dash.top_empty_text') }))]));
   $('dashLowSub').textContent = t('adm.dash.low_sub', { n: d.low_stock.total });
@@ -538,7 +555,7 @@ function openReturn(o, i) {
   $('retItem').textContent = `${productName(i)} · ${i.size} · ${som(i.unit_price)}`;
   rf.quantity.max = left;
   rf.quantity.value = 1;
-  rf.new_size.replaceChildren(...sizesFor(i.category).filter((s) => s !== i.size).map((s) => el('option', { value: s, textContent: s })));
+  rf.new_size.replaceChildren(...(i.sizes ? i.sizes.split(',') : sizesFor(i.category)).filter((s) => s !== i.size).map((s) => el('option', { value: s, textContent: s })));
   syncReturn();
   $('retDlg').showModal();
 }
@@ -720,6 +737,134 @@ $('payFind').onsubmit = async (e) => {
   } catch (err) { $('payFindError').textContent = err.message; }
 };
 
+// ---------- Categories page (task 36): owners add, rename, reorder, hide, delete (only empty ones) and give each a role,
+// a size kind and a photo. A super-admin works on the picked store's organisation.
+const catOrg = () => (me.role === 'super' ? orgOfStore(scope) : me.organization_id);
+const sizesText = (c) => (c.size_kind === 'one' ? t('common.size_one') : c.sizes.length > 6 ? `${c.sizes[0]} – ${c.sizes.at(-1)} (${c.sizes.length})` : c.sizes.join(', '));
+async function loadCategories() {
+  const seq = (loads.cats = (loads.cats || 0) + 1);
+  stateBox($('catsError'));
+  if (!catOrg()) return emptyRow($('catRows'), 5, { ic: 'store', title: t('adm.cats.pick_store'), text: t('adm.cats.pick_store_text') });
+  const stop = skeletonRows($('catRows'), 5, 5);
+  try {
+    cats = await call('/categories');
+    stop();
+    if (seq !== loads.cats) return;
+    const list = cats.filter((c) => c.organization_id === catOrg());
+    if (!list.length) return emptyRow($('catRows'), 5, { ic: 'bag', title: t('adm.cats.none'), text: t('adm.cats.none_text') });
+    $('catRows').replaceChildren(...list.map((c, i) => el('tr', {},
+      el('td', {}, el('span', { className: 'prod' },
+        c.image_url ? el('img', { className: 'thumb', src: c.image_url, alt: '', loading: 'lazy' }) : el('span', { className: 'thumb ph' }, icon(c.role || 'hanger')),
+        el('span', {},
+          el('button', { type: 'button', className: 'name-btn', textContent: catText(c), onclick: () => openCat(c) }),
+          el('span', { className: 'sizes' }, getLang() === 'ru' ? c.name : c.name_ru, c.hidden ? el('span', { className: 'badge', textContent: t('adm.cats.hidden') }) : null)))),
+      el('td', { className: 'hide-sm', textContent: c.role ? cat(c.role) : t('adm.cats.role_none') }),
+      el('td', { className: 'hide-sm', textContent: sizesText(c) }),
+      el('td', { className: 'num', textContent: c.products }),
+      el('td', {}, el('span', { className: 'order' }, moveBtn(list, i, -1), moveBtn(list, i, 1))))));
+  } catch (err) {
+    stop();
+    if (seq === loads.cats) { $('catRows').replaceChildren(); stateBox($('catsError'), err, () => loadCategories()); }
+  }
+}
+// ↑ / ↓ swaps two neighbours; every category whose place changed gets its new position as `sort`.
+function moveBtn(list, i, d) {
+  const other = list[i + d], up = d < 0;
+  return el('button', { type: 'button', className: `icon-btn ghost${up ? ' up' : ''}`, disabled: !other, title: t(up ? 'adm.cats.up' : 'adm.cats.down'),
+    ariaLabel: t(up ? 'adm.cats.up_aria' : 'adm.cats.down_aria', { name: catText(list[i]) }), onclick: async () => {
+      const next = [...list];
+      [next[i], next[i + d]] = [next[i + d], next[i]];
+      try {
+        for (const [j, c] of next.entries()) if (c.sort !== j + 1) await call(`/categories/${c.id}`, { method: 'PATCH', body: { sort: j + 1 } });
+      } catch (err) { toast(err.message, { tone: 'danger' }); }
+      loadCategories();
+    } }, icon('chevron-down'));
+}
+const cf = $('catForm');
+let editingCat = null;
+function openCat(c) {
+  editingCat = c;
+  cf.reset();
+  $('catDlgError').textContent = $('catImgError').textContent = '';
+  $('catTitle').textContent = c ? t('adm.cats.edit_title', { name: catText(c) }) : t('adm.cats.add');
+  for (const k of ['name', 'name_ru', 'size_kind']) cf[k].value = c?.[k] ?? (k === 'size_kind' ? 'one' : '');
+  cf.role.value = c?.role ?? '';
+  cf.sizes.value = c?.size_kind === 'custom' ? c.sizes.join(', ') : '';
+  cf.hidden.checked = Boolean(c?.hidden);
+  $('catDelete').hidden = !c || c.products > 0;
+  $('catImgWrap').hidden = !c;
+  $('catImgNote').hidden = Boolean(c);
+  $('catImgFile').value = '';
+  showCatImage(c?.image_url);
+  catKind();
+  $('catDlg').showModal();
+}
+// A role fixes the size kind (the engine matches the customer's sizes); only a role-less category picks its own.
+function catKind() {
+  const role = cf.role.value;
+  if (role) cf.size_kind.value = { outerwear: 'clothes', top: 'clothes', bottom: 'clothes', shoes: 'shoes', accessory: 'one' }[role];
+  cf.size_kind.disabled = Boolean(role);
+  const custom = cf.size_kind.value === 'custom';
+  $('catSizesWrap').hidden = !custom;
+  cf.sizes.required = custom;
+  $('catSizesHint').textContent = [custom && t('adm.cats.sizes_hint'), editingCat?.products > 0 && t('adm.cats.in_use', { n: editingCat.products })].filter(Boolean).join(' ');
+}
+cf.role.onchange = cf.size_kind.onchange = catKind;
+$('catCancel').onclick = () => $('catDlg').close();
+cf.onsubmit = async (e) => {
+  e.preventDefault();
+  $('catDlgError').textContent = '';
+  if (!cf.reportValidity()) return;
+  const body = {
+    name: cf.name.value, name_ru: cf.name_ru.value, role: cf.role.value || null, size_kind: cf.size_kind.value,
+    sizes: cf.size_kind.value === 'custom' ? cf.sizes.value : null, hidden: cf.hidden.checked,
+    ...(!editingCat && me.role === 'super' && { organization_id: catOrg() }),
+  };
+  $('catSave').disabled = true;
+  try {
+    const c = await call(editingCat ? `/categories/${editingCat.id}` : '/categories', { method: editingCat ? 'PATCH' : 'POST', body });
+    toast(t(editingCat ? 'adm.cats.saved' : 'adm.cats.added', { name: catText(c) }), { tone: 'ok' });
+    if (editingCat) $('catDlg').close();
+    else openCat(c); // a new one stays open for its photo
+    loadCategories();
+  } catch (err) { $('catDlgError').textContent = err.message; } finally { $('catSave').disabled = false; }
+};
+$('catDelete').onclick = async () => {
+  const c = editingCat;
+  if (!(await confirmDialog({ title: t('adm.cats.delete_title', { name: catText(c) }), text: t('adm.cats.delete_text'), ok: t('common.delete'), danger: true }))) return;
+  try {
+    await call(`/categories/${c.id}`, { method: 'DELETE' });
+    $('catDlg').close();
+    toast(t('adm.cats.deleted'));
+    loadCategories();
+  } catch (err) { $('catDlgError').textContent = err.message; }
+};
+function showCatImage(url) {
+  $('catImg').hidden = $('catImgRemove').hidden = !url;
+  if (url) $('catImg').src = url;
+}
+$('catImgUpload').onclick = async () => {
+  const file = $('catImgFile').files[0];
+  $('catImgError').textContent = '';
+  if (!file) return void ($('catImgError').textContent = t('adm.form.image_pick'));
+  if (file.size > 2 * 1024 * 1024) return void ($('catImgError').textContent = t('adm.form.image_big'));
+  try {
+    const r = await call(`/categories/${editingCat.id}/image`, { method: 'POST', raw: file, type: file.type || 'application/octet-stream' });
+    editingCat.image_url = r.image_url;
+    showCatImage(r.image_url);
+    $('catImgFile').value = '';
+    loadCategories();
+  } catch (err) { $('catImgError').textContent = err.message; }
+};
+$('catImgRemove').onclick = async () => {
+  try {
+    await call(`/categories/${editingCat.id}/image`, { method: 'DELETE' });
+    editingCat.image_url = null;
+    showCatImage(null);
+    loadCategories();
+  } catch (err) { $('catImgError').textContent = err.message; }
+};
+
 // ---------- Products
 
 const PRODUCT_TABS = [['', 'common.all'], ['low', 'adm.products.f_low'], ['out', 'adm.products.f_out'], ['no_image', 'adm.products.f_noimg']];
@@ -749,6 +894,7 @@ async function loadProducts() {
   const p = route.params;
   seg($('productTabs'), PRODUCT_TABS.map(([v, k]) => [v, t(k)]), p.filter || '', (v) => setParams({ ...p, filter: v, page: '' }));
   if (document.activeElement !== pf.q) pf.q.value = p.q || '';
+  fillCatFilter();
   pf.category.value = p.category || '';
   productHead();
   const cols = showStore() ? 7 : 6;
@@ -772,7 +918,7 @@ async function loadProducts() {
           el('button', { type: 'button', className: 'name-btn', textContent: productName(x), onclick: () => openForm(x) }),
           el('span', { className: 'sizes' }, x.sku || '', x.image_url ? null : el('span', { className: 'badge warn', textContent: t('adm.products.no_image') })),
           el('span', { className: 'show-sm' }, price(x))))),
-        el('td', { className: 'hide-sm', textContent: cat(x.category) }),
+        el('td', { className: 'hide-sm', textContent: catOf(x) }),
         ...(showStore() ? [el('td', { className: 'hide-sm', textContent: storeName(x.store_id) })] : []),
         el('td', { className: 'num hide-sm' }, price(x)),
         el('td', {}, heat(x.stock, x.low_stock_threshold)),
@@ -839,8 +985,8 @@ $('labelPrint').onclick = async () => {
 
 const reloadProducts = () => (route.route === 'products' ? loadProducts() : route.route === 'dashboard' ? loadDashboard(true) : null);
 
-function renderStock(category, stock = []) {
-  $('stock').replaceChildren(...sizesFor(category).map((size) => {
+function renderStock(sizes, stock = []) {
+  $('stock').replaceChildren(...sizes.map((size) => {
     const row = stock.find((s) => s.size === size);
     const input = el('input', { type: 'number', min: row?.reserved || 0, step: 1, value: row?.quantity ?? 0 });
     input.dataset.size = size;
@@ -853,12 +999,15 @@ function openForm(p) {
   f.reset();
   $('formError').textContent = '';
   $('formTitle').textContent = t(p ? 'adm.form.edit' : 'adm.form.new');
-  for (const k of ['name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'shelf_location', 'sku', 'barcode']) f[k].value = p?.[k] ?? '';
-  if (!p) { f.category.value = 'top'; f.gender.value = 'unisex'; }
+  for (const k of ['name', 'name_ru', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'shelf_location', 'sku', 'barcode', 'description', 'description_ru']) f[k].value = p?.[k] ?? '';
+  if (!p) f.gender.value = 'unisex';
+  // A role-less product is stored as worn in any weather (−60…60): the form shows those as empty.
+  if (p && !p.category && p.temp_min === -60 && p.temp_max === 60) f.temp_min.value = f.temp_max.value = '';
   f.waterproof.checked = !!p?.waterproof;
   f.store_id.value = p?.store_id ?? (scope || stores[0]?.id || '');
   f.store_id.disabled = !!p;
-  renderStock(f.category.value, p?.stock);
+  fillFormCats(p);
+  renderDetails(p?.details);
   renderFit(p);
   $('imgWrap').hidden = !p;
   $('formDelete').hidden = !p;
@@ -867,7 +1016,47 @@ function openForm(p) {
   showImage(p?.image_url);
   $('dlg').showModal();
 }
-$('form').category.onchange = (e) => renderStock(e.target.value, editing?.stock);
+// The product's store decides which organisation's categories it can take (a new product: the picked store).
+function fillFormCats(p) {
+  const f = $('form'), list = catsOf(f.store_id.value);
+  f.category.replaceChildren(...list.map((c) => el('option', { value: c.id, textContent: c.hidden ? `${catText(c)} (${t('adm.cats.hidden')})` : catText(c) })));
+  const pick = p ? list.find((c) => c.id === p.category_id) ?? list.find((c) => c.role === p.category) : list.find((c) => c.role === 'top') ?? list[0];
+  f.category.value = pick?.id ?? '';
+  applyCat();
+}
+const formCat = () => cats.find((c) => String(c.id) === $('form').category.value);
+// Temperature and waterproof only matter for a category that is part of an outfit; a role-less one hides them.
+function applyCat() {
+  const f = $('form'), c = formCat(), outfit = Boolean(c?.role);
+  for (const x of f.querySelectorAll('[data-outfit]')) x.hidden = !outfit;
+  f.temp_min.required = f.temp_max.required = outfit;
+  $('roleNote').hidden = outfit || !c;
+  renderStock(c?.sizes ?? [], editing?.stock);
+}
+$('form').category.onchange = applyCat;
+$('form').store_id.onchange = () => fillFormCats(null);
+const DETAILS_MAX = 10;
+function detailRow(d = {}) {
+  const row = el('div', { className: 'detail-row' },
+    el('input', { maxLength: 40, value: d.name ?? '', ariaLabel: t('field.detail_name'), placeholder: t('adm.form.detail_name_ph') }),
+    el('input', { maxLength: 120, value: d.value ?? '', ariaLabel: t('field.detail_value'), placeholder: t('adm.form.detail_value_ph') }),
+    el('button', { type: 'button', className: 'icon-btn ghost', title: t('adm.form.detail_remove'), ariaLabel: t('adm.form.detail_remove'), onclick: () => { row.remove(); detailBtn(); } }, icon('close')));
+  return row;
+}
+const detailBtn = () => { $('detailAdd').hidden = $('details').children.length >= DETAILS_MAX; };
+function renderDetails(list) {
+  $('details').replaceChildren(...(list || []).map(detailRow));
+  detailBtn();
+}
+$('detailAdd').onclick = () => {
+  $('details').append(detailRow());
+  detailBtn();
+  $('details').lastElementChild.querySelector('input').focus();
+};
+const readDetails = () => [...$('details').children].map((r) => {
+  const [name, value] = r.querySelectorAll('input');
+  return { name: name.value, value: value.value };
+});
 $('cancel').onclick = () => $('dlg').close();
 $('formDelete').onclick = async () => { if (await remove(editing)) $('dlg').close(); };
 $('form').addEventListener('submit', async (e) => {
@@ -875,9 +1064,11 @@ $('form').addEventListener('submit', async (e) => {
   const f = e.target;
   const num = (v) => (v === '' ? null : Number(v));
   const body = {
-    name: f.name.value, name_ru: f.name_ru.value || null, category: f.category.value, gender: f.gender.value, color: f.color.value,
+    name: f.name.value, name_ru: f.name_ru.value || null, category_id: Number(f.category.value) || null, gender: f.gender.value, color: f.color.value,
     style: f.style.value || null, price: num(f.price.value), discount_price: num(f.discount_price.value),
-    temp_min: num(f.temp_min.value), temp_max: num(f.temp_max.value), waterproof: f.waterproof.checked,
+    temp_min: f.temp_min.required ? num(f.temp_min.value) : null, temp_max: f.temp_max.required ? num(f.temp_max.value) : null,
+    waterproof: f.temp_min.required && f.waterproof.checked,
+    description: f.description.value.trim() || null, description_ru: f.description_ru.value.trim() || null, details: readDetails(),
     shelf_location: f.shelf_location.value || null, sku: f.sku.value.trim() || null, barcode: f.barcode.value.trim() || null,
     stock: Object.fromEntries([...$('stock').querySelectorAll('input')].map((i) => [i.dataset.size, num(i.value) ?? 0])),
   };
@@ -894,7 +1085,7 @@ $('form').addEventListener('submit', async (e) => {
 const FIT_MIN = 5;
 const FIT_V = { 1: 'adm.sizefit.v_small', 0: 'adm.sizefit.v_right', '-1': 'adm.sizefit.v_big' };
 function renderFit(p) {
-  $('fitWrap').hidden = !p || p.category === 'accessory' || !p.fit;
+  $('fitWrap').hidden = !p || !p.category || p.category === 'accessory' || !p.fit;
   $('fitError').textContent = '';
   if ($('fitWrap').hidden) return;
   const n = p.fit.small + p.fit.right + p.fit.big;
@@ -954,7 +1145,7 @@ async function remove(p) {
   }
 }
 
-$('importCols').textContent = 'id, sku, barcode, store_id, name, name_ru, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, shelf_location, XS, S, M, L, XL, XXL, 36 … 45, ONE';
+$('importCols').textContent = 'id, sku, barcode, store_id, name, name_ru, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, shelf_location, description, description_ru, XS, S, M, L, XL, XXL, 36 … 45, ONE';
 function openImport() {
   $('importForm').reset();
   $('importError').textContent = '';
@@ -1014,7 +1205,7 @@ async function loadStats() {
   drawFunnel($('statsFunnel'), f);
   $('statsSales').textContent = salesLine(s.sales);
   $('topRows').replaceChildren(...(s.top.length ? s.top.map((x) => el('li', {},
-    el('span', { className: 'rank-name' }, el('strong', { textContent: x.name ? productName(x) : t('adm.stats.deleted', { id: x.product_id }) }), el('span', { className: 'muted', textContent: cat(x.category) })),
+    el('span', { className: 'rank-name' }, el('strong', { textContent: x.name ? productName(x) : t('adm.stats.deleted', { id: x.product_id }) }), el('span', { className: 'muted', textContent: catOf(x) })),
     el('span', { className: 'rank-num num' }, el('strong', { textContent: t('adm.stats.times_n', { n: x.count }) })))) :
     [el('li', { className: 'li-empty' }, emptyState({ ic: 'sparkle', title: t('adm.stats.empty_title'), text: t('adm.stats.empty_text') }))]));
 }
@@ -1053,7 +1244,7 @@ async function loadDemand() {
   if (!d.items.length) emptyRow($('demandRows'), 7, { ic: 'check', title: t('adm.demand.empty'), text: t('adm.demand.empty_text') });
   else $('demandRows').replaceChildren(...d.items.map((x) => el('tr', {},
     el('td', {}, el('span', { className: 'demand-name' }, el('strong', { textContent: productName(x) }),
-      el('span', { className: 'sizes', textContent: [x.sku || cat(x.category), withStore && x.store_name].filter(Boolean).join(' · ') }),
+      el('span', { className: 'sizes', textContent: [x.sku || catOf(x), withStore && x.store_name].filter(Boolean).join(' · ') }),
       el('span', { className: 'show-sm', textContent: [`${t('adm.demand.size')}: ${sizeText(x.size)}`, x.waiting && `${t('adm.demand.waiting')}: ${x.waiting}`].filter(Boolean).join(' · ') }))), // phones: size and waiting columns hide
     el('td', { className: 'hide-sm', textContent: sizeText(x.size) }),
     el('td', { className: 'num', textContent: x.missed }),
@@ -1066,7 +1257,7 @@ async function loadDemand() {
   if (!d.scans.length) emptyRow($('scanRows'), 4, { ic: 'qr', title: t('adm.scans.empty'), text: t('adm.scans.empty_text') });
   else $('scanRows').replaceChildren(...d.scans.map((x) => el('tr', {},
     el('td', {}, el('span', { className: 'demand-name' }, el('strong', { textContent: productName(x) }),
-      el('span', { className: 'sizes', textContent: [x.sku || cat(x.category), withStore && x.store_name].filter(Boolean).join(' · ') }))),
+      el('span', { className: 'sizes', textContent: [x.sku || catOf(x), withStore && x.store_name].filter(Boolean).join(' · ') }))),
     el('td', { className: 'num', textContent: x.scans }),
     el('td', { className: 'num hide-sm', textContent: x.sold }),
     el('td', { className: 'num' }, el('strong', { textContent: `${x.rate}%` })))));
@@ -1436,6 +1627,8 @@ const AUDIT_FIELDS = {
   sku: 'field.sku', barcode: 'field.barcode', low_stock_threshold: 'field.low_stock', prefix: 'adm.sync.key',
   email: 'field.email', role: 'field.role', disabled: 'adm.team.status',
   bundle_percent: 'field.bundle_percent', store_id: 'common.store', kind: 'field.promo_kind', value: 'field.promo_value', min_order: 'field.promo_min',
+  description: 'field.description', description_ru: 'field.description_ru', details: 'field.details', size_kind: 'field.size_kind', sizes: 'field.cat_sizes',
+  hidden: 'adm.cats.hide', sort: 'adm.cats.order',
   starts_on: 'adm.promo.starts', ends_on: 'adm.promo.ends', max_uses: 'field.promo_max_uses', max_per_phone: 'field.promo_per_phone', active: 'field.promo_active',
 };
 const MONEY = ['price', 'discount_price', 'delivery_fee', 'free_delivery_threshold', 'min_order'];
@@ -1447,8 +1640,10 @@ function auditValue(k, v) {
   if (MONEY.includes(k)) return money(v);
   if (k === 'status') return t(`adm.status.${v}`);
   if (k === 'payment_status') return t(`adm.pay.${v}`);
-  if (k === 'role') return roleName(v);
-  if (k === 'category') return cat(v);
+  if (k === 'role') return CATEGORIES.includes(v) ? cat(v) : roleName(v); // a category's outfit role, or an admin's
+  if (k === 'category') return CATEGORIES.includes(v) ? cat(v) : String(v); // older rows: the role; task 36: the name
+  if (k === 'size_kind') return t(`adm.cats.kind_${v}`);
+  if (k === 'details') return Array.isArray(v) ? v.map((d) => `${d.name}: ${d.value}`).join('; ') : String(v);
   if (k === 'store_id') return storeName(v) || `#${v}`;
   if (k === 'kind') return t(v === 'percent' ? 'adm.promo.percent' : 'adm.promo.fixed');
   return String(v);
@@ -1473,7 +1668,7 @@ function auditLines(l) {
 }
 const auditSubject = (l) => (l.entity === 'order' ? t('adm.order.title', { id: l.entity_label }) : l.entity === 'fitting' ? t('adm.fit.cabin', { cabin: l.entity_label }) : l.entity_label || '');
 const af = $('auditFilters');
-for (const e of ['product', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
+for (const e of ['product', 'category', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
 af.entity.onchange = af.admin.onchange = af.from.onchange = af.to.onchange = () =>
   setParams({ tab: 'audit', entity: af.entity.value, admin: af.admin.value, from: af.from.value, to: af.to.value });
 af.onsubmit = (e) => e.preventDefault();

@@ -4,6 +4,10 @@ import { fitOf, wantSize } from '../size/size.js';
 // Rule-based outfits. filterCandidates is the only source of items: task 7 sends its output to Claude as CANDIDATES.
 
 export const ORDER = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
+// Task 36: products of a hidden category are offered nowhere. category_id null = a row from before categories (tests).
+export const visible = (q) => q.leftJoin('categories as c', 'c.id', 'p.category_id').where((w) => w.whereNull('c.hidden').orWhere('c.hidden', false));
+// A want entry (task 30/36): a role code (every category with that role) or a category id (that category only).
+export const inWant = (w) => (Number.isInteger(w) ? (p) => p.category_id === w : (p) => p.category === w);
 export const OUTERWEAR_BELOW = 18;
 const MAX_OUTFITS = 3;
 
@@ -17,7 +21,7 @@ export const totalOf = (items) => items.reduce((sum, i) => sum + i.unit_price, 0
 // spread widens the temperature window to ±spread °C (the relaxation fallback in ruleOutfits).
 // fit (task 29): the customer's preference tight|regular|loose shifts clothes one size first; fit_from is relative to that.
 export async function filterCandidates(db, { storeId, gender, sizes, temperature, spread = 0, fit = null }) {
-  const rows = await db('products as p')
+  const rows = await visible(db('products as p'))
     .join('product_stock as s', 's.product_id', 'p.id')
     .where('p.store_id', storeId)
     .whereIn('p.gender', [gender, 'unisex'])
@@ -25,7 +29,7 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
     .whereRaw('p.temp_min <= cast(? as real) and p.temp_max >= cast(? as real)', [temperature + spread, temperature - spread])
     .whereRaw('s.quantity - s.reserved > 0')
     .orderBy(['p.id', 's.id'])
-    .select('p.id', 'p.name', 'p.name_ru', 'p.category', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.waterproof', 'p.image_url', 'p.shelf_location', 'p.fit_offset', 's.size');
+    .select('p.id', 'p.name', 'p.name_ru', 'p.category', 'p.category_id', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.waterproof', 'p.image_url', 'p.shelf_location', 'p.fit_offset', 's.size');
   // Task 23: a product that runs small or big is offered one size up or down (clamped to its sizes), and only if that
   // size has free stock: never the customer's own size, which is known not to fit.
   const fits = await fitOf(db, [...new Map(rows.map((r) => [r.id, r])).values()]);
@@ -52,10 +56,12 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
 // → [{ product_id, size }].
 // want (task 30): only the categories the customer came for.
 export async function missedItems(db, { storeId, gender, sizes, temperature, fit = null, want = null }) {
-  const rows = await db('products as p').leftJoin('product_stock as s', 's.product_id', 'p.id')
+  const q = db('products as p').leftJoin('product_stock as s', 's.product_id', 'p.id')
     .where('p.store_id', storeId)
     .whereIn('p.gender', [gender, 'unisex'])
-    .whereIn('p.category', Object.keys(sizeKey).filter((c) => sizes[sizeKey[c]] && (!want || want.includes(c))))
+    .whereIn('p.category', Object.keys(sizeKey).filter((c) => sizes[sizeKey[c]]));
+  if (want) q.where((w) => w.whereIn('p.category', want.filter((x) => !Number.isInteger(x))).orWhereIn('p.category_id', want.filter(Number.isInteger)));
+  const rows = await q
     .whereRaw('p.temp_min <= cast(? as real) and p.temp_max >= cast(? as real)', [temperature, temperature])
     .orderBy(['p.id', 's.id'])
     .select('p.id', 'p.category', 'p.fit_offset', 's.size', db.raw('s.quantity - s.reserved as free'));
@@ -176,11 +182,13 @@ export const requiredCategories = (temperature, raining) =>
 
 // Candidates per category, best first: items inside the temperature window before relaxed ones (closest first),
 // then waterproof first in rain; with a budget cheapest first, otherwise the best temperature match.
-export function rankPool(candidates, { temperature, raining, budget = null }) {
+export function ranker({ temperature, raining, budget = null }) {
   const fit = (p) => Math.abs(temperature - (p.temp_min + p.temp_max) / 2);
   const out = (p) => Math.max(0, p.temp_min - temperature, temperature - p.temp_max);
-  const rank = (a, b) =>
-    out(a) - out(b) || (raining ? b.waterproof - a.waterproof : 0) || (budget ? a.unit_price - b.unit_price : fit(a) - fit(b)) || a.id - b.id;
+  return (a, b) => out(a) - out(b) || (raining ? b.waterproof - a.waterproof : 0) || (budget ? a.unit_price - b.unit_price : fit(a) - fit(b)) || a.id - b.id;
+}
+export function rankPool(candidates, ctx) {
+  const rank = ranker(ctx);
   return Object.fromEntries(ORDER.map((c) => [c, candidates.filter((p) => p.category === c).sort(rank)]));
 }
 
@@ -201,6 +209,7 @@ export function cheaperAlternative(items, pool, used) {
 // worn below OUTERWEAR_BELOW. The item itself and repeats can't appear (one per category). Caller filters gender + stock.
 const mid = (p) => (p.temp_min + p.temp_max) / 2;
 export function pairWith(item, candidates, max = 4) {
+  if (!item.category) return []; // task 36: a role-less item is not part of an outfit, so it has no pairs either
   const cats = ORDER.filter((c) => c !== item.category && (c !== 'outerwear' || mid(item) < OUTERWEAR_BELOW));
   const picked = [item];
   for (const c of cats) {
@@ -240,11 +249,11 @@ export function swapOptions(candidates, { items, replace, exclude = [], budget =
 // → [{ category, items: [{ ...item, alternative, pairs }], over_budget }].
 export const MAX_SINGLE = 6;
 export function singleItems(candidates, { want, own = [], temperature, raining, budget = null }) {
-  const pool = rankPool(candidates, { temperature, raining, budget });
+  const rank = ranker({ temperature, raining, budget });
   const styles = new Set(own.map((x) => x.style).filter(Boolean)), clash = own.some(bright);
   const score = (p, i) => i + (styles.size && p.style && !styles.has(p.style) ? 2 : 0) + (raining && !p.waterproof ? 10 : 0) + (clash && bright(p) ? 50 : 0);
   return want.map((category) => {
-    const all = pool[category];
+    const all = candidates.filter(inWant(category)).sort(rank);
     const fits = budget ? all.filter((p) => p.unit_price <= budget) : all;
     const list = fits.length ? fits : all;
     const items = list.map((p, i) => ({ p, s: score(p, i) })).sort((a, b) => a.s - b.s).slice(0, MAX_SINGLE).map(({ p }) => p);

@@ -165,11 +165,18 @@ Demo requests from the landing page show under the same **Tashkilotlar** page ("
    cashier or cancelling. An owner made with `admin:create` belongs to that store's organisation. After that the
    owner adds staff in `/admin` → Sozlamalar → Jamoa: "Taklif qilish" makes a one-time link (valid 48 hours) to send to the
    new manager, who sets their own password with it.
-3. Add products in `/admin` → "Kiyimlar" (form, or "CSV yuklash" for a whole catalogue), set stock per size, upload photos.
+3. Set up the shop's categories in `/admin` → "Kategoriyalar" (owner): every organisation starts with the five built-in ones
+   (Ustki kiyim, Ko'ylak / futbolka, Shim / yubka, Poyabzal, Aksessuar) and can rename, hide, reorder or add its own
+   ("Sumkalar", "Bolalar kiyimi" with sizes 98–164…). A category's outfit role decides whether its items join whole outfits;
+   one without a role shows only in the catalogue and as single items. A category with products can be hidden, not deleted.
+   Then add products in `/admin` → "Kiyimlar" (form, or "CSV yuklash" for a whole catalogue), set stock per size, upload
+   photos, a description in both languages and up to 10 details ("Mato → 100% paxta").
    CSV columns (`,` or `;`, UTF-8, header row): `id, sku, barcode, store_id, name, name_ru, category, gender, color, style, price,
-   discount_price, temp_min, temp_max, waterproof, shelf_location` plus one stock column per size (`XS…XXL`, `36…45`, `ONE`). A filled
+   discount_price, temp_min, temp_max, waterproof, shelf_location, description, description_ru` plus one stock column per size
+   (`XS…XXL`, `36…45`, `ONE` and the shop's own sizes). A filled
    `id` updates that product; else a `sku` that already exists in the row's store updates that product; else a new one is
-   created. SKUs are unique per store (letters, digits, `. _ - /`, up to 40). Categories `outerwear/top/bottom/shoes/accessory`, genders
+   created. SKUs are unique per store (letters, digits, `. _ - /`, up to 40). `category` is the shop's category by name (Uzbek or
+   Russian, any case; the old codes `outerwear/top/…` still work); an unknown name lists the shop's categories. Genders
    `male/female/unisex`, prices in whole so'm. Any bad row rejects the whole file with the line numbers.
 4. Kiosk: open `https://<domain>/kiosk?store=<id>` full screen in the kiosk browser (Chrome kiosk mode), allow the camera.
 5. Phone: `/admin` → "QR kodlar" → "QR chop etish" and put the print next to the kiosk / in the fitting rooms.
@@ -222,7 +229,7 @@ curl -X POST https://<domain>/api/sync/stock \
 ```
 
 - `quantity` is the absolute count on hand for that SKU and size (an integer 0–100 000), not a delta. Sizes are
-  `XS…XXL`, `36…45` or `ONE`, depending on the product's category. Products themselves (name, price…) are not created here:
+  `XS…XXL`, `36…45`, `ONE` or the shop's own list, depending on the product's category. Products themselves (name, price…) are not created here:
   add them in admin or by CSV with the same SKU first.
 - Up to 1000 items per request. The batch is all-or-nothing: any bad row → `400 {"code":"sync_rows","errors":[{index,sku,size,code,error}]}`
   and nothing changes. Row codes: `sync_sku` (no such SKU in this key's store), `bad_size`, `invalid_qty`, `sync_dup`

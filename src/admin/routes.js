@@ -4,7 +4,9 @@ import { labelPath, scanStats } from '../labels.js';
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { sizesFor } from '../db/seed.js';
+import { sizesFor, sizesOf } from '../db/seed.js';
+import { builtinRows } from '../db/migrations/023_categories.js';
+import { categoryRoutes, categoryFor, catSizes } from './categories.js';
 import { parseCsv, toCsv } from './csv.js';
 import { hashPassword, verifyPassword, DUMMY_HASH, tokenSecret, signToken, verifyToken } from './auth.js';
 import { releaseExpired, markPaid, orderView, nextStatuses, changeStatus, stamp } from '../cart/cart.js';
@@ -62,25 +64,47 @@ const code = (v, label) => {
   return c;
 };
 
-// Validates a full product (create, or existing row merged with a partial edit).
-function validProduct(b) {
+// Task 36: up to 10 free details shown on the item page, [{ name: 'Mato', value: '100% paxta' }]. Rows with both cells
+// empty are dropped (the form's blank lines); a JSON string is the stored value coming back on a partial edit.
+export const DETAILS_MAX = 10;
+function validDetails(v) {
+  if (typeof v === 'string') {
+    try { v = JSON.parse(v); } catch { throw fail(400, 'err.invalid', { field: 'field.details' }); }
+  }
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v)) throw fail(400, 'err.invalid', { field: 'field.details' });
+  const rows = v.filter((d) => !(d && typeof d === 'object' && !Array.isArray(d) && !String(d.name ?? '').trim() && !String(d.value ?? '').trim()));
+  if (rows.length > DETAILS_MAX || !rows.every((d) => d && typeof d === 'object' && !Array.isArray(d))) throw fail(400, 'err.invalid', { field: 'field.details' });
+  const out = rows.map((d) => ({ name: text(d.name, 40, 'field.detail_name', true), value: text(d.value, 120, 'field.detail_value', true) }));
+  return out.length ? JSON.stringify(out) : null;
+}
+
+// Validates a full product (create, or existing row merged with a partial edit). c = its category (task 36): the role
+// and the sizes come from it; the temperature range is required only for a category with an outfit role (a role-less
+// item without one is worn in any weather).
+function validProduct(b, c) {
+  const anyWeather = !c.role;
   const p = {
     name: text(b.name, 120, 'field.name', true),
     name_ru: text(b.name_ru, 120, 'field.name_ru', false),
-    category: b.category,
+    category: c.role ?? null,
+    category_id: c.id,
+    sizes: c.role ? null : catSizes(c).join(','),
     gender: b.gender,
     color: text(b.color, 40, 'field.color', true),
     style: text(b.style, 40, 'field.style', false),
     price: int(b.price, 1, 1e9, 'field.price'),
     discount_price: b.discount_price ?? null,
-    temp_min: int(b.temp_min, -60, 60, 'field.temp_min'),
-    temp_max: int(b.temp_max, -60, 60, 'field.temp_max'),
+    temp_min: anyWeather && (b.temp_min ?? '') === '' ? -60 : int(b.temp_min, -60, 60, 'field.temp_min'),
+    temp_max: anyWeather && (b.temp_max ?? '') === '' ? 60 : int(b.temp_max, -60, 60, 'field.temp_max'),
     waterproof: b.waterproof ?? false,
     shelf_location: text(b.shelf_location, 40, 'field.shelf_location', false),
     sku: code(b.sku, 'field.sku'),
     barcode: code(b.barcode, 'field.barcode'),
+    description: text(b.description, 300, 'field.description', false),
+    description_ru: text(b.description_ru, 300, 'field.description_ru', false),
+    details: validDetails(b.details),
   };
-  if (!CATEGORIES.includes(p.category)) throw fail(400, 'err.invalid', { field: 'field.category' });
   if (!GENDERS.includes(p.gender)) throw fail(400, 'err.invalid', { field: 'field.gender' });
   if (p.discount_price !== null) int(p.discount_price, 1, p.price - 1, 'field.discount_price');
   if (p.temp_min > p.temp_max) throw fail(400, 'err.temp_range');
@@ -89,11 +113,10 @@ function validProduct(b) {
   return p;
 }
 
-// stock = { "M": 3, "L": 0 } → validated entries for this category's sizes.
-function validStock(stock, category) {
+// stock = { "M": 3, "L": 0 } → validated entries for the product's sizes.
+function validStock(stock, sizes) {
   if (stock === undefined) return [];
   if (!stock || typeof stock !== 'object' || Array.isArray(stock)) throw fail(400, 'err.invalid', { field: 'field.stock' });
-  const sizes = sizesFor(category);
   return Object.entries(stock).map(([size, qty]) => {
     if (!sizes.includes(size)) throw fail(400, 'err.bad_size', { size });
     if (!Number.isInteger(qty) || qty < 0 || qty > 100000) throw fail(400, 'err.invalid_qty', { size });
@@ -111,11 +134,14 @@ async function applyStock(trx, productId, entries) {
 }
 
 // What the audit log keeps of a product: its editable fields, image and stock per size ({ M: 3 }).
+// The category is kept by name (the viewer shows it as is), the details as their list.
 async function snapProduct(q, id) {
-  const p = await q('products').where({ id }).first();
+  const p = await q('products as p').leftJoin('categories as c', 'c.id', 'p.category_id').where('p.id', id).first('p.*', 'c.name as category_name');
   const stock = await q('product_stock').where({ product_id: id }).orderBy('id');
   return {
     ...Object.fromEntries(PRODUCT_COLS.map((c) => [c, c === 'waterproof' ? Boolean(p[c]) : p[c] ?? null])),
+    category: p.category_name ?? p.category ?? null,
+    details: p.details ? JSON.parse(p.details) : null,
     image_url: p.image_url ?? null,
     stock: Object.fromEntries(stock.map((s) => [s.size, s.quantity])),
   };
@@ -123,10 +149,10 @@ async function snapProduct(q, id) {
 
 // CSV import: one row = one product, stock in one column per size. A filled `id` cell, or else a `sku` already in
 // that store, updates that product; other rows create one.
-const PRODUCT_COLS = ['sku', 'barcode', 'name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'shelf_location'];
+// Task 36: `category` is the shop's category by name (or an old role code); a shop's own sizes are columns too.
+const PRODUCT_COLS = ['sku', 'barcode', 'name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'shelf_location', 'description', 'description_ru'];
 const SIZE_COLS = [...sizesFor('top'), ...sizesFor('shoes'), ...sizesFor('accessory')];
-const IMPORT_COLS = ['id', 'store_id', ...PRODUCT_COLS, ...SIZE_COLS];
-const TEXT_COLS = ['sku', 'barcode', 'name', 'name_ru', 'color', 'style', 'shelf_location'];
+const TEXT_COLS = ['sku', 'barcode', 'name', 'name_ru', 'category', 'color', 'style', 'shelf_location', 'description', 'description_ru'];
 const MAX_IMPORT_ROWS = 2000;
 const YES = ['1', 'true', 'ha', 'yes'], NO = ['0', 'false', "yo'q", 'yoq', 'no'];
 
@@ -138,11 +164,13 @@ function importCell(col, raw) {
   if (v === '') return null;
   if (TEXT_COLS.includes(col)) return v;
   if (col === 'waterproof') return YES.includes(v.toLowerCase()) ? true : NO.includes(v.toLowerCase()) ? false : v;
-  if (col === 'category' || col === 'gender') return v.toLowerCase();
+  if (col === 'category') return v;
+  if (col === 'gender') return v.toLowerCase();
   const n = Number(v.replace(/\s/g, ''));
   return Number.isInteger(n) ? n : v;
 }
 
+export const imageExt = (buf) => buf.length >= 12 && IMAGE_TYPES.find(([, is]) => is(buf))?.[0];
 const IMAGE_TYPES = [
   ['jpg', (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
   ['png', (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))],
@@ -260,12 +288,12 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
       .map((s) => [s.id, s.low_stock_threshold]));
     const fits = await fitOf(db, products);
     return products.map((p) => {
-      const sizes = sizesFor(p.category);
+      const sizes = sizesOf(p);
       const stock = rows
         .filter((s) => s.product_id === p.id)
         .sort((a, b) => sizes.indexOf(a.size) - sizes.indexOf(b.size))
         .map(({ size, quantity, reserved }) => ({ size, quantity, reserved }));
-      return { ...p, waterproof: Boolean(p.waterproof), low_stock_threshold: low[p.store_id], stock, fit: fits.get(p.id) };
+      return { ...p, waterproof: Boolean(p.waterproof), details: p.details ? JSON.parse(p.details) : [], low_stock_threshold: low[p.store_id], stock, fit: fits.get(p.id) };
     });
   }
 
@@ -311,7 +339,8 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const q = db('products as p').leftJoin(stockTotals(db).as('s'), 's.product_id', 'p.id');
     inStores(req.admin, q, 'p.store_id');
     if (req.query.store_id) q.where('p.store_id', Number(req.query.store_id) || 0);
-    if (req.query.category) q.where('p.category', String(req.query.category));
+    // Task 36: a category id; an old role code still filters by role.
+    if (req.query.category) /^\d+$/.test(req.query.category) ? q.where('p.category_id', Number(req.query.category)) : q.where('p.category', String(req.query.category));
     if (req.query.q) {
       // shortcut: SQLite (dev) LIKE ignores case for ASCII only, so a Cyrillic search is case-sensitive there; Postgres ILIKE is fine.
       const like = `%${String(req.query.q).trim().slice(0, 100)}%`;
@@ -321,7 +350,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     if (filter === 'low') q.where('s.thin', '>', 0); // any size at or below the threshold, fully sold-out ones included: the restock list
     if (filter === 'no_image') q.whereNull('p.image_url');
     const [{ n }] = await q.clone().count({ n: '*' });
-    const rows = await q.select('p.*').orderByRaw(`${PRODUCT_SORT[sort]} ${dir}, p.id ${dir}`).limit(limit).offset(offset);
+    const rows = await q.leftJoin('categories as c', 'c.id', 'p.category_id').select('p.*', 'c.name as category_name', 'c.name_ru as category_name_ru').orderByRaw(`${PRODUCT_SORT[sort]} ${dir}, p.id ${dir}`).limit(limit).offset(offset);
     res.json({ items: await withStock(rows), total: Number(n), limit, offset });
   });
 
@@ -350,12 +379,12 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   }
 
   async function insertProduct(trx, admin, body) {
-    const product = validProduct(body);
-    const stock = validStock(body.stock, product.category);
     const storeId = await resolveStore(trx, admin, body.store_id);
+    const product = validProduct(body, await categoryFor(trx, storeId, body));
+    const stock = validStock(body.stock, sizesOf(product));
     await skuFree(trx, storeId, product.sku);
     const [{ id }] = await trx('products').insert({ ...product, store_id: storeId }).returning('id');
-    await trx('product_stock').insert(sizesFor(product.category).map((size) => ({ product_id: id, size, quantity: 0 })));
+    await trx('product_stock').insert(sizesOf(product).map((size) => ({ product_id: id, size, quantity: 0 })));
     await applyStock(trx, id, stock);
     await audit(trx, admin, { action: 'product.create', storeId, entityId: id, label: product.name, after: await snapProduct(trx, id) });
     return id;
@@ -364,10 +393,13 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   // Partial edit: only the given fields change, plus optional `stock`. store_id cannot change.
   async function updateProduct(trx, existing, body, admin) {
     if (body.store_id !== undefined && Number(body.store_id) !== existing.store_id) throw fail(400, 'err.store_locked');
-    const product = validProduct({ ...existing, ...body });
-    // Sizes depend on category group; switching group would orphan the stock rows.
-    if (sizesFor(product.category) !== sizesFor(existing.category)) throw fail(400, 'err.category_locked');
-    const stock = validStock(body.stock, product.category);
+    // The category named in the edit, else the current one (an old row without category_id: by its role).
+    const named = (body.category_id ?? body.category ?? null) !== null;
+    const c = await categoryFor(trx, existing.store_id, named ? body : existing.category_id ? existing : { category: existing.category });
+    const product = validProduct({ ...existing, ...body }, c);
+    // Stock rows are per size; a category with other sizes would orphan them.
+    if (sizesOf(product).join() !== sizesOf(existing).join()) throw fail(400, 'err.category_locked');
+    const stock = validStock(body.stock, sizesOf(product));
     await skuFree(trx, existing.store_id, product.sku, existing.id);
     const before = await snapProduct(trx, existing.id);
     await trx('products').where({ id: existing.id }).update({ ...product, updated_at: trx.fn.now() });
@@ -407,7 +439,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const p = await findProduct(req);
     const offset = req.body?.offset ?? null;
     if (offset !== null && ![-1, 0, 1].includes(offset)) throw fail(400, 'err.invalid', { field: 'field.fit_offset' });
-    if (p.category === 'accessory') throw fail(400, 'err.invalid', { field: 'field.fit_offset' });
+    if (!p.category || p.category === 'accessory') throw fail(400, 'err.invalid', { field: 'field.fit_offset' });
     if ((p.fit_offset ?? null) !== offset) {
       await db.transaction(async (trx) => {
         await trx('products').where({ id: p.id }).update({ fit_offset: offset, updated_at: trx.fn.now() });
@@ -430,7 +462,14 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     }
     const header = rows.shift().map((h) => h.trim());
     while (header.length && !header.at(-1)) header.pop(); // Excel often adds empty trailing columns
-    const cols = header.map((h) => IMPORT_COLS.find((c) => c.toLowerCase() === h.toLowerCase()));
+    // The caller's shops' own sizes (custom size lists) are columns too; each row's sizes are checked per product.
+    const own = db('categories').where({ size_kind: 'custom' });
+    if (req.admin.role !== 'super') own.where({ organization_id: req.admin.organization_id });
+    const fixed = ['id', 'store_id', ...PRODUCT_COLS];
+    const taken = new Set([...fixed, ...SIZE_COLS].map((c) => c.toLowerCase())); // a shop size called "price" stays the price column
+    const sizeCols = [...SIZE_COLS, ...new Set((await own.select('sizes', 'size_kind')).flatMap(catSizes).filter((x) => !taken.has(x.toLowerCase())))];
+    const importCols = [...fixed, ...sizeCols];
+    const cols = header.map((h) => importCols.find((c) => c.toLowerCase() === h.toLowerCase()));
     const unknown = header.filter((h, i) => !cols[i]);
     if (unknown.length) throw fail(400, 'err.csv_unknown', { cols: unknown.join(', ') });
     if (new Set(cols).size !== cols.length) throw fail(400, 'err.csv_dup_col');
@@ -450,7 +489,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
             let id, storeId = req.query.store_id || undefined; // a row's store_id column wins over ?store_id
             cols.forEach((col, j) => {
               const raw = cells[j] ?? '';
-              if (SIZE_COLS.includes(col)) {
+              if (sizeCols.includes(col)) {
                 if (raw.trim()) stock[col] = importCell('stock', raw);
               } else if (col === 'id') id = raw.trim() || undefined;
               else if (col === 'store_id') storeId = raw.trim() || undefined;
@@ -492,7 +531,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   r.post('/products/:id/image', express.raw({ type: () => true, limit: '2mb' }), async (req, res) => {
     const p = await findProduct(req);
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-    const ext = buf.length >= 12 && IMAGE_TYPES.find(([, is]) => is(buf))?.[0];
+    const ext = imageExt(buf);
     if (!ext) throw fail(400, 'err.image_type');
     const file = `${p.id}-${randomBytes(8).toString('hex')}.${ext}`;
     await mkdir(imageDir, { recursive: true });
@@ -647,13 +686,13 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     if (typeof b.restock !== 'boolean') throw fail(400, 'err.invalid', { field: 'field.restock' });
     const line = Number.isInteger(b.item_id) ? await db('order_items').where({ id: b.item_id, order_id: o.id }).first() : undefined;
     if (!line) throw fail(404, 'err.not_found');
-    const p = await db('products').where({ id: line.product_id }).first('name', 'name_ru', 'category');
+    const p = await db('products').where({ id: line.product_id }).first('name', 'name_ru', 'category', 'sizes');
     const qty = int(b.quantity, 1, line.quantity, 'field.quantity');
     // What these units cost the customer: the line's price less its share of the order's discounts (task 26).
     const paid = Math.floor(((line.unit_price * line.quantity - line.discount) * qty) / line.quantity);
     const refund = b.kind === 'exchange' ? int(b.refund ?? 0, 0, 0, 'field.refund') : int(b.refund ?? paid, 0, paid, 'field.refund');
     const newSize = b.kind === 'exchange' ? b.new_size : null;
-    if (b.kind === 'exchange' && (!sizesFor(p.category).includes(newSize) || newSize === line.size)) throw fail(400, 'err.invalid', { field: 'field.size' });
+    if (b.kind === 'exchange' && (!sizesOf(p).includes(newSize) || newSize === line.size)) throw fail(400, 'err.invalid', { field: 'field.size' });
     try {
       await db.transaction(async (trx) => {
         // The key row first: a parallel double submit waits on its unique index, then fails and is answered below.
@@ -750,6 +789,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   settingsRoutes(r, db, { secret, lock, resolveStore });
   orgRoutes(r, db);
   promoRoutes(r, db); // task 26
+  categoryRoutes(r, db, { uploadDir }); // task 36
 
   // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.
   const inScope = (req, q, col = 'store_id') => {
@@ -961,7 +1001,10 @@ async function orgFor(db, orgId, name) {
   }
   const orgs = await db('organizations').limit(2).select('id');
   if (orgs.length > 1) throw new Error('Several organisations exist: pass organization_id');
-  return orgs[0]?.id ?? (await db('organizations').insert({ name: String(name ?? '').trim().slice(0, 120) || 'Smart Fit' }).returning('id'))[0].id;
+  if (orgs[0]) return orgs[0].id;
+  const [{ id }] = await db('organizations').insert({ name: String(name ?? '').trim().slice(0, 120) || 'Smart Fit' }).returning('id');
+  await db('categories').insert(builtinRows(id));
+  return id;
 }
 
 // New store (CLI: npm run store:create). Weather comes from lat/lon; the delivery fee is a flat city fee in so'm,

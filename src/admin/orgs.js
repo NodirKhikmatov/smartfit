@@ -3,6 +3,7 @@ import express from 'express';
 import { fail, text, int, paging, langOf } from './routes.js';
 import { createInvite } from './settings.js';
 import { audit } from './audit.js';
+import { builtinRows } from '../db/migrations/023_categories.js';
 import { normalizePhone, stamp } from '../cart/cart.js';
 
 const superOnly = (admin) => {
@@ -32,6 +33,7 @@ export function orgRoutes(r, db) {
     if (!EMAIL.test(email) || email.length > 200) throw fail(400, 'err.invalid', { field: 'field.email' });
     const out = await db.transaction(async (trx) => {
       const [{ id }] = await trx('organizations').insert({ name }).returning('id');
+      await trx('categories').insert(builtinRows(id)); // task 36: every shop starts with the five built-in categories
       await audit(trx, req.admin, { action: 'org.create', entityId: id, label: name, after: { name } });
       return { id, name, invite: await createInvite(req, trx, { email, role: 'owner', storeId: null, orgId: id }) };
     });

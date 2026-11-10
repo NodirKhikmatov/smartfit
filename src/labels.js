@@ -42,9 +42,9 @@ export function createScanRoute(db, { limit = (req, res, next) => next() } = {})
 // bought least first (scans − sold). `sold` counts every paid, not cancelled sale of the product, not only after a scan.
 export async function scanStats(db, scope, { from, limit = 50 }) {
   const rows = await scope(db('qr_scans as q'), 'q.store_id').where('q.created_at', '>=', dbTime(from))
-    .join('products as p', 'p.id', 'q.product_id').join('stores as st', 'st.id', 'q.store_id')
-    .groupBy('q.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.sku', 'q.store_id', 'st.name')
-    .select('q.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.sku', 'q.store_id', 'st.name as store_name').count({ scans: '*' });
+    .join('products as p', 'p.id', 'q.product_id').join('stores as st', 'st.id', 'q.store_id').leftJoin('categories as c', 'c.id', 'p.category_id')
+    .groupBy('q.product_id', 'p.name', 'p.name_ru', 'p.category', 'c.name', 'c.name_ru', 'p.sku', 'q.store_id', 'st.name')
+    .select('q.product_id', 'p.name', 'p.name_ru', 'p.category', 'c.name as category_name', 'c.name_ru as category_name_ru', 'p.sku', 'q.store_id', 'st.name as store_name').count({ scans: '*' });
   if (!rows.length) return [];
   const sold = await db('order_items as i').join('orders as o', 'o.id', 'i.order_id').where('o.paid_at', '>=', iso(from))
     .whereIn('i.product_id', rows.map((x) => x.product_id)).where('o.payment_status', 'paid').whereNot('o.status', 'cancelled')

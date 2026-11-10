@@ -298,6 +298,25 @@ test('every mutating admin route writes an audit row', async () => {
       const p = (await admin('POST', '/promos', { code: `OFF${Date.now()}`, kind: 'fixed', value: 5000 }, ownerToken)).body;
       return admin('PATCH', `/promos/${p.id}`, { active: false }, ownerToken);
     }],
+    // Task 36: categories (owner).
+    'POST /categories': ['category.create', () => admin('POST', '/categories', { name: `Walk ${Date.now()}`, name_ru: `Обход ${Date.now()}`, size_kind: 'one' }, ownerToken)],
+    'PATCH /categories/:id': ['category.update', async () => {
+      const c = (await admin('POST', '/categories', { name: `Yangi ${Date.now()}`, name_ru: `Новая ${Date.now()}`, size_kind: 'one' }, ownerToken)).body;
+      return admin('PATCH', `/categories/${c.id}`, { hidden: true }, ownerToken);
+    }],
+    'DELETE /categories/:id': ['category.delete', async () => {
+      const c = (await admin('POST', '/categories', { name: `Bo'sh ${Date.now()}`, name_ru: `Пустая ${Date.now()}`, size_kind: 'one' }, ownerToken)).body;
+      return admin('DELETE', `/categories/${c.id}`, undefined, ownerToken);
+    }],
+    'POST /categories/:id/image': ['category.image', async () => {
+      const c = (await admin('POST', '/categories', { name: `Rasm ${Date.now()}`, name_ru: `Фото ${Date.now()}`, size_kind: 'one' }, ownerToken)).body;
+      return admin('POST', `/categories/${c.id}/image`, undefined, ownerToken, { raw: png, type: 'image/png' });
+    }],
+    'DELETE /categories/:id/image': ['category.image', async () => {
+      const c = (await admin('POST', '/categories', { name: `Rasmsiz ${Date.now()}`, name_ru: `Без фото ${Date.now()}`, size_kind: 'one' }, ownerToken)).body;
+      await admin('POST', `/categories/${c.id}/image`, undefined, ownerToken, { raw: png, type: 'image/png' });
+      return admin('DELETE', `/categories/${c.id}/image`, undefined, ownerToken);
+    }],
     'POST /orgs': ['org.create', () => admin('POST', '/orgs', { name: 'Audit brand', owner_email: `org${Date.now()}@smartfit.uz` }, superToken)],
     'PATCH /demo-requests/:id': ['demo.handle', async () => {
       const [{ id }] = await db('demo_requests').insert({ name: 'Aziz', phone: '+998901234567', company: 'Moda', lang: 'uz' }).returning('id');

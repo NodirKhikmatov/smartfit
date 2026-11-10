@@ -133,6 +133,7 @@ html.kiosk .camera-screen:not([data-mode="photo"]) { grid-template-columns: minm
 .results-head h1 { margin-bottom: var(--s-1); }
 .results-head p { margin: 0; }
 .sizes { flex: 0 1 auto; display: grid; gap: var(--s-1); padding: var(--s-2) var(--s-4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.sizes:empty { display: none; } /* single items that need no size (shoes, accessories, role-less categories) */
 .sizes .row { align-items: center; gap: var(--s-4); }
 .sizes .meta { margin: 0; max-width: 28rem; }
 .stepper { display: flex; align-items: center; gap: var(--s-2); }
@@ -272,6 +273,11 @@ html.kiosk .catalog-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap
 .item-photo { display: grid; place-items: center; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; border-radius: var(--r-lg); background: var(--sunken); color: var(--ink-3); }
 .item-info { display: grid; gap: var(--s-3); }
 .item-info > p { margin: 0; }
+/* Task 36: the shop's free details (name → value) and a category photo on its catalogue chip */
+.item-info .details { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--s-1) var(--s-3); margin: 0; }
+.item-info .details dt { color: var(--ink-2); }
+.item-info .details dd { margin: 0; overflow-wrap: anywhere; }
+.chip .chip-img { width: 1.5rem; height: 1.5rem; border-radius: 50%; object-fit: cover; margin-right: var(--s-2); vertical-align: middle; }
 .item-info > .price { text-align: left; font: var(--weight-strong) var(--text-2xl)/1 var(--font-display); font-variant-numeric: lining-nums; }
 .item-info .pick { display: grid; gap: var(--s-1); }
 .item-info .pick .field-error:empty { display: none; }

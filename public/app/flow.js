@@ -9,6 +9,15 @@ export const FITS = ['tight', 'regular', 'loose'];
 export const METHODS = ['full', 'torso', 'upper', 'usual', 'tape', 'body', 'profile'];
 // Task 30: the categories a customer can come for as single items (same order as the engine's ORDER).
 export const WANT = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
+// Task 36: the store's own categories are wanted by id; their outfit role (or none) decides which sizes are asked.
+// Filled from the store (GET /api/stores/:id) and, until it loads after a refresh, from the saved route.
+const ROLES = new Map(); // category id → role | null
+export function setCategories(list) {
+  ROLES.clear();
+  for (const [id, role] of list) if (Number.isInteger(id) && id > 0) ROLES.set(id, WANT.includes(role) ? role : null);
+}
+export const categoryRoles = () => [...ROLES];
+const roleOf = (c) => (Number.isInteger(c) ? ROLES.get(c) ?? null : c);
 const ROUTE_KEY = 'sfRoute';
 
 const str = (v) => String(v ?? '').trim();
@@ -41,16 +50,23 @@ const FORM = ['gender', 'height', 'weight', 'shoes', 'budget'];
 // none. `photo` = the size step (photo / usual size / tape) is shown at all; height and weight are asked only for it.
 export function sizeNeeds(want = null) {
   if (!want) return { top: true, bottom: true, shoes: true, photo: true };
-  const top = want.includes('outerwear') || want.includes('top'), bottom = want.includes('bottom');
-  return { top, bottom, shoes: want.includes('shoes'), photo: top || bottom };
+  const roles = want.map(roleOf);
+  const top = roles.includes('outerwear') || roles.includes('top'), bottom = roles.includes('bottom');
+  return { top, bottom, shoes: roles.includes('shoes'), photo: top || bottom };
 }
 // The sizes a request still lacks for its choice (the results screen can show only when this is true).
 export const sizesReady = (sizes, want = null) => {
   const n = sizeNeeds(want);
   return (!n.top || !!sizes?.top) && (!n.bottom || !!sizes?.bottom);
 };
-// A want list from untrusted input (form, saved route): known categories, once each, in order; none → null.
-export const cleanWant = (w) => (Array.isArray(w) && WANT.some((c) => w.includes(c)) ? WANT.filter((c) => w.includes(c)) : null);
+// A want list from untrusted input (form, saved route): role codes (in order) and category ids (task 36: "12" or 12,
+// in the order given), once each, at most 20; none → null.
+export function cleanWant(w) {
+  if (!Array.isArray(w)) return null;
+  const ids = [...new Set(w.filter((c) => /^\d{1,9}$/.test(String(c)) && Number(c) > 0).map(Number))];
+  const out = [...WANT.filter((c) => w.includes(c)), ...ids].slice(0, 20);
+  return out.length ? out : null;
+}
 
 // Form values (strings from the inputs) → the /api/size body and the /api/recommend request, or null if a field is wrong.
 // Height and weight are checked only when the choice needs the size step.
@@ -72,7 +88,8 @@ export function toRequest(v, storeId) {
 // the server checks the lists again).
 const ownItem = (x) => x && typeof x === 'object' && WANT.includes(x.category) && typeof x.color === 'string' && x.color.length <= 20
   && (x.style == null || (typeof x.style === 'string' && x.style.length <= 10));
-export function routeData({ screen, form = {}, sizes = {}, manual = false, method = null, fit = null, item = null, own = [] } = {}) {
+export function routeData({ screen, form = {}, sizes = {}, manual = false, method = null, fit = null, item = null, own = [], roles = [] } = {}) {
+  const known = new Map(Array.isArray(roles) ? roles.filter((x) => Array.isArray(x) && Number.isInteger(x[0])) : []);
   return {
     screen: SCREENS.includes(screen) ? screen : 'start',
     form: { ...Object.fromEntries(FORM.map((k) => [k, str(form?.[k]).slice(0, 12)])), want: cleanWant(form?.want) },
@@ -86,6 +103,8 @@ export function routeData({ screen, form = {}, sizes = {}, manual = false, metho
     method: METHODS.includes(method) ? method : null,
     fit: FITS.includes(fit) ? fit : null,
     item: Number.isInteger(item) && item > 0 ? item : null,
+    // Task 36: the outfit role of each wanted category id, so a refresh asks the right sizes before the store loads.
+    roles: (cleanWant(form?.want) ?? []).filter(Number.isInteger).map((id) => [id, WANT.includes(known.get(id)) ? known.get(id) : null]),
   };
 }
 export function saveRoute(route, storage = globalThis.sessionStorage) {

@@ -2,7 +2,7 @@ import { watchIdle } from './idle.js';
 import { loadPose, measure, framing, framingHint } from './pose.js';
 import { keypad } from './keypad.js';
 import { kioskShell, attract, kioskDevice, randomId } from './kiosk.js';
-import { CLOTHES, SHOES, JEANS, WANT, nextError, fieldError, toRequest, sizeNeeds, sizesReady, cleanWant, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
+import { CLOTHES, SHOES, JEANS, WANT, nextError, fieldError, toRequest, sizeNeeds, sizesReady, cleanWant, setCategories, categoryRoles, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
 import { icon, confirmDialog, showAfter, skeletonCard, toast } from '/shared/ui.js';
 import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName, COLORS, STYLES } from '/shared/i18n.js';
 
@@ -15,7 +15,14 @@ const storeId = Number(params.get('store'));
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
 const som = (n) => fmt.som(n);
-const cat = (c) => t(`cat.${c}`);
+const cat = (c) => (c ? t(`cat.${c}`) : '');
+// Task 36: the store's own categories. Their names are shop text from the database, always set as text.
+const shownCats = () => store?.categories ?? [];
+const catName = (c) => (getLang() === 'ru' && c.name_ru) || c.name;
+const catOf = (p) => (p.category_name ? (getLang() === 'ru' && p.category_name_ru) || p.category_name : cat(p.category)); // a product's
+const wantName = (w) => (Number.isInteger(w) ? catName(shownCats().find((c) => c.id === w) ?? { name: '' }) : cat(w)); // a want entry
+// The sizes a category comes in: by its kind (clothes, shoes, one size) or the shop's own list.
+const catSizes = (c) => (c.size_kind === 'custom' ? String(c.sizes ?? '').split(',').filter(Boolean) : c.size_kind === 'shoes' ? SHOES : c.size_kind === 'one' ? [] : CLOTHES);
 const form = $('form');
 
 // Server cart (task 8): each item holds its stock for 15 min. The phone keeps the token across reloads; the kiosk never stores it.
@@ -44,19 +51,22 @@ let holdTimer = null, holdDeadline = 0; // cart hold countdown (cart screen)
 $('shoeChips').append(...SHOES.map((s) => el('label', {}, el('input', { type: 'radio', name: 'shoes', value: s }), el('span', { textContent: s }))));
 // Task 30, "Nima kerak?": a whole outfit (the default) or one or more categories as single items. Picking "To'liq obraz"
 // clears the categories, picking a category clears it, and with nothing picked it comes back.
-$('wantChips').append(...[['outfit', 'kiosk.want.outfit'], ...WANT.map((c) => [c, `cat.${c}`])].map(([v, key]) => {
-  const text = el('span', { textContent: t(key) });
-  text.dataset.i18n = key; // the language switch translates it
-  return el('label', {}, el('input', { type: 'checkbox', name: 'want', value: v, defaultChecked: v === 'outfit' }), text);
-}));
+// Task 36: the chips are the store's own shown categories (by id), drawn when the store loads; a ticked one stays ticked.
+function renderWantChips(want = formWant()) {
+  $('wantChips').replaceChildren(...[['outfit', t('kiosk.want.outfit')], ...shownCats().map((c) => [String(c.id), catName(c)])].map(([v, text]) =>
+    el('label', {}, el('input', { type: 'checkbox', name: 'want', value: v, checked: want ? want.includes(Number(v)) : v === 'outfit' }), el('span', { textContent: text }))));
+  applyNeeds();
+}
+let restoredWant = null; // a refresh's choice, until the store's chips exist
 const wantBoxes = () => [...document.getElementsByName('want')];
-const formWant = () => cleanWant(wantBoxes().filter((b) => b.checked).map((b) => b.value));
+const formWant = () => (wantBoxes().length > 1 ? cleanWant(wantBoxes().filter((b) => b.checked).map((b) => b.value)) : restoredWant);
 $('wantChips').addEventListener('change', (e) => {
   const boxes = wantBoxes();
   if (e.target.value === 'outfit') boxes.forEach((b) => (b.checked = b === e.target));
   else boxes[0].checked = !boxes.some((b) => b.value !== 'outfit' && b.checked);
   applyNeeds();
 });
+renderWantChips(null);
 // Only the inputs the choice needs show (form: height/weight for the size step, shoe sizes; size step: top or bottom parts).
 function applyNeeds() {
   const n = sizeNeeds(formWant());
@@ -85,6 +95,7 @@ if (kiosk) keypad();
 const switcher = langSwitch(() => {
   for (const id of ['cartError', 'checkoutError']) $(id).textContent = '';
   store ? renderWeather() : loadStore(); // loadStore redraws a start error (no store, offline) in the new language
+  if (store) renderWantChips();
   setCart(cart);
   budgetChips();
   if (lastResult) renderResults(lastResult);
@@ -94,7 +105,7 @@ $('langBox').replaceChildren(switcher);
 // History routing (U2): one entry per screen, so the phone's back button steps back inside the app.
 const formValues = () => ({ gender: form.gender.value, height: form.height.value, weight: form.weight.value, shoes: form.shoes.value, budget: form.budget.value, want: formWant() });
 const appState = () => ({ formOk: !!request, sizesOk: !!request && sizesReady(request.sizes, request.want), orderOk: !!lastOrder });
-const remember = () => saveRoute({ screen: current, form: formValues(), sizes: request?.sizes, manual: sizeInfo?.manual, method: request?.method, fit: request?.fit, item: current === 'item' ? itemId : null, own: request?.own });
+const remember = () => saveRoute({ screen: current, form: formValues(), sizes: request?.sizes, manual: sizeInfo?.manual, method: request?.method, fit: request?.fit, item: current === 'item' ? itemId : null, own: request?.own, roles: categoryRoles() });
 const ENTER = {
   camera: () => showCamera(),
   results: () => (lastResult ? renderResults(lastResult) : loadResults()),
@@ -193,6 +204,10 @@ async function loadStore() {
     return;
   }
   $('storeName').textContent = store.name;
+  setCategories(store.categories.map((c) => [c.id, c.role]));
+  renderWantChips(formWant());
+  restoredWant = null;
+  if (lastResult?.groups) renderResults(lastResult); // a refresh drew the single items before their category names came
   $('startLabel').textContent = t('kiosk.start.go');
   $('start').disabled = false;
   $('catalogBtn').hidden = false;
@@ -649,10 +664,10 @@ function renderSingles(r) {
     ownBox(),
     ...(r.style_guess ? [el('p', { className: 'muted', textContent: t('kiosk.results.style', { style: r.style_guess }) })] : []),
     ...(r.relaxed ? [el('p', { className: 'muted', textContent: t('kiosk.results.relaxed', { n: r.relaxed }) })] : []),
-    ...r.groups.map((g) => el('section', { className: 'single-group' }, el('h2', { textContent: cat(g.category) }),
+    ...r.groups.map((g) => el('section', { className: 'single-group' }, el('h2', { textContent: wantName(g.category) }),
       ...(g.over_budget > 0 ? [warn('kiosk.single.over_budget', { sum: som(g.over_budget) })] : []),
       g.items.length ? el('div', { className: 'outfits' }, ...g.items.map(singleCard))
-        : el('div', { className: 'empty' }, icon('hanger'), el('p', { textContent: t('kiosk.single.empty', { cat: cat(g.category) }) })))),
+        : el('div', { className: 'empty' }, icon('hanger'), el('p', { textContent: t('kiosk.single.empty', { cat: wantName(g.category) }) })))),
     ...(n ? [triedCard()] : []),
     ...(store?.profile && !kiosk ? [profileBox()] : []), // phone: keep the sizes (no outfit to keep)
   );
@@ -736,7 +751,7 @@ function triedCard() {
 }
 
 const sizeName = (s) => (s === 'ONE' ? t('common.size_one') : s);
-const thumb = (p) => (p.image_url ? el('img', { className: 'thumb', src: p.image_url, alt: '' }) : el('div', { className: 'thumb' }, icon(p.category)));
+const thumb = (p) => (p.image_url ? el('img', { className: 'thumb', src: p.image_url, alt: '' }) : el('div', { className: 'thumb' }, icon(p.category || 'hanger')));
 const chosen = new Map(); // product id → shoe size picked on the results screen (shared by an outfit and its cheaper variant)
 
 // Chips (U11): one pressed chip per group; onPick gets the value. options: [[value, text]].
@@ -758,7 +773,7 @@ const sizeChips = (sizes, current, label, onPick) => chipRow(sizes.map((s) => [s
 // Photo collage of an outfit (D2): the clothes, not the accessory, up to four.
 function look(items) {
   const pics = items.filter((p) => p.category !== 'accessory').slice(0, 4);
-  return el('div', { className: `look n${pics.length}` }, ...pics.map((p) => (p.image_url ? el('img', { src: p.image_url, alt: '' }) : el('div', { className: 'ph' }, icon(p.category)))));
+  return el('div', { className: `look n${pics.length}` }, ...pics.map((p) => (p.image_url ? el('img', { src: p.image_url, alt: '' }) : el('div', { className: 'ph' }, icon(p.category || 'hanger')))));
 }
 
 // Unknown shoe size: the customer picks one of the in-stock sizes before adding (addButton finds it by data-pick).
@@ -957,7 +972,6 @@ function partialCard(p) {
 }
 
 // --- Task 25: catalogue and item page. The server sends only items and sizes with free stock now.
-const CATEGORY_LIST = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 const PRICE_BANDS = [[null, 300_000], [300_000, 800_000], [800_000, null]]; // what the customer pays (discount price first)
 const NO_FILTER = { category: '', gender: '', size: '', price: '' };
 let filters = { ...NO_FILTER };
@@ -968,7 +982,8 @@ const bandName = ([lo, hi]) => (lo === null ? t('kiosk.catalog.price_upto', { su
   : hi === null ? t('kiosk.catalog.price_from', { sum: fmt.num(lo) }) : `${fmt.num(lo)} – ${fmt.num(hi)}`);
 function renderFilters() {
   const f = filters;
-  const sizes = f.category === 'shoes' ? SHOES : f.category === 'accessory' ? [] : CLOTHES;
+  const picked = shownCats().find((c) => String(c.id) === f.category);
+  const sizes = picked ? catSizes(picked) : CLOTHES;
   const all = ['', t('common.all')];
   const group = (key, label, options) => {
     const g = el('div', { className: 'filter' }, el('div', { className: 'meta', textContent: label }), chipRow([all, ...options], f[key], label, (v) => {
@@ -979,8 +994,11 @@ function renderFilters() {
     g.dataset.group = key;
     return g;
   };
+  const cats = group('category', t('field.category'), shownCats().map((c) => [String(c.id), catName(c)]));
+  // Task 36: a category's photo (optional) leads its chip; the first chip is "all".
+  cats.querySelectorAll('.chip').forEach((b, i) => shownCats()[i - 1]?.image_url && b.prepend(el('img', { className: 'chip-img', src: shownCats()[i - 1].image_url, alt: '' })));
   $('catalogFilters').replaceChildren(
-    group('category', t('field.category'), CATEGORY_LIST.map((c) => [c, cat(c)])),
+    cats,
     group('gender', t('kiosk.catalog.gender'), [['male', t('gender.male')], ['female', t('gender.female')]]),
     group('price', t('field.price'), PRICE_BANDS.map((b, i) => [String(i), bandName(b)])),
     ...(sizes.length ? [group('size', t('kiosk.catalog.size'), sizes.map((x) => [x, x]))] : []),
@@ -1015,7 +1033,7 @@ async function loadCatalog() {
 
 // A catalogue or "goes well with" tile: photo, name, price and the sizes in stock. Opens the item page.
 const tile = (p) => el('button', { type: 'button', className: 'tile', onclick: () => go('item', { data: { item: p.id } }) },
-  p.image_url ? el('img', { src: p.image_url, alt: '' }) : el('span', { className: 'ph' }, icon(p.category)),
+  p.image_url ? el('img', { src: p.image_url, alt: '' }) : el('span', { className: 'ph' }, icon(p.category || 'hanger')),
   el('span', { className: 'name', textContent: productName(p) }), priceEl(p),
   el('span', { className: 'meta', textContent: p.sizes.map(sizeName).join(' ') }));
 
@@ -1042,13 +1060,14 @@ async function loadItem(id) {
   if (seq === itemSeq) renderItem(r.item, r.pairs);
 }
 
+const description = (p) => (getLang() === 'ru' && p.description_ru) || p.description;
 // Every size of the item: the ones in stock add to the cart, a sold-out one shows the organisation's other stores.
 function renderItem(p, pairs) {
   syncs = new Set();
   $('itemName').textContent = productName(p);
-  const all = p.category === 'shoes' ? SHOES : p.category === 'accessory' ? p.sizes : CLOTHES;
+  const all = p.all_sizes; // task 36: every size it comes in (the shop's own list too)
   chosen.delete(p.id);
-  if (p.category === 'accessory') chosen.set(p.id, p.sizes[0]);
+  if (all.length === 1) chosen.set(p.id, p.sizes[0]);
   const other = el('div', { className: 'elsewhere' });
   const err = el('p', { className: 'field-error' });
   const chips = chipRow(all.map((x) => [x, sizeName(x)]), chosen.get(p.id), t('kiosk.size.aria', { name: productName(p) }), (x) => {
@@ -1072,10 +1091,12 @@ function renderItem(p, pairs) {
   const page = $('itemBody');
   page.replaceChildren(
     el('div', { className: 'item-page' },
-      p.image_url ? el('img', { className: 'item-photo', src: p.image_url, alt: '' }) : el('div', { className: 'item-photo ph' }, icon(p.category)),
+      p.image_url ? el('img', { className: 'item-photo', src: p.image_url, alt: '' }) : el('div', { className: 'item-photo ph' }, icon(p.category || 'hanger')),
       el('div', { className: 'item-info card' }, priceEl(p),
-        el('p', { className: 'meta', textContent: [cat(p.category), colorName(p.color), p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }),
-        ...(p.description ? [el('p', { textContent: p.description })] : []),
+        el('p', { className: 'meta', textContent: [catOf(p), colorName(p.color), p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }),
+        ...(description(p) ? [el('p', { textContent: description(p) })] : []),
+        // Task 36: the shop's free details ("Mato: 100% paxta"), as text.
+        ...(p.details.length ? [el('dl', { className: 'details' }, ...p.details.flatMap((d) => [el('dt', { textContent: d.name }), el('dd', { textContent: d.value })]))] : []),
         fitHint(p), pick, other,
         addButton([{ ...p, size: null }], page, 'primary wide', 'kiosk.add.btn', null),
         ...(scanToken ? [fittingBox([{ ...p, size: null }], page, { scan: scanToken })] : []))), // task 32: in the shop, from a label
@@ -1177,7 +1198,7 @@ function cartLine(i) {
     thumb(i),
     el('div', { className: 'name', textContent: i.quantity > 1 ? `${name} × ${i.quantity}` : name }),
     el('div', { className: i.discount_price ? 'price sale' : 'price' }, ...(i.discount_price ? [el('s', { textContent: som(i.price * i.quantity) })] : []), som(i.line_total)),
-    el('div', { className: 'meta', textContent: [cat(i.category), colorName(i.color), i.sizes.length < 2 && sizeName(i.size), i.shelf_location && t('kiosk.shelf', { shelf: i.shelf_location })].filter(Boolean).join(' · ') }),
+    el('div', { className: 'meta', textContent: [catOf(i), colorName(i.color), i.sizes.length < 2 && sizeName(i.size), i.shelf_location && t('kiosk.shelf', { shelf: i.shelf_location })].filter(Boolean).join(' · ') }),
     ...(i.sizes.length > 1 ? [sizeChips(i.sizes, i.size, t('kiosk.size.aria', { name }), (s) => cartAction(() => api(url, { size: s }, 'PATCH')))] : []),
     el('button', { type: 'button', className: 'ghost danger remove', ariaLabel: t('kiosk.cart.remove_aria', { name }), onclick: () => cartAction(() => api(url, null, 'DELETE')) }, icon('trash'), t('common.delete')),
   );
@@ -1617,7 +1638,9 @@ if (saved) {
     if (f instanceof RadioNodeList) for (const r of f) r.checked = r.value === v;
     else f.value = v;
   }
-  for (const b of wantBoxes()) b.checked = saved.form.want ? saved.form.want.includes(b.value) : b.value === 'outfit';
+  setCategories(saved.roles);
+  restoredWant = saved.form.want;
+  for (const b of wantBoxes()) b.checked = !restoredWant;
   applyNeeds();
   const r = toRequest(saved.form, storeId);
   if (r) {

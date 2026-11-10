@@ -6,8 +6,9 @@ export const AUDIT_ACTIONS = [
   'order.status', 'order.pay', 'order.return', 'fitting.done', 'fitting.accept', 'product.fit',
   'store.update', 'store.kiosk_pin', 'team.invite', 'team.invite_revoke', 'team.join', 'team.disable', 'team.enable', 'account.password',
   'sync_key.create', 'sync_key.revoke', 'stock.sync', 'store.create', 'org.create', 'demo.handle', 'promo.create', 'promo.update',
+  'category.create', 'category.update', 'category.delete', 'category.image',
 ];
-export const AUDIT_ENTITIES = ['product', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'org', 'demo', 'promo'];
+export const AUDIT_ENTITIES = ['product', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'org', 'demo', 'promo', 'category'];
 
 const json = (v) => (v == null ? null : JSON.stringify(v));
 

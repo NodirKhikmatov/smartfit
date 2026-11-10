@@ -57,7 +57,7 @@ const item = (category, unit_price, extra = {}) => ({ id: nextId++, category, pr
 
 test('want validation: categories once each, own only with want and from fixed lists; only the wanted sizes are required', async () => {
   const sizes = { top: 'M', bottom: 'M' };
-  for (const want of ['top', [], ['hat'], ['top', 'top'], [1], { 0: 'top' }]) {
+  for (const want of ['top', [], ['hat'], ['top', 'top'], [999999], [1.5], { 0: 'top' }]) {
     const r = await recommend({ sizes, want });
     assert.equal(r.status, 400, JSON.stringify(want));
     assert.equal(r.body.code, 'invalid');

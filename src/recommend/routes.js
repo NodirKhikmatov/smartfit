@@ -1,8 +1,8 @@
 import express from 'express';
 import { randomBytes } from 'node:crypto';
-import { sizesFor } from '../db/seed.js';
+import { sizesFor, sizesOf } from '../db/seed.js';
 import { fail, langOf } from '../admin/routes.js';
-import { filterCandidates, ruleOutfits, ruleSingles, missedItems, swapOptions, SPREADS, ORDER, sizeKey } from './engine.js';
+import { filterCandidates, ruleOutfits, ruleSingles, missedItems, swapOptions, SPREADS, ORDER, sizeKey, visible } from './engine.js';
 import { logMissed } from '../demand.js';
 import { isFit, METHODS } from '../size/size.js';
 import { parseJson } from '../cart/promo.js';
@@ -21,26 +21,35 @@ const pick = (v, allowed, label, required) => {
 
 // Task 30: want = the categories wanted as single items (none = a whole outfit, as before); own = what the customer
 // already has, from fixed lists, for single items only. → { want: [..] | null, own: [{ category, color, style }] }.
-function parseWant(b) {
+// Task 36: a want entry is a role code or the id of one of the store's shown categories (cats); role codes first in
+// the engine's order, then ids in the shop's category order.
+function parseWant(b, cats) {
   if (b.want === undefined || b.want === null) {
     if (b.own !== undefined && b.own !== null) throw fail(400, 'err.invalid', { field: 'field.own' });
     return { want: null, own: [] };
   }
   const w = b.want;
-  if (!Array.isArray(w) || !w.length || !w.every((c) => ORDER.includes(c)) || new Set(w).size !== w.length) throw fail(400, 'err.invalid', { field: 'field.want' });
+  const known = (c) => ORDER.includes(c) || (Number.isInteger(c) && cats.some((x) => x.id === c));
+  if (!Array.isArray(w) || !w.length || w.length > 20 || !w.every(known) || new Set(w).size !== w.length) throw fail(400, 'err.invalid', { field: 'field.want' });
   const o = b.own ?? [];
   const ok = (x) => x && typeof x === 'object' && ORDER.includes(x.category) && COLORS.includes(x.color) && (x.style == null || STYLES.includes(x.style));
   if (!Array.isArray(o) || o.length > 5 || !o.every(ok)) throw fail(400, 'err.invalid', { field: 'field.own' });
-  return { want: ORDER.filter((c) => w.includes(c)), own: o.map((x) => ({ category: x.category, color: x.color, style: x.style ?? null })) };
+  return { want: [...ORDER, ...cats.map((x) => x.id)].filter((c) => w.includes(c)), own: o.map((x) => ({ category: x.category, color: x.color, style: x.style ?? null })) };
 }
+
+// The store's categories a customer can pick (not hidden), in the shop's order. Task 36.
+export const shownCategories = (db, storeId) => db('categories as c').join('stores as st', 'st.organization_id', 'c.organization_id')
+  .where('st.id', storeId).where('c.hidden', false).orderBy(['c.sort', 'c.id']).select('c.id', 'c.name', 'c.name_ru', 'c.role', 'c.image_url', 'c.size_kind', 'c.sizes');
+const catsFor = (db, b) => (Array.isArray(b.want) && b.want.some(Number.isInteger) && Number.isInteger(b.store_id) && b.store_id > 0 ? shownCategories(db, b.store_id) : []);
 
 // The customer part of a /recommend body: store, gender, sizes, budget and (task 30) want/own. A single-item request
 // needs only the sizes of the wanted categories (top for outerwear/top, bottom for bottom; shoes stay optional).
-function parseRequest(b) {
+function parseRequest(b, cats = []) {
   if (!Number.isInteger(b.store_id) || b.store_id < 1) throw fail(400, 'err.invalid', { field: 'field.store' });
   if (!['male', 'female'].includes(b.gender)) throw fail(400, 'err.invalid', { field: 'field.gender' });
-  const { want, own } = parseWant(b);
-  const needs = (key) => !want || want.some((c) => sizeKey[c] === key);
+  const { want, own } = parseWant(b, cats);
+  const role = (c) => (Number.isInteger(c) ? cats.find((x) => x.id === c).role : c);
+  const needs = (key) => !want || want.some((c) => sizeKey[role(c)] === key);
   const sizes = {
     top: pick(b.sizes?.top, sizesFor('top'), 'field.top_size', needs('top')),
     bottom: pick(b.sizes?.bottom, sizesFor('bottom'), 'field.bottom_size', needs('bottom')),
@@ -83,7 +92,8 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
 
   r.post('/', async (req, res) => {
     const b = req.body ?? {};
-    const { sizes, budget, fit, method, want, own } = parseRequest(b);
+    const cats = await catsFor(db, b);
+    const { sizes, budget, fit, method, want, own } = parseRequest(b, cats);
     const photo = parsePhoto(b.photo); // memory only: goes to Claude for this request, never stored or logged
 
     const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon', 'bundle_percent');
@@ -92,7 +102,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     const ctx = { temperature: w.temperature, raining: w.raining, budget };
     const load = (spread) => filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread, fit });
     const mode = want ? 'single' : 'outfit';
-    if (want) return single(req, res, { b, store, w, sizes, budget, method, fit, want, own, photo, load });
+    if (want) return single(req, res, { b, store, w, sizes, budget, method, fit, want, own, photo, load, cats });
     const { candidates, ...rules } = await ruleOutfits(load, ctx);
     let result = { ...rules, style_guess: null, source: 'rules' };
     // No rule outfit means a required category is empty, so Claude could not build one either. Without outerwear
@@ -117,14 +127,15 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
   });
 
   // Task 30, single items: rule picks per wanted category; Claude (when there) only re-orders the items the rules chose.
-  async function single(req, res, { b, store, w, sizes, budget, method, fit, want, own, photo, load }) {
+  async function single(req, res, { b, store, w, sizes, budget, method, fit, want, own, photo, load, cats }) {
     const ctx = { temperature: w.temperature, raining: w.raining, budget, want, own };
     let { groups, relaxed } = await ruleSingles(load, ctx);
     let style_guess = null, source = 'rules';
     const shownItems = () => groups.flatMap((g) => g.items);
     if (stylist && shownItems().length && allowAi(req.ip)) {
       try {
-        const answer = await withDeadline((signal) => stylist({ mode: 'single', photo, weather: w, sizes, budget, want, own, candidates: shownItems(), lang: langOf(req) }, signal), stylistTimeoutMs);
+        const answer = await withDeadline((signal) => stylist({ mode: 'single', photo, weather: w, sizes, budget, own,
+          want: want.map((c) => (Number.isInteger(c) ? cats.find((x) => x.id === c).name : c)), candidates: shownItems(), lang: langOf(req) }, signal), stylistTimeoutMs);
         const ai = applyRanking(answer, groups);
         if (ai) {
           ({ groups, style_guess } = ai);
@@ -172,7 +183,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
   // same in-stock candidates (customer's sizes, the answer's temperature window). With `rec`, the options are kept for the bundle rule.
   r.post('/swap', async (req, res) => {
     const b = req.body ?? {};
-    const { sizes, budget, fit } = parseRequest(b);
+    const { sizes, budget, fit } = parseRequest(b, await catsFor(db, b));
     const ids = (v, max) => {
       if (!Array.isArray(v) || v.length > max || !v.every((x) => Number.isInteger(x) && x > 0) || new Set(v).size !== v.length) throw fail(400, 'err.invalid', { field: 'field.items' });
       return v;
@@ -226,9 +237,9 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     const items = [];
     for (const i of b.items) {
       if (!Number.isInteger(i?.product_id) || typeof i.size !== 'string') throw fail(400, 'err.item_missing');
-      const p = await db('products').where({ id: i.product_id, store_id: row.store_id }).first('name', 'name_ru', 'category');
+      const p = await db('products').where({ id: i.product_id, store_id: row.store_id }).first('name', 'name_ru', 'category', 'sizes');
       if (!p) throw fail(404, 'err.product_not_found');
-      if (!sizesFor(p.category).includes(i.size)) throw fail(400, 'err.product_size', { product: p });
+      if (!sizesOf(p).includes(i.size)) throw fail(400, 'err.product_size', { product: p });
       // Main rule: only what is on the shelf now (free stock > 0) is offered, for a try-on as well.
       const free = await db('product_stock').where({ product_id: i.product_id, size: i.size }).whereRaw('quantity - reserved > 0').first('id');
       if (!free) throw fail(409, 'err.out_of_stock', { product: p, size: i.size === 'ONE' ? 'common.size_one' : i.size });
@@ -258,14 +269,16 @@ export function createStoreRouter(db, { weather, profiles = false }) {
     const store = Number.isInteger(id) && id > 0 ? await db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon', 'organization_id') : undefined;
     if (!store) throw fail(404, 'err.store_not_found');
     const w = await weather(store);
-    const rows = await db('products as p')
+    const rows = await visible(db('products as p'))
       .where('p.store_id', id).whereIn('p.category', LOOK).whereNotNull('p.image_url')
       .whereRaw('p.temp_min <= cast(? as real) and p.temp_max >= cast(? as real)', [w.temperature, w.temperature])
       .whereExists(db('product_stock as s').whereRaw('s.product_id = p.id').whereRaw('s.quantity - s.reserved > 0'))
       .orderBy('p.id').select('p.category', 'p.image_url');
     const looks = LOOK.map((c) => rows.find((p) => p.category === c)).filter(Boolean);
     // profile: show the task 27 buttons (needs the Telegram bot and an organisation to scope the profile to).
-    res.json({ id: store.id, name: store.name, city: store.city, weather: w, looks, profile: profiles && store.organization_id != null });
+    // categories (task 36): the shop's shown categories for the catalogue filter and the "Nima kerak?" chips.
+    res.json({ id: store.id, name: store.name, city: store.city, weather: w, looks, profile: profiles && store.organization_id != null,
+      categories: await shownCategories(db, id) });
   });
   return r;
 }

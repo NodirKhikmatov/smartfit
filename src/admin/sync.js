@@ -4,7 +4,7 @@
 import express from 'express';
 import { createHash } from 'node:crypto';
 import { fail, langOf, errorBody } from './routes.js';
-import { sizesFor } from '../db/seed.js';
+import { sizesOf } from '../db/seed.js';
 import { audit } from './audit.js';
 
 export const SYNC_MAX_ITEMS = 1000;
@@ -43,9 +43,9 @@ export function createSyncRouter(db) {
           if (seen.has(`${sku}\n${size}`)) { row(fail(400, 'err.sync_dup')); continue; }
           seen.add(`${sku}\n${size}`);
           // The key's store only: another store's SKU is simply unknown here.
-          const p = await trx('products').where({ store_id: key.store_id, sku }).first('id', 'category');
+          const p = await trx('products').where({ store_id: key.store_id, sku }).first('id', 'category', 'sizes');
           if (!p) { row(fail(400, 'err.sync_sku', { sku })); continue; }
-          if (!sizesFor(p.category).includes(size)) { row(fail(400, 'err.bad_size', { size })); continue; }
+          if (!sizesOf(p).includes(size)) { row(fail(400, 'err.bad_size', { size })); continue; }
           const cur = await trx('product_stock').where({ product_id: p.id, size }).first();
           if (cur?.quantity === quantity) { unchanged++; continue; }
           // Conditional on reserved, so a cart hold that lands meanwhile can't be pushed under (the CHECK would 500).

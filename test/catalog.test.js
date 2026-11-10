@@ -73,7 +73,7 @@ test('catalogue: only items and sizes with free stock; filters by category, gend
   for (const p of m) assert.ok((await free(p.id, 'M')) > 0);
   const band = await list('min=300000&max=800000');
   assert.ok(band.length && band.every((p) => p.unit_price >= 300000 && p.unit_price <= 800000), 'price is what the customer pays');
-  for (const q of ['category=hat', 'gender=unisex', 'size=XXXL', 'min=-1', 'max=1e9']) assert.equal((await call(`/catalog/${tash}?${q}`)).status, 400, q);
+  for (const q of ['category=hat', 'gender=unisex', 'size=%3Cb%3E', 'min=-1', 'max=1e9']) assert.equal((await call(`/catalog/${tash}?${q}`)).status, 400, q);
   assert.equal((await call('/catalog/9999')).status, 404);
 });
 

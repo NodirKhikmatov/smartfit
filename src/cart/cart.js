@@ -4,7 +4,7 @@
 import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { fail } from '../admin/routes.js';
-import { sizesFor } from '../db/seed.js';
+import { sizesOf } from '../db/seed.js';
 import { unitPrice } from '../recommend/engine.js';
 import { REC } from '../recommend/routes.js';
 import { qrSvg, publicBase } from '../qr.js';
@@ -159,14 +159,15 @@ const promoError = (pr) => fail(409, pr.promo.error, pr.promo.error === 'err.pro
 // Prices always come from the products table, never from the request.
 async function cartView(db, cart, payments) {
   const store = await storeOf(db, cart.store_id);
-  const rows = await db('cart_items as c').join('products as p', 'p.id', 'c.product_id').where('c.cart_id', cart.id).orderBy('c.id')
-    .select('c.id', 'c.product_id', 'c.size', 'c.quantity', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.price', 'p.discount_price', 'p.image_url', 'p.shelf_location');
+  const rows = await db('cart_items as c').join('products as p', 'p.id', 'c.product_id').leftJoin('categories as k', 'k.id', 'p.category_id')
+    .where('c.cart_id', cart.id).orderBy('c.id')
+    .select('c.id', 'c.product_id', 'c.size', 'c.quantity', 'p.name', 'p.name_ru', 'p.category', 'k.name as category_name', 'k.name_ru as category_name_ru', 'p.sizes as size_list', 'p.color', 'p.price', 'p.discount_price', 'p.image_url', 'p.shelf_location');
   const free = await db('product_stock').whereIn('product_id', rows.map((r) => r.product_id)).whereRaw('quantity - reserved > 0').select('product_id', 'size');
-  const items = rows.map((r) => ({
+  const items = rows.map(({ size_list, ...r }) => ({
     ...r,
     unit_price: unitPrice(r),
     line_total: unitPrice(r) * r.quantity,
-    sizes: sizesFor(r.category).filter((s) => s === r.size || free.some((f) => f.product_id === r.product_id && f.size === s)),
+    sizes: sizesOf({ category: r.category, sizes: size_list }).filter((s) => s === r.size || free.some((f) => f.product_id === r.product_id && f.size === s)),
   }));
   const pr = await pricing(db, cart, store, items);
   const off = pr.subtotal - pr.goods;
@@ -185,7 +186,7 @@ async function cartView(db, cart, payments) {
 
 export async function orderView(db, order) {
   const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').where('i.order_id', order.id).orderBy('i.id')
-    .select('i.id', 'i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price', 'i.discount', 'i.returned', 'i.fit');
+    .select('i.id', 'i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.sizes', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price', 'i.discount', 'i.returned', 'i.fit');
   const { id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total, promo_code, promo_discount, bundle_discount } = order;
   return {
     id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total,
@@ -287,9 +288,9 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
       const [{ n }] = await trx('cart_items').where({ cart_id: cart.id }).sum({ n: 'quantity' });
       if (Number(n ?? 0) + items.length > MAX_UNITS) throw fail(409, 'err.cart_full', { max: MAX_UNITS });
       for (const { product_id, size } of items) {
-        const p = await trx('products').where({ id: product_id, store_id: cart.store_id }).first('name', 'name_ru', 'category');
+        const p = await trx('products').where({ id: product_id, store_id: cart.store_id }).first('name', 'name_ru', 'category', 'sizes');
         if (!p) throw fail(404, 'err.product_not_found');
-        if (!sizesFor(p.category).includes(size)) throw fail(400, 'err.product_size', { product: p });
+        if (!sizesOf(p).includes(size)) throw fail(400, 'err.product_size', { product: p });
         if (!(await hold(trx, product_id, size, 1))) {
           // Task 24: logged after the rollback (below) as missed demand, once per results screen or cart.
           throw Object.assign(fail(409, 'err.out_of_stock', { product: p, size: size === 'ONE' ? 'common.size_one' : size }),
@@ -330,8 +331,8 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
       const line = await trx('cart_items').where({ id: Number(req.params.id) || 0, cart_id: cart.id }).first();
       if (!line) throw fail(404, 'err.not_in_cart');
       if (size === line.size) return cart;
-      const p = await trx('products').where({ id: line.product_id }).first('category');
-      if (typeof size !== 'string' || !sizesFor(p.category).includes(size)) throw fail(400, 'err.invalid', { field: 'field.size' });
+      const p = await trx('products').where({ id: line.product_id }).first('category', 'sizes');
+      if (typeof size !== 'string' || !sizesOf(p).includes(size)) throw fail(400, 'err.invalid', { field: 'field.size' });
       if (await trx('cart_items').where({ cart_id: cart.id, product_id: line.product_id, size }).first()) throw fail(409, 'err.size_in_cart');
       if (!(await hold(trx, line.product_id, size, line.quantity))) {
         // Missed demand only when that size has none left (one unit wanted), not when there are fewer than the line needs.

@@ -306,7 +306,15 @@ a.kpi:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); col
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: var(--s-3); }
 .grid .check { align-self: end; min-height: var(--control-h); }
 .stock { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr)); gap: var(--s-2); }
-#imgPreview { max-width: 10rem; max-height: 10rem; border-radius: var(--r-md); display: block; margin: var(--s-2) 0; }
+#imgPreview, .cat-photo { max-width: 10rem; max-height: 10rem; border-radius: var(--r-md); display: block; margin: var(--s-2) 0; }
+.grid .span-2 { grid-column: 1 / -1; }
+.grid textarea { min-height: 4rem; }
+/* Task 36: free details (name → value) and the categories page */
+.details { display: grid; gap: var(--s-2); margin-bottom: var(--s-2); }
+.detail-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; gap: var(--s-2); align-items: center; }
+.cats-table .order { display: flex; gap: var(--s-1); }
+.cats-table .order .up .icon { transform: rotate(180deg); }
+.cats-table .badge { margin-left: var(--s-2); }
 #importErrors, #wizImportErrors { max-height: 15rem; overflow: auto; font-size: var(--text-sm); padding-left: var(--s-5); }
 dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }
 
