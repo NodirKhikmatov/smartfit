@@ -10,6 +10,7 @@ import { createAdmin } from '../src/admin/routes.js';
 import { filterCandidates, ruleOutfits, singleItems, MAX_SINGLE } from '../src/recommend/engine.js';
 import { applyRanking } from '../src/recommend/stylist.js';
 import { weeklyReport } from '../src/notify/telegram.js';
+import { funnelStats } from '../src/demand.js';
 import { sizeNeeds, sizesReady, toRequest, routeData } from '../public/app/flow.js';
 
 process.env.ADMIN_TOKEN_SECRET = 'test-secret';
@@ -176,6 +177,9 @@ test('"Bor kiyimimga mos": own changes the order, never the stock rule', async (
   assert.deepEqual(ids([]), [red.id, black.id, grey.id], 'without own: the rank (cheapest first with a budget)');
   assert.deepEqual(ids([{ category: 'bottom', color: 'sariq', style: null }]), [black.id, grey.id, red.id], 'a bright item owned: no second bright colour first');
   assert.deepEqual(ids([{ category: 'bottom', color: 'qora', style: 'classic' }]), [black.id, red.id, grey.id], 'same style first');
+  // Casual owned first, classic second: the classic black top is not pushed back (only the first style used to count).
+  assert.deepEqual(ids([{ category: 'shoes', color: 'oq', style: 'casual' }, { category: 'bottom', color: 'qora', style: 'classic' }]), [black.id, red.id, grey.id],
+    'every owned style counts, not only the first');
 
   const sizes = { top: 'M', bottom: 'M' };
   const plain = shown(await recommend({ sizes, want: ['top', 'bottom'] }));
@@ -243,6 +247,17 @@ test('mode logging: results, funnel and missed demand carry outfit|single and no
   assert.equal((await call('POST', '/api/funnel', { store_id: store, visit, step: 'start' })).status, 204, 'mode optional (start screen)');
   const ev = await db('funnel_events').where({ visit }).orderBy('id');
   assert.deepEqual(ev.map((e) => [e.step, e.mode]), [['outfits', 'single'], ['start', null]]);
+  // The funnel per mode: a visit counts under its chosen mode at every step it reached; one that never chose is in neither.
+  const other = 'b'.repeat(32), none = 'c'.repeat(32);
+  for (const step of ['size', 'outfits', 'cart']) await call('POST', '/api/funnel', { store_id: store, visit: other, step, mode: 'outfit' });
+  await call('POST', '/api/funnel', { store_id: store, visit: none, step: 'start' });
+  const f = await funnelStats(db, (q, col) => q.where(col, store), { from: Date.now() - 3600_000 });
+  assert.deepEqual(f.per_mode, [
+    { mode: 'outfit', start: 1, size: 1, outfits: 1, cart: 1, order: 0 },
+    { mode: 'single', start: 1, size: 1, outfits: 1, cart: 0, order: 0 },
+  ]);
+  assert.equal(f.total.start, 3);
+  assert.deepEqual((await call('GET', '/api/admin/demand?days=7', undefined, token)).body.funnel.per_mode, f.per_mode, 'on the Talab page');
 
   // A size with no free stock of a wanted category is missed demand with mode single; other categories are not logged.
   const top = await db('products').where({ store_id: store, category: 'top' }).where('temp_min', '<=', 5).where('temp_max', '>=', 5).whereIn('gender', ['male', 'unisex']).orderBy('id').first();

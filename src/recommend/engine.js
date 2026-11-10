@@ -234,17 +234,20 @@ export function swapOptions(candidates, { items, replace, exclude = [], budget =
 // Task 30, single items: up to MAX_SINGLE best items per wanted category instead of whole outfits. Same in-stock
 // candidates and rank (weather, rain, budget) as the outfits; within budget per item, and when nothing in a category
 // fits, its cheapest items with `over_budget` = how far the cheapest one is over. own = [{ category, color, style }] the
-// customer already has: re-ranks with the outfit style/colour score, so it only changes the order (never adds an item).
+// customer already has: re-ranks with the outfit style/colour rules (a style none of them has +2, a second bright colour
+// +50), so it only changes the order (never adds an item). Every owned item's style counts, not just the first.
 // Each item gets its cheapest cheaper unshown item of the category (`alternative`) and the task 25 pairs.
 // → [{ category, items: [{ ...item, alternative, pairs }], over_budget }].
 export const MAX_SINGLE = 6;
 export function singleItems(candidates, { want, own = [], temperature, raining, budget = null }) {
   const pool = rankPool(candidates, { temperature, raining, budget });
+  const styles = new Set(own.map((x) => x.style).filter(Boolean)), clash = own.some(bright);
+  const score = (p, i) => i + (styles.size && p.style && !styles.has(p.style) ? 2 : 0) + (raining && !p.waterproof ? 10 : 0) + (clash && bright(p) ? 50 : 0);
   return want.map((category) => {
     const all = pool[category];
     const fits = budget ? all.filter((p) => p.unit_price <= budget) : all;
     const list = fits.length ? fits : all;
-    const items = list.map((p, i) => ({ p, s: pickScore(p, i, own, raining) })).sort((a, b) => a.s - b.s).slice(0, MAX_SINGLE).map(({ p }) => p);
+    const items = list.map((p, i) => ({ p, s: score(p, i) })).sort((a, b) => a.s - b.s).slice(0, MAX_SINGLE).map(({ p }) => p);
     const shown = new Set(items.map((p) => p.id));
     const cheaper = (p) => all.filter((x) => !shown.has(x.id) && x.unit_price < p.unit_price).sort((a, b) => a.unit_price - b.unit_price || a.id - b.id)[0] ?? null;
     return {

@@ -1017,6 +1017,9 @@ async function loadDemand() {
   else funnelChart($('dropFunnel'), DROP.map(([k, label]) => ({ label: t(label), value: f.total[k] })), { pct: (v, base) => (base ? `${dec(share(v, base))}%` : '—') });
   const head = (first) => el('tr', {}, el('th', { textContent: t(first) }), ...DROP.map(([, label]) => el('th', { className: 'num', textContent: t(label) })));
   const cells = (x) => DROP.map(([k]) => el('td', { className: 'num', textContent: x[k] }));
+  // Task 30: the same funnel for customers who chose a whole outfit and for those who came for single items.
+  $('dropModeHead').replaceChildren(head('adm.drop.mode'));
+  $('dropModeRows').replaceChildren(...f.per_mode.map((m) => el('tr', {}, el('td', { textContent: t(MODE_NAME[m.mode]) }), ...cells(m))));
   $('dropKioskHead').replaceChildren(head('adm.drop.kiosk'));
   if (!f.per_kiosk.length) emptyRow($('dropKioskRows'), 6, { ic: 'store', title: t('adm.drop.empty'), text: t('adm.drop.empty_text') });
   else $('dropKioskRows').replaceChildren(...f.per_kiosk.map((k) => el('tr', {},
@@ -1030,6 +1033,7 @@ async function loadDemand() {
   $('dropDayRows').replaceChildren(...f.per_day.slice().reverse().map((x) => el('tr', {}, el('td', { textContent: day(x.day) }), ...cells(x))));
 }
 
+const MODE_NAME = { outfit: 'adm.drop.mode_outfit', single: 'adm.drop.mode_single' };
 const METHOD_NAME = { full: 'adm.method.full', torso: 'adm.method.torso', upper: 'adm.method.upper', usual: 'adm.method.usual', tape: 'adm.method.tape', body: 'adm.method.body', profile: 'adm.method.profile' };
 
 // ---------- QR codes for the phone app, one card per store.

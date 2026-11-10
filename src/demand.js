@@ -53,23 +53,27 @@ export async function demandItems(db, scope, { from, to = null, limit = 200 }) {
 
 // Funnel drop-off: a visit counts at every step up to the furthest one it reached (a refresh mid-way starts a new visit
 // that may lack the early steps). Per Tashkent day (`keys`, zero-filled; the visit's first event decides the day) and
-// per kiosk (short id; null = phone).
+// per kiosk (short id; null = phone) and (task 30) per mode: the visit's first logged mode, outfit or single; a visit
+// that never chose (left at the start) is in neither row.
 // shortcut: aggregates in JS over the raw events, like /stats; move to SQL if a period holds ~100k events.
 export async function funnelStats(db, scope, { from, to = null, keys = [] }) {
   const rows = await range(scope(db('funnel_events'), 'store_id'), 'created_at', dbTime(from), to && dbTime(to))
-    .orderBy('id').select('visit', 'step', 'device', 'store_id', 'created_at');
+    .orderBy('id').select('visit', 'step', 'device', 'store_id', 'mode', 'created_at');
   const visits = new Map();
   for (const r of rows) {
-    const v = visits.get(r.visit) ?? { day: dayKey(msOf(r.created_at)), store_id: r.store_id, device: null, reach: -1 };
+    const v = visits.get(r.visit) ?? { day: dayKey(msOf(r.created_at)), store_id: r.store_id, device: null, mode: null, reach: -1 };
     v.reach = Math.max(v.reach, FUNNEL_STEPS.indexOf(r.step));
     v.device ??= r.device;
+    v.mode ??= r.mode;
     visits.set(r.visit, v);
   }
   const zero = () => Object.fromEntries(FUNNEL_STEPS.map((s) => [s, 0]));
   const add = (o, reach) => FUNNEL_STEPS.forEach((s, i) => { if (i <= reach) o[s]++; });
   const total = zero(), perDay = new Map(keys.map((k) => [k, zero()])), perKiosk = new Map();
+  const perMode = Object.fromEntries(MODES.map((m) => [m, zero()]));
   for (const v of visits.values()) {
     add(total, v.reach);
+    if (perMode[v.mode]) add(perMode[v.mode], v.reach);
     if (perDay.has(v.day)) add(perDay.get(v.day), v.reach);
     const k = `${v.store_id}:${v.device ?? ''}`;
     if (!perKiosk.has(k)) perKiosk.set(k, { store_id: v.store_id, kiosk: v.device ? v.device.slice(0, 6) : null, ...zero() });
@@ -79,6 +83,7 @@ export async function funnelStats(db, scope, { from, to = null, keys = [] }) {
     total,
     per_day: keys.map((day) => ({ day, ...perDay.get(day) })),
     per_kiosk: [...perKiosk.values()].sort((a, b) => b.start - a.start || a.store_id - b.store_id),
+    per_mode: MODES.map((mode) => ({ mode, ...perMode[mode] })),
   };
 }
 
