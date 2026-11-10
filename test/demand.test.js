@@ -95,7 +95,7 @@ test('missed demand from the cart: a sold-out size is logged once per session, a
   // A customer who checks out: their name and phone go to the order, never into either log.
   const done = await call('POST', `/api/cart/${cart.token}/checkout`, { fulfillment: 'pickup', name: NAME, phone: PHONE });
   assert.equal(done.status, 201);
-  for (const [table, cols] of [['missed_demand', ['created_at', 'id', 'product_id', 'session', 'size', 'source', 'store_id']], ['funnel_events', ['created_at', 'device', 'id', 'step', 'store_id', 'visit']]]) {
+  for (const [table, cols] of [['missed_demand', ['created_at', 'id', 'mode', 'product_id', 'session', 'size', 'source', 'store_id']], ['funnel_events', ['created_at', 'device', 'id', 'mode', 'step', 'store_id', 'visit']]]) {
     assert.deepEqual(Object.keys(await db(table).columnInfo()).sort(), cols, `${table}: no personal columns`);
     const dump = JSON.stringify(await db(table));
     assert.ok(!dump.includes('998907776655') && !dump.includes('Dilnoza'), `${table}: no phone or name`);
@@ -214,7 +214,8 @@ test('weekly report text: sales, conversion, top items, missed demand top 5, low
   const text = await weeklyReport(db, s, next);
   const lines = text.split('\n');
   assert.match(lines[1], /^Savdo: 1 ta buyurtma, [\d ]+ so'm$/);
-  assert.equal(lines[2], 'Konversiya: 33% (3 ta tashrifdan 1 ta buyurtma)');
+  assert.equal(lines[2], 'Obraz: 0 ta, alohida kiyim: 0 ta, katalog: 1 ta', 'task 30: sales by how the customer chose');
+  assert.equal(lines[3], 'Konversiya: 33% (3 ta tashrifdan 1 ta buyurtma)');
   assert.ok(text.includes(`Eng ko'p sotilgan:\n• ${top.name} — 1 dona`), text);
   assert.ok(text.includes(`Talab bor, lekin qolmagan (top 5):\n• ${top.name} — L: 3 marta`), text);
   assert.ok(lines.filter((l) => l.startsWith('• ') && l.includes(' marta')).length <= 5);

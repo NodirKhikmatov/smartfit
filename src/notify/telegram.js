@@ -5,7 +5,7 @@
 import { qrSvg } from '../qr.js';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { smsSender } from './sms.js';
-import { fittingView, dayStart, DAY_MS } from '../admin/routes.js';
+import { fittingView, dayStart, DAY_MS, salesByMode } from '../admin/routes.js';
 import { demandItems, funnelStats } from '../demand.js';
 import { dbTime } from '../recommend/routes.js';
 import { handleProfileMessage } from '../profile.js';
@@ -157,6 +157,7 @@ export async function weeklyReport(db, store, week) {
   const paid = () => db('orders as o').where('o.store_id', store.id).where('o.payment_status', 'paid').whereNot('o.status', 'cancelled')
     .where('o.paid_at', '>=', iso(from)).where('o.paid_at', '<', iso(to));
   const [{ n, revenue }] = await paid().count({ n: '*' }).sum({ revenue: 'o.total' });
+  const by = await salesByMode(db, paid());
   const top = await paid().join('order_items as i', 'i.order_id', 'o.id').join('products as p', 'p.id', 'i.product_id')
     .groupBy('i.product_id', 'p.name').select('p.name').sum({ units: 'i.quantity' })
     .orderBy([{ column: 'units', order: 'desc' }, { column: 'i.product_id' }]).limit(3);
@@ -170,6 +171,7 @@ export async function weeklyReport(db, store, week) {
   return [
     `${store.name}: haftalik hisobot, ${ddmm(from)}–${ddmm(to - 1)}`,
     `Savdo: ${Number(n)} ta buyurtma, ${som(Number(revenue ?? 0))} so'm`,
+    `Obraz: ${by.outfit.orders} ta, alohida kiyim: ${by.single.orders} ta, katalog: ${by.other.orders} ta`,
     f.start ? `Konversiya: ${Math.round((f.order / f.start) * 100)}% (${f.start} ta tashrifdan ${f.order} ta buyurtma)` : "Konversiya: tashriflar bo'lmadi",
     '', 'Eng ko\'p sotilgan:', ...list(top, (x) => `• ${x.name} — ${Number(x.units)} dona`, "yo'q"),
     '', 'Talab bor, lekin qolmagan (top 5):', ...list(missed, (x) => `• ${x.name} — ${sizeText(x.size)}: ${x.missed} marta`, "yo'q"),

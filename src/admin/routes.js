@@ -777,6 +777,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const prevLogs = allLogs.filter((x) => !cur(x)), prevOrders = allOrders.filter((x) => !cur(x));
     res.json({
       days,
+      sales: await salesByMode(db, inScope(req, db('orders as o'), 'o.store_id').where('o.created_at', '>=', dbTime(since))),
       total: logs.length,
       pilot: funnel(logs, orders),
       prev: { total: prevLogs.length, pilot: funnel(prevLogs, prevOrders) },
@@ -857,6 +858,19 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   });
 
   return r;
+}
+
+// Task 30: paid, not cancelled orders of `q` (orders as o, already scoped and windowed) and their revenue by how the
+// customer chose: a whole outfit, single items, or other (no results screen: catalogue, item page). Logs from before
+// task 30 have no mode: they were outfits.
+export async function salesByMode(db, q) {
+  const kind = "case when o.recommendation_id is null or r.id is null then 'other' else coalesce(r.mode, 'outfit') end";
+  const rows = await q.leftJoin('recommendation_logs as r', 'r.id', 'o.recommendation_id')
+    .where('o.payment_status', 'paid').whereNot('o.status', 'cancelled')
+    .groupByRaw(kind).select(db.raw(`${kind} as kind`)).count({ n: '*' }).sum({ revenue: 'o.total' });
+  const out = Object.fromEntries(['outfit', 'single', 'other'].map((k) => [k, { orders: 0, revenue: 0 }]));
+  for (const x of rows) if (out[x.kind]) out[x.kind] = { orders: Number(x.n), revenue: Number(x.revenue ?? 0) };
+  return out;
 }
 
 // Funnel per results screen: shown → accepted (added to cart) → tried on → bought (a paid order from it), plus order totals.

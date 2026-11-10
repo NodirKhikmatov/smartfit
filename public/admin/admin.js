@@ -358,6 +358,7 @@ async function loadDashboard(quiet) {
   drawTrend($('dashChart'), $('dashChartTitle'), $('dashChartSub'), s, metric);
   $('dashFunnelSub').textContent = t('adm.stats.days', { n: days });
   drawFunnel($('dashFunnel'), s.pilot);
+  $('dashSales').textContent = salesLine(s.sales);
   $('dashTopSub').textContent = t('adm.stats.days', { n: days });
   $('dashTop').replaceChildren(...(d.top_sold.length ? d.top_sold.map((x) => el('li', {},
     thumb(x),
@@ -386,6 +387,10 @@ async function loadDashboard(quiet) {
     el('span', { className: `badge ${k.online ? 'ok' : 'off'}`, textContent: t(k.online ? 'adm.dash.online' : 'adm.dash.offline') }))) :
     [el('li', { className: 'li-empty' }, emptyState({ ic: 'info', title: t('adm.dash.kiosks_none'), text: t('adm.dash.kiosks_none_text') }))]));
 }
+
+// Task 30: paid orders of the period by how the customer chose: a whole outfit, single items, or the catalogue.
+const salesPart = (x) => t('adm.sales.part', { n: x.orders, sum: money(x.revenue) });
+const salesLine = (x) => t('adm.sales.split', { outfit: salesPart(x.outfit), single: salesPart(x.single), other: salesPart(x.other) });
 
 // Line chart of revenue or recommendations per day, with the period total and its change against the previous period.
 function drawTrend(box, title, sub, s, metric) {
@@ -958,6 +963,7 @@ async function loadStats() {
     el('td', { textContent: d.day }), el('td', { className: 'num', textContent: d.count }), el('td', { className: 'num', textContent: d.orders }), el('td', { className: 'num', textContent: som(d.revenue) }))));
   $('statsFunnelSub').textContent = t('adm.stats.orders', { orders: f.orders, delivery: f.delivery_orders });
   drawFunnel($('statsFunnel'), f);
+  $('statsSales').textContent = salesLine(s.sales);
   $('topRows').replaceChildren(...(s.top.length ? s.top.map((x) => el('li', {},
     el('span', { className: 'rank-name' }, el('strong', { textContent: x.name ? productName(x) : t('adm.stats.deleted', { id: x.product_id }) }), el('span', { className: 'muted', textContent: cat(x.category) })),
     el('span', { className: 'rank-num num' }, el('strong', { textContent: t('adm.stats.times_n', { n: x.count }) })))) :

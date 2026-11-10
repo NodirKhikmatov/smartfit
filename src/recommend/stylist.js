@@ -51,16 +51,39 @@ export function parsePhoto(v) {
   return m[1];
 }
 
+// Task 30, single items: the rules already chose the items per category; Claude only puts them in order.
+export const SINGLE_PROMPT = `Sen kiyim do'konidagi stilistsan. Mijoz to'liq obraz emas, faqat WANT dagi toifalardan bitta kiyim qidiryapti. Vazifang: CANDIDATES ni eng mosidan boshlab tartiblash. Qoidalar:
+- Faqat CANDIDATES ro'yxatidagi product_id larni ishlat. Boshqa kiyim o'ylab topma.
+- Bugungi ob-havoga mosini oldinga qo'y.
+- OWN — mijozda bor kiyimlar: ular bilan rangi va uslubi mos keladiganini oldinga qo'y; neytral ranglar (qora, oq, kulrang, to'q ko'k, bej) hammasi bilan, ikkita yorqin rang bir-biriga mos emas.
+- Rasmga qarab mijozning uslubini taxmin qil (klassik, sport, kundalik).
+- Mijozning tashqi ko'rinishi haqida baho berma.`;
+export const SUBMIT_RANKING = {
+  name: 'submit_ranking',
+  input_schema: {
+    type: 'object',
+    required: ['product_ids'],
+    properties: {
+      style_guess: { type: 'string' },
+      product_ids: { type: 'array', items: { type: 'integer' } },
+    },
+  },
+};
+
 // Returns ask(input, signal) → the submit_outfits input or null, or null when there is no key (rules only).
 export function createStylist({ client, apiKey = process.env.ANTHROPIC_API_KEY, model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL } = {}) {
   if (!client && !apiKey) return null;
   client ??= new Anthropic({ apiKey });
   // lang: the customer's UI language. The spec prompt stays Uzbek; a Russian customer gets one extra line and Russian names.
-  return async ({ photo, weather, sizes, budget, candidates, lang = 'uz' }, signal) => {
+  // mode 'single' (task 30): the ranking prompt and tool, plus WANT and OWN.
+  return async ({ photo, weather, sizes, budget, candidates, lang = 'uz', mode = 'outfit', want = null, own = [] }, signal) => {
+    const single = mode === 'single';
+    const tool = single ? SUBMIT_RANKING : SUBMIT_OUTFITS;
     const data = {
       WEATHER: { temperature: weather.temperature, apparent_temperature: weather.apparent_temperature, raining: weather.raining, wind_speed: weather.wind_speed },
       SIZES: sizes,
       BUDGET: budget,
+      ...(single && { WANT: want, OWN: own }),
       CANDIDATES: candidates.map((p) => ({ product_id: p.id, name: (lang === 'ru' && p.name_ru) || p.name, category: p.category, color: p.color, style: p.style, price: p.unit_price, waterproof: p.waterproof })),
     };
     const content = [
@@ -71,16 +94,16 @@ export function createStylist({ client, apiKey = process.env.ANTHROPIC_API_KEY, 
       {
         model,
         max_tokens: 2048,
-        system: SYSTEM_PROMPT,
-        tools: [SUBMIT_OUTFITS],
-        tool_choice: { type: 'tool', name: 'submit_outfits' },
+        system: single ? SINGLE_PROMPT : SYSTEM_PROMPT,
+        tools: [tool],
+        tool_choice: { type: 'tool', name: tool.name },
         output_config: { effort: 'low' },
         messages: [{ role: 'user', content }],
       },
       { signal, timeout: TIMEOUT_MS, maxRetries: 0 }, // one try: the 8 s budget has no room for retries
     );
     if (msg.stop_reason === 'refusal') return null;
-    return msg.content.find((b) => b.type === 'tool_use' && b.name === 'submit_outfits')?.input ?? null;
+    return msg.content.find((b) => b.type === 'tool_use' && b.name === tool.name)?.input ?? null;
   };
 }
 
@@ -133,5 +156,20 @@ export function applyStylist(answer, candidates, { temperature, raining, budget 
     style_guess: text(answer.style_guess, 40) || null,
     over_budget: 0,
     outfits: picked.map((o) => ({ ...o, total: totalOf(o.items), alternative: cheaperAlternative(o.items, pool, used) })),
+  };
+}
+
+// Pure, task 30: puts the rule groups' items in Claude's order. Only IDs the rules already showed move (unknown,
+// repeated or non-integer IDs are ignored, nothing is added or dropped); unranked items keep the rules' order after
+// the ranked ones. null when none of Claude's IDs is shown (→ rules).
+export function applyRanking(answer, groups) {
+  if (!Array.isArray(answer?.product_ids)) return null;
+  const order = new Map();
+  answer.product_ids.forEach((id, i) => Number.isInteger(id) && !order.has(id) && order.set(id, i));
+  const rank = (p) => order.get(p.id) ?? Number.MAX_SAFE_INTEGER;
+  if (!groups.some((g) => g.items.some((p) => order.has(p.id)))) return null;
+  return {
+    style_guess: text(answer.style_guess, 40) || null,
+    groups: groups.map((g) => ({ ...g, items: [...g.items].sort((a, b) => rank(a) - rank(b)) })), // stable sort: rules order for ties
   };
 }

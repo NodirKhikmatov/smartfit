@@ -45,6 +45,11 @@
   <section data-screen="form" hidden>
     <h1 tabindex="-1" data-i18n="kiosk.form.title"></h1>
     <form id="form" novalidate class="form-grid">
+      <fieldset class="span want" aria-describedby="wantHint">
+        <legend data-i18n="kiosk.want.title"></legend>
+        <div class="chips want-chips" id="wantChips"></div>
+        <p class="hint" id="wantHint" data-i18n="kiosk.want.hint"></p>
+      </fieldset>
       <fieldset class="span" aria-describedby="genderErr">
         <legend data-i18n="kiosk.form.gender"></legend>
         <div class="chips two">
@@ -53,18 +58,18 @@
         </div>
         <p class="field-error" id="genderErr"></p>
       </fieldset>
-      <label class="field">
+      <label class="field" data-need="photo">
         <span data-i18n="kiosk.form.height"></span>
         <input name="height" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" data-i18n-placeholder="kiosk.form.height_ph" aria-describedby="heightErr">
         <span class="field-error" id="heightErr"></span>
       </label>
-      <label class="field">
+      <label class="field" data-need="photo">
         <span><span data-i18n="kiosk.form.weight"></span> <span class="hint" data-i18n="kiosk.form.optional"></span></span>
         <input name="weight" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" aria-describedby="weightHint weightErr">
         <span class="hint" id="weightHint" data-i18n="kiosk.form.weight_hint"></span>
         <span class="field-error" id="weightErr"></span>
       </label>
-      <fieldset class="span">
+      <fieldset class="span" data-need="shoes">
         <legend><span data-i18n="kiosk.form.shoes"></span> <span class="hint" data-i18n="kiosk.form.optional"></span></legend>
         <div class="chips sizes-chips" id="shoeChips">
           <label class="wide-chip"><input type="radio" name="shoes" value="" checked><span data-i18n="kiosk.form.shoes_unknown"></span></label>
@@ -123,19 +128,19 @@
       </div>
       <!-- Task 29: a size without a photo, from the usual size or a tape measure -->
       <form id="wayForm" class="way-form" data-way="usual tape" novalidate hidden>
-        <fieldset data-way="usual">
+        <fieldset data-way="usual" data-need="top">
           <legend data-i18n="kiosk.size.usual_top"></legend>
           <div class="chips sizes-chips" id="usualTopChips"></div>
         </fieldset>
-        <fieldset data-way="usual">
+        <fieldset data-way="usual" data-need="bottom">
           <legend data-i18n="kiosk.size.jeans"></legend>
           <div class="chips sizes-chips" id="jeansChips"></div>
         </fieldset>
         <p class="muted" data-way="tape" data-i18n="kiosk.size.tape_intro"></p>
         <div class="tape-grid" data-way="tape">
-          <label class="field"><span data-i18n="kiosk.size.chest"></span><input name="chest" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" data-i18n-placeholder="kiosk.size.cm_ph"></label>
-          <label class="field"><span data-i18n="kiosk.size.waist"></span><input name="tapeWaist" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" data-i18n-placeholder="kiosk.size.cm_ph"></label>
-          <label class="field"><span data-i18n="kiosk.size.hips"></span><input name="hips" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" data-i18n-placeholder="kiosk.size.cm_ph"></label>
+          <label class="field" data-need="top"><span data-i18n="kiosk.size.chest"></span><input name="chest" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" data-i18n-placeholder="kiosk.size.cm_ph"></label>
+          <label class="field" data-need="bottom"><span data-i18n="kiosk.size.waist"></span><input name="tapeWaist" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" data-i18n-placeholder="kiosk.size.cm_ph"></label>
+          <label class="field" data-need="bottom"><span data-i18n="kiosk.size.hips"></span><input name="hips" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" data-i18n-placeholder="kiosk.size.cm_ph"></label>
         </div>
         <fieldset>
           <legend data-i18n="kiosk.size.fit"></legend>

@@ -49,7 +49,7 @@ test('routing: back from results goes to the form with the values kept; forward 
   s.router.go('results', { replace: true }); // the camera step is replaced, so back skips it
   s.win.history.back();
   assert.equal(s.screen, 'form');
-  assert.deepEqual(loadRoute(s.storage).form, FORM, 'form values kept');
+  assert.deepEqual(loadRoute(s.storage).form, { ...FORM, want: null }, 'form values kept (task 30: no want = whole outfit)');
   s.win.history.forward();
   assert.equal(s.screen, 'results');
   s.win.history.back();
@@ -125,8 +125,8 @@ test('privacy: sessionStorage holds only the screen, form numbers and sizes, nev
   }, storage);
   const raw = storage.dump();
   for (const bad of ['data:image', 'base64', 'Dilnoza', '998901234567', 'Amir', 'shoulder']) assert.ok(!raw.includes(bad), bad);
-  assert.deepEqual(Object.keys(JSON.parse(raw)).sort(), ['fit', 'form', 'item', 'manual', 'method', 'screen', 'sizes']);
-  assert.deepEqual(Object.keys(JSON.parse(raw).form).sort(), ['budget', 'gender', 'height', 'shoes', 'weight']);
+  assert.deepEqual(Object.keys(JSON.parse(raw)).sort(), ['fit', 'form', 'item', 'manual', 'method', 'own', 'screen', 'sizes']);
+  assert.deepEqual(Object.keys(JSON.parse(raw).form).sort(), ['budget', 'gender', 'height', 'shoes', 'want', 'weight']);
   // A tampered or broken entry is cleaned up, not trusted.
   storage.setItem('sfRoute', JSON.stringify({ screen: 'admin', form: { height: 'x'.repeat(500), phone: '+99890' }, sizes: { top: '<b>', bottom: 'M' } }));
   assert.deepEqual(loadRoute(storage), routeData({ screen: 'start', form: { height: 'x'.repeat(12) }, sizes: { bottom: 'M' } }));

@@ -11,9 +11,10 @@ const DEVICE = /^[a-f0-9]{16,32}$/; // the kiosk heartbeat id (kiosk.js)
 const iso = (ms) => new Date(ms).toISOString(); // paid_at is written as an ISO string (cart.js)
 
 // Once per session (the results screen's rec token, or the cart token) per product and size; a re-query adds nothing.
-export async function logMissed(db, { storeId, session, items, source }) {
+// mode (task 30): outfit | single for the results screen, null where it isn't known (cart, catalogue).
+export async function logMissed(db, { storeId, session, items, source, mode = null }) {
   if (!items.length || typeof session !== 'string' || !ID.test(session)) return;
-  await db('missed_demand').insert(items.map((i) => ({ store_id: storeId, product_id: i.product_id, size: i.size, session, source })))
+  await db('missed_demand').insert(items.map((i) => ({ store_id: storeId, product_id: i.product_id, size: i.size, session, source, mode })))
     .onConflict(['session', 'product_id', 'size']).ignore();
 }
 
@@ -97,16 +98,18 @@ export async function methodStats(db, scope, { from, to = null }) {
   });
 }
 
-// Public: POST /api/funnel { store_id, visit, step, device? } → 204, once per visit and step. Rate-limited in app.js.
+// Public: POST /api/funnel { store_id, visit, step, device?, mode? } → 204, once per visit and step. Rate-limited in app.js.
+// mode (task 30): outfit | single, once the customer has chosen.
+export const MODES = ['outfit', 'single'];
 export function createFunnelRouter(db) {
   const r = express.Router();
   r.post('/', async (req, res) => {
-    const { store_id, visit, step, device } = req.body ?? {};
-    if (typeof visit !== 'string' || !ID.test(visit) || !FUNNEL_STEPS.includes(step)) throw fail(400, 'err.bad_request');
+    const { store_id, visit, step, device, mode = null } = req.body ?? {};
+    if (typeof visit !== 'string' || !ID.test(visit) || !FUNNEL_STEPS.includes(step) || (mode !== null && !MODES.includes(mode))) throw fail(400, 'err.bad_request');
     if (!Number.isInteger(store_id) || store_id < 1 || !(await db('stores').where({ id: store_id }).first('id'))) throw fail(404, 'err.store_not_found');
     // Only a kiosk this store has heard a heartbeat from counts as one; anything else is a phone.
     const known = typeof device === 'string' && DEVICE.test(device) && (await db('kiosks').where({ store_id, device }).first('id'));
-    await db('funnel_events').insert({ store_id, visit, step, device: known ? device : null }).onConflict(['visit', 'step']).ignore();
+    await db('funnel_events').insert({ store_id, visit, step, device: known ? device : null, mode }).onConflict(['visit', 'step']).ignore();
     res.status(204).end();
   });
   return r;

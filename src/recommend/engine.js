@@ -7,7 +7,7 @@ export const ORDER = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const OUTERWEAR_BELOW = 18;
 const MAX_OUTFITS = 3;
 
-const sizeKey = { outerwear: 'top', top: 'top', bottom: 'bottom', shoes: 'shoes' };
+export const sizeKey = { outerwear: 'top', top: 'top', bottom: 'bottom', shoes: 'shoes' }; // which customer size a category needs
 export const unitPrice = (p) => p.discount_price ?? p.price;
 export const totalOf = (items) => items.reduce((sum, i) => sum + i.unit_price, 0);
 
@@ -50,11 +50,12 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
 // Task 24, missed demand: items this weather and gender would have been offered, but whose size (the customer's,
 // after the fit shift) has no free stock. Accessories and shoes without a size are left out: no size was asked for.
 // → [{ product_id, size }].
-export async function missedItems(db, { storeId, gender, sizes, temperature, fit = null }) {
+// want (task 30): only the categories the customer came for.
+export async function missedItems(db, { storeId, gender, sizes, temperature, fit = null, want = null }) {
   const rows = await db('products as p').leftJoin('product_stock as s', 's.product_id', 'p.id')
     .where('p.store_id', storeId)
     .whereIn('p.gender', [gender, 'unisex'])
-    .whereIn('p.category', Object.keys(sizeKey).filter((c) => sizes[sizeKey[c]]))
+    .whereIn('p.category', Object.keys(sizeKey).filter((c) => sizes[sizeKey[c]] && (!want || want.includes(c))))
     .whereRaw('p.temp_min <= cast(? as real) and p.temp_max >= cast(? as real)', [temperature, temperature])
     .orderBy(['p.id', 's.id'])
     .select('p.id', 'p.category', 'p.fit_offset', 's.size', db.raw('s.quantity - s.reserved as free'));
@@ -228,4 +229,42 @@ export function swapOptions(candidates, { items, replace, exclude = [], budget =
       const next = [...rest, p].sort(byOrder);
       return { swap: p.id, items: next, total: totalOf(next) };
     });
+}
+
+// Task 30, single items: up to MAX_SINGLE best items per wanted category instead of whole outfits. Same in-stock
+// candidates and rank (weather, rain, budget) as the outfits; within budget per item, and when nothing in a category
+// fits, its cheapest items with `over_budget` = how far the cheapest one is over. own = [{ category, color, style }] the
+// customer already has: re-ranks with the outfit style/colour score, so it only changes the order (never adds an item).
+// Each item gets its cheapest cheaper unshown item of the category (`alternative`) and the task 25 pairs.
+// → [{ category, items: [{ ...item, alternative, pairs }], over_budget }].
+export const MAX_SINGLE = 6;
+export function singleItems(candidates, { want, own = [], temperature, raining, budget = null }) {
+  const pool = rankPool(candidates, { temperature, raining, budget });
+  return want.map((category) => {
+    const all = pool[category];
+    const fits = budget ? all.filter((p) => p.unit_price <= budget) : all;
+    const list = fits.length ? fits : all;
+    const items = list.map((p, i) => ({ p, s: pickScore(p, i, own, raining) })).sort((a, b) => a.s - b.s).slice(0, MAX_SINGLE).map(({ p }) => p);
+    const shown = new Set(items.map((p) => p.id));
+    const cheaper = (p) => all.filter((x) => !shown.has(x.id) && x.unit_price < p.unit_price).sort((a, b) => a.unit_price - b.unit_price || a.id - b.id)[0] ?? null;
+    return {
+      category,
+      items: items.map((p) => ({ ...p, alternative: cheaper(p), pairs: pairWith(p, candidates, 3) })),
+      over_budget: budget && !fits.length && all.length ? Math.min(...all.map((p) => p.unit_price)) - budget : 0,
+    };
+  });
+}
+
+// singleItems with the R1 window fallback: widen to ±3, then ±6 °C until every wanted category has 3 in-budget items
+// (in-window items still rank first). Keeps the narrowest window with the most of them. → { groups, relaxed, candidates }.
+export async function ruleSingles(load, ctx) {
+  const score = (groups) => groups.reduce((n, g) => n + (g.over_budget ? 0 : Math.min(g.items.length, 3)), 0);
+  let best;
+  for (const spread of SPREADS) {
+    const candidates = await load(spread);
+    const groups = singleItems(candidates, ctx);
+    if (!best || score(groups) > score(best.groups)) best = { groups, relaxed: spread, candidates };
+    if (score(best.groups) === ctx.want.length * 3) break;
+  }
+  return best;
 }

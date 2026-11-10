@@ -2,9 +2,9 @@ import { watchIdle } from './idle.js';
 import { loadPose, measure, framing, framingHint } from './pose.js';
 import { keypad } from './keypad.js';
 import { kioskShell, attract, kioskDevice, randomId } from './kiosk.js';
-import { CLOTHES, SHOES, JEANS, nextError, fieldError, toRequest, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
+import { CLOTHES, SHOES, JEANS, WANT, nextError, fieldError, toRequest, sizeNeeds, sizesReady, cleanWant, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
 import { icon, confirmDialog, showAfter, skeletonCard, toast } from '/shared/ui.js';
-import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName } from '/shared/i18n.js';
+import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName, COLORS, STYLES } from '/shared/i18n.js';
 
 // One app: /kiosk (big buttons, idle reset) and /m (phone, opened from the store QR).
 const kiosk = location.pathname.startsWith('/kiosk');
@@ -41,6 +41,29 @@ let holdTimer = null, holdDeadline = 0; // cart hold countdown (cart screen)
 
 // Shoe size chips (U11: chips, not a <select>) and budget shortcuts.
 $('shoeChips').append(...SHOES.map((s) => el('label', {}, el('input', { type: 'radio', name: 'shoes', value: s }), el('span', { textContent: s }))));
+// Task 30, "Nima kerak?": a whole outfit (the default) or one or more categories as single items. Picking "To'liq obraz"
+// clears the categories, picking a category clears it, and with nothing picked it comes back.
+$('wantChips').append(...[['outfit', 'kiosk.want.outfit'], ...WANT.map((c) => [c, `cat.${c}`])].map(([v, key]) => {
+  const text = el('span', { textContent: t(key) });
+  text.dataset.i18n = key; // the language switch translates it
+  return el('label', {}, el('input', { type: 'checkbox', name: 'want', value: v, defaultChecked: v === 'outfit' }), text);
+}));
+const wantBoxes = () => [...document.getElementsByName('want')];
+const formWant = () => cleanWant(wantBoxes().filter((b) => b.checked).map((b) => b.value));
+$('wantChips').addEventListener('change', (e) => {
+  const boxes = wantBoxes();
+  if (e.target.value === 'outfit') boxes.forEach((b) => (b.checked = b === e.target));
+  else boxes[0].checked = !boxes.some((b) => b.value !== 'outfit' && b.checked);
+  applyNeeds();
+});
+// Only the inputs the choice needs show (form: height/weight for the size step, shoe sizes; size step: top or bottom parts).
+function applyNeeds() {
+  const n = sizeNeeds(formWant());
+  for (const x of document.querySelectorAll('[data-need]')) x.classList.toggle('need-off', !n[x.dataset.need]);
+  if (!n.photo) for (const f of ['height', 'weight']) showError(f, '');
+}
+const formFields = () => (sizeNeeds(formWant()).photo ? FORM_FIELDS : FORM_FIELDS.filter((f) => f !== 'height' && f !== 'weight'));
+
 const BUDGETS = [500_000, 1_000_000, 2_000_000];
 function budgetChips() {
   const now = form.budget.value.replace(/\s/g, '');
@@ -68,9 +91,9 @@ const switcher = langSwitch(() => {
 $('langBox').replaceChildren(switcher);
 
 // History routing (U2): one entry per screen, so the phone's back button steps back inside the app.
-const formValues = () => ({ gender: form.gender.value, height: form.height.value, weight: form.weight.value, shoes: form.shoes.value, budget: form.budget.value });
-const appState = () => ({ formOk: !!request, sizesOk: !!(request?.sizes.top && request?.sizes.bottom), orderOk: !!lastOrder });
-const remember = () => saveRoute({ screen: current, form: formValues(), sizes: request?.sizes, manual: sizeInfo?.manual, method: request?.method, fit: request?.fit, item: current === 'item' ? itemId : null });
+const formValues = () => ({ gender: form.gender.value, height: form.height.value, weight: form.weight.value, shoes: form.shoes.value, budget: form.budget.value, want: formWant() });
+const appState = () => ({ formOk: !!request, sizesOk: !!request && sizesReady(request.sizes, request.want), orderOk: !!lastOrder });
+const remember = () => saveRoute({ screen: current, form: formValues(), sizes: request?.sizes, manual: sizeInfo?.manual, method: request?.method, fit: request?.fit, item: current === 'item' ? itemId : null, own: request?.own });
 const ENTER = {
   camera: () => showCamera(),
   results: () => (lastResult ? renderResults(lastResult) : loadResults()),
@@ -86,7 +109,9 @@ let visit = null;
 function track(name) {
   if (!FUNNEL[name] || !(storeId > 0)) return;
   visit ??= randomId();
-  api('/funnel', { store_id: storeId, visit, step: FUNNEL[name], ...(kiosk && { device: kioskDevice() }) }).catch(() => {});
+  // mode (task 30): whole outfit or single items, on the steps after the form (on 'start' it is not chosen yet).
+  const mode = request && FUNNEL[name] !== 'start' ? { mode: request.want ? 'single' : 'outfit' } : {};
+  api('/funnel', { store_id: storeId, visit, step: FUNNEL[name], ...(kiosk && { device: kioskDevice() }), ...mode }).catch(() => {});
 }
 const NO_STEPS = ['start', 'done', 'catalog', 'item']; // the catalogue is outside the four-step flow
 function render(name, data = {}) {
@@ -251,9 +276,11 @@ inline(form, FORM_FIELDS);
 
 form.addEventListener('submit', (e) => {
   e.preventDefault();
-  if (!checkAll(form, FORM_FIELDS)) return;
+  if (!checkAll(form, formFields())) return;
   ({ body, request } = toRequest(formValues(), storeId));
   sizeInfo = sizeInput = lastResult = null;
+  // Task 30: shoes (the form's chips) and accessories need no size step.
+  if (!sizeNeeds(request.want).photo) return go('results');
   go('camera');
 });
 
@@ -407,11 +434,13 @@ async function findSizes(input, photo = null) {
   if (cameraScreen.hidden) return;
   sizeInput = input.usual || input.tape ? input : null;
   // Task 29: a partial photo says what it measured; the customer retakes it or goes on with it.
-  if (sizeInfo.method === 'torso' || sizeInfo.method === 'upper') return askPartial(photo);
+  // An upper-body photo measured the top; when only the top is wanted (task 30) there is nothing to ask.
+  if (sizeInfo.method === 'torso' || (sizeInfo.method === 'upper' && sizeNeeds(request.want).bottom)) return askPartial(photo);
   toResults(photo);
 }
 function toResults(photo) {
-  Object.assign(request.sizes, sizeInfo.sizes);
+  const n = sizeNeeds(request.want); // task 30: only the sizes this choice needs
+  for (const k of ['top', 'bottom']) if (n[k]) request.sizes[k] = sizeInfo.sizes[k];
   request.method = sizeInfo.method;
   request.photo = photo ?? undefined; // undefined is left out of the JSON
   lastResult = null;
@@ -524,8 +553,9 @@ wayForm.addEventListener('submit', (e) => {
 const CONFIDENCE = { high: 'kiosk.conf.high', medium: 'kiosk.conf.medium', low: 'kiosk.conf.low' };
 
 function renderSizes() {
+  const want = request.want;
   const stepper = (key) => {
-    const label = cat(key);
+    const label = cat(key === 'top' && want && !want.includes('top') ? 'outerwear' : key); // task 30: only a jacket wanted
     const i = CLOTHES.indexOf(request.sizes[key]);
     const move = (d) => () => {
       request.sizes[key] = CLOTHES[i + d];
@@ -537,8 +567,10 @@ function renderSizes() {
       el('strong', { textContent: request.sizes[key] }),
       el('button', { type: 'button', ariaLabel: t('kiosk.size.bigger', { label }), disabled: i >= CLOTHES.length - 1, onclick: move(1) }, icon('plus')));
   };
+  const keys = ['top', 'bottom'].filter((k) => sizeNeeds(want)[k]);
+  if (!keys.length) return $('sizeBar').replaceChildren(); // task 30: shoes or accessories only
   $('sizeBar').replaceChildren(
-    el('div', { className: 'row' }, stepper('top'), stepper('bottom')),
+    el('div', { className: 'row' }, ...keys.map(stepper)),
     // After a refresh the confidence is gone (it is not stored), so only the − / + hint is left.
     el('p', { className: 'meta', textContent: sizeInfo?.manual ? t('kiosk.size.manual') : t('kiosk.size.adjust', { conf: sizeNote() }).trim() }),
   );
@@ -585,8 +617,12 @@ function renderResults(r) {
   lastResult = r;
   syncs = new Set();
   renderSizes();
+  $('resultsWeather').textContent = [t('kiosk.results.weather', { weather: weatherLine(r.weather) }), r.budget && t(r.groups ? 'kiosk.single.budget' : 'kiosk.results.budget', { sum: som(r.budget) })].filter(Boolean).join(' · ');
+  const h1 = document.querySelector('[data-screen="results"] h1');
+  h1.dataset.i18n = r.groups ? 'kiosk.single.title' : 'kiosk.results.title'; // kept for the language switch
+  h1.textContent = t(h1.dataset.i18n);
+  if (r.groups) return renderSingles(r);
   $('resultsStatus').textContent = r.outfits.length ? t('kiosk.results.found', { n: r.outfits.length }) : t('kiosk.results.none');
-  $('resultsWeather').textContent = [t('kiosk.results.weather', { weather: weatherLine(r.weather) }), r.budget && t('kiosk.results.budget', { sum: som(r.budget) })].filter(Boolean).join(' · ');
   if (!r.outfits.length) {
     $('results').replaceChildren(el('div', { className: 'empty' }, icon('hanger'), el('p', { textContent: t('kiosk.results.empty') })));
     return;
@@ -601,6 +637,86 @@ function renderResults(r) {
     triedCard(),
     ...(store?.profile && !kiosk ? [profileBox(r.outfits.map((o) => o.items.map((i) => i.id)))] : []), // phone flow: keep sizes + these looks
   );
+}
+
+// Task 30: single items, one section per wanted category (best first, in the customer's size, within budget per item).
+function renderSingles(r) {
+  const n = r.groups.reduce((a, g) => a + g.items.length, 0);
+  $('resultsStatus').textContent = n ? t('kiosk.single.found', { n }) : t('kiosk.results.none');
+  const warn = (key, vars) => el('div', { className: 'notice warn' }, icon('info'), el('p', { textContent: t(key, vars) }));
+  $('results').replaceChildren(
+    ownBox(),
+    ...(r.style_guess ? [el('p', { className: 'muted', textContent: t('kiosk.results.style', { style: r.style_guess }) })] : []),
+    ...(r.relaxed ? [el('p', { className: 'muted', textContent: t('kiosk.results.relaxed', { n: r.relaxed }) })] : []),
+    ...r.groups.map((g) => el('section', { className: 'single-group' }, el('h2', { textContent: cat(g.category) }),
+      ...(g.over_budget > 0 ? [warn('kiosk.single.over_budget', { sum: som(g.over_budget) })] : []),
+      g.items.length ? el('div', { className: 'outfits' }, ...g.items.map(singleCard))
+        : el('div', { className: 'empty' }, icon('hanger'), el('p', { textContent: t('kiosk.single.empty', { cat: cat(g.category) }) })))),
+    ...(n ? [triedCard()] : []),
+    ...(store?.profile && !kiosk ? [profileBox()] : []), // phone: keep the sizes (no outfit to keep)
+  );
+}
+
+// One item: the outfit card's photo, row, add and cabin buttons, plus its cheaper variant and "Shu bilan yaxshi ketadi"
+// as optional extras (opened on their item page, never put in the cart for the customer).
+function singleCard(p) {
+  const c = card(productName(p), [p], p.unit_price, '', null);
+  c.querySelector('.items .name').remove(); // the heading already names it
+  c.querySelector('.total').remove(); // one item: its price is the total
+  const body = c.querySelector('.outfit-body');
+  const alt = p.alternative;
+  if (alt) {
+    body.append(el('div', { className: 'alt' }, thumb(alt),
+      el('div', {}, el('strong', { textContent: t('kiosk.outfit.alt') }),
+        el('div', { className: 'meta', textContent: t('kiosk.single.alt_save', { swap: productName(alt), sum: som(p.unit_price - alt.unit_price) }) })),
+      picker(alt),
+      addButton([alt], c, '', 'kiosk.outfit.alt_add')));
+  }
+  if (p.pairs.length) {
+    body.append(el('div', { className: 'pairs-mini' }, el('div', { className: 'meta', textContent: t('kiosk.item.pairs') }),
+      el('ul', {}, ...p.pairs.map((x) => el('li', {}, el('button', { type: 'button', className: 'ghost', onclick: () => go('item', { data: { item: x.id } }) },
+        thumb(x), el('span', { className: 'name', textContent: productName(x) }), el('span', { className: 'meta', textContent: som(x.unit_price) })))))));
+  }
+  return c;
+}
+
+// Task 30, "Bor kiyimimga mos": what the customer already has, from fixed lists (category, colour, optional style). Each
+// change asks the server again: the same in-stock items are re-ranked to go with it.
+const OWN_MAX = 3;
+const ownName = (x) => [cat(x.category), colorName(x.color), x.style && t(`kiosk.style.${x.style}`)].filter(Boolean).join(', ');
+function setOwn(own) {
+  request.own = own;
+  loadResults();
+}
+function ownBox() {
+  const own = request.own ?? [];
+  const box = el('section', { className: 'card own' }, el('h2', { textContent: t('kiosk.own.title') }), el('p', { className: 'muted', textContent: t('kiosk.own.hint') }),
+    ...(own.length ? [el('ul', { className: 'own-list' }, ...own.map((x, i) => el('li', {}, el('span', { textContent: ownName(x) }),
+      el('button', { type: 'button', className: 'icon-btn ghost', ariaLabel: t('kiosk.own.remove', { name: ownName(x) }), onclick: () => setOwn(own.filter((_, j) => j !== i)) }, icon('close')))))] : []));
+  if (own.length < OWN_MAX) {
+    const open = el('button', { type: 'button', className: 'secondary' }, icon('plus'), t('kiosk.own.add'));
+    open.onclick = () => {
+      const f = ownForm();
+      open.replaceWith(f);
+      f.querySelector('.chip').focus();
+    };
+    box.append(open);
+  }
+  return box;
+}
+function ownForm() {
+  const pick = { category: null, color: null, style: null };
+  const err = el('p', { className: 'field-error', role: 'alert' });
+  const row = (key, label, options) => el('div', { className: 'own-row' }, el('div', { className: 'meta', textContent: t(label) }),
+    chipRow(options, null, t(label), (v) => { pick[key] = v; err.textContent = ''; }));
+  return el('div', { className: 'own-form' },
+    row('category', 'kiosk.own.category', WANT.map((c) => [c, cat(c)])),
+    row('color', 'kiosk.own.color', COLORS.map((c) => [c, colorName(c)])),
+    row('style', 'kiosk.own.style', STYLES.map((x) => [x, t(`kiosk.style.${x}`)])),
+    el('button', { type: 'button', className: 'primary', onclick: () => {
+      if (!pick.category || !pick.color) return void (err.textContent = t('kiosk.own.err'));
+      setOwn([...(request.own ?? []), pick]);
+    } }, t('kiosk.own.save')), err);
 }
 
 // Pilot report: the customer says they tried the suggestion on (the shelf numbers are on each item above).
@@ -1416,6 +1532,7 @@ function applyProfile(p) {
     switcher.sync();
   }
   form.reset();
+  applyNeeds();
   budgetChips();
   form.gender.value = p.gender ?? '';
   form.height.value = p.height ?? '';
@@ -1455,6 +1572,7 @@ function reset() {
     switcher.sync();
   }
   form.reset();
+  applyNeeds();
   wayForm.reset();
   wayError('');
   showWay('photo');
@@ -1479,15 +1597,20 @@ if (kiosk) {
 const saved = loadRoute();
 if (saved) {
   for (const [k, v] of Object.entries(saved.form)) {
+    if (k === 'want') continue;
     const f = form.elements[k];
     if (f instanceof RadioNodeList) for (const r of f) r.checked = r.value === v;
     else f.value = v;
   }
+  for (const b of wantBoxes()) b.checked = saved.form.want ? saved.form.want.includes(b.value) : b.value === 'outfit';
+  applyNeeds();
   const r = toRequest(saved.form, storeId);
   if (r) {
     ({ body, request } = r);
-    if (saved.sizes.top && saved.sizes.bottom) {
-      request.sizes = { ...request.sizes, top: saved.sizes.top, bottom: saved.sizes.bottom };
+    if (request.want && saved.own.length) request.own = saved.own;
+    if (sizesReady(saved.sizes, request.want)) {
+      const n = sizeNeeds(request.want);
+      for (const k of ['top', 'bottom']) if (n[k]) request.sizes[k] = saved.sizes[k];
       Object.assign(request, { method: saved.method, fit: saved.fit });
       sizeInfo = { manual: saved.manual };
     }

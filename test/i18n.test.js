@@ -7,7 +7,7 @@ import { seed } from '../src/db/seed.js';
 import { createAdmin, CATEGORIES } from '../src/admin/routes.js';
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from '../src/admin/audit.js';
 import { createStylist } from '../src/recommend/stylist.js';
-import { DICT, LANGS, t, fmt, errorText, productName, colorName } from '../public/shared/i18n.js';
+import { DICT, LANGS, t, fmt, errorText, productName, colorName, STYLES } from '../public/shared/i18n.js';
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 const srcFiles = (dir = 'src') => readdirSync(new URL(`../${dir}`, import.meta.url), { withFileTypes: true })
@@ -78,6 +78,7 @@ test('every key used in code exists, and every dictionary key is used', () => {
     'adm.pay': ['pending', 'paid', 'cancelled'],
     'kiosk.track.step': ['placed', 'paid', 'packing', 'shipping', 'delivered', 'handed'],
     'adm.ent': AUDIT_ENTITIES, 'adm.act': AUDIT_ACTIONS,
+    'kiosk.style': STYLES,
   };
   const all = Object.values(sources).join('\n');
   for (const [prefix, members] of Object.entries(FAMILIES)) {
