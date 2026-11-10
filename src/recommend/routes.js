@@ -4,6 +4,7 @@ import { sizesFor } from '../db/seed.js';
 import { fail, langOf } from '../admin/routes.js';
 import { filterCandidates, ruleOutfits, missedItems, swapOptions, SPREADS } from './engine.js';
 import { logMissed } from '../demand.js';
+import { isFit, METHODS } from '../size/size.js';
 import { parseJson } from '../cart/promo.js';
 import { parsePhoto, applyStylist, withDeadline, TIMEOUT_MS } from './stylist.js';
 
@@ -28,7 +29,11 @@ function parseRequest(b) {
   };
   const budget = b.budget === undefined || b.budget === null || b.budget === 0 ? null : b.budget;
   if (budget !== null && (!Number.isInteger(budget) || budget < 1 || budget > 1e9)) throw fail(400, 'err.invalid', { field: 'field.budget' });
-  return { sizes, budget };
+  // Task 29: fit preference (shifts clothes per product) and how the size was found (pilot accuracy per method).
+  const fit = b.fit ?? null, method = b.method ?? null;
+  if (fit !== null && !isFit(fit)) throw fail(400, 'err.invalid', { field: 'field.fit_pref' });
+  if (method !== null && !METHODS.includes(method)) throw fail(400, 'err.bad_request');
+  return { sizes, budget, fit, method };
 }
 
 // shortcut: in-memory per-IP cap on paid Claude calls (over it → rules, never an error); one process only.
@@ -41,7 +46,7 @@ const REC_TTL_MS = 2 * 60 * 60 * 1000; // a re-query after this starts a new log
 // Compares right against DB-default created_at: SQLite stores 'YYYY-MM-DD HH:MM:SS' (UTC) text, Postgres timestamptz.
 export const dbTime = (ms) => `${new Date(ms).toISOString().replace('T', ' ').slice(0, 19)}+00:00`;
 
-// Public: POST /api/recommend { store_id, gender, sizes: { top, bottom, shoes? }, budget?, photo? }
+// Public: POST /api/recommend { store_id, gender, sizes: { top, bottom, shoes? }, budget?, fit?, method?, photo? }
 // stylist (task 7) is null without ANTHROPIC_API_KEY → rules only.
 export function createRecommendRouter(db, { weather, stylist = null, stylistTimeoutMs = TIMEOUT_MS }) {
   const r = express.Router();
@@ -58,14 +63,14 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
 
   r.post('/', async (req, res) => {
     const b = req.body ?? {};
-    const { sizes, budget } = parseRequest(b);
+    const { sizes, budget, fit, method } = parseRequest(b);
     const photo = parsePhoto(b.photo); // memory only: goes to Claude for this request, never stored or logged
 
     const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon', 'bundle_percent');
     if (!store) throw fail(404, 'err.store_not_found');
     const w = await weather(store);
     const ctx = { temperature: w.temperature, raining: w.raining, budget };
-    const load = (spread) => filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread });
+    const load = (spread) => filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread, fit });
     const { candidates, ...rules } = await ruleOutfits(load, ctx);
     let result = { ...rules, style_guess: null, source: 'rules' };
     // No rule outfit means a required category is empty, so Claude could not build one either. Without outerwear
@@ -91,6 +96,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       budget,
       product_ids: JSON.stringify([...new Set([...outfits, ...(partial ? [partial] : [])].flatMap((o) => o.items.map((i) => i.id)))]),
       source,
+      size_method: method,
       // Task 26: the whole outfits shown (and their cheaper variants), so the cart can trust an "outfit" for the bundle discount.
       outfits: JSON.stringify(outfits.flatMap((o) => [o, ...(o.alternative ? [o.alternative] : [])]).map((o) => o.items.map((i) => i.id))),
     };
@@ -101,7 +107,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       await db('recommendation_logs').insert({ ...log, store_id: store.id, token: rec });
     }
     // Task 24: what this customer wanted but the shelf has none of, once per results screen (rec). Never fails the answer.
-    await missedItems(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature })
+    await missedItems(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, fit })
       .then((items) => logMissed(db, { storeId: store.id, session: rec, items, source: 'recommend' }))
       .catch((err) => console.error('missed demand not logged:', err.message));
     res.json({ weather: w, budget, over_budget, partial, relaxed, notice, source, style_guess, outfits, rec, bundle_percent: store.bundle_percent });
@@ -112,7 +118,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
   // same in-stock candidates (customer's sizes, the answer's temperature window). With `rec`, the options are kept for the bundle rule.
   r.post('/swap', async (req, res) => {
     const b = req.body ?? {};
-    const { sizes, budget } = parseRequest(b);
+    const { sizes, budget, fit } = parseRequest(b);
     const ids = (v, max) => {
       if (!Array.isArray(v) || v.length > max || !v.every((x) => Number.isInteger(x) && x > 0) || new Set(v).size !== v.length) throw fail(400, 'err.invalid', { field: 'field.items' });
       return v;
@@ -125,7 +131,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     // Nothing in the outfit's window → widen it like the outfits do (R1: ±3, then ±6 °C); in-window items still rank first.
     let options = [];
     for (const spread of SPREADS.filter((x) => x >= (SPREADS.includes(b.relaxed) ? b.relaxed : 0))) {
-      const candidates = await filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread });
+      const candidates = await filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread, fit });
       const byId = new Map(candidates.map((p) => [p.id, p]));
       const items = outfit.map((id) => byId.get(id));
       if (items.some((p) => !p)) throw fail(409, 'err.outfit_stale'); // sold out or resized since the outfit was shown

@@ -80,28 +80,74 @@
     </form>
   </section>
 
-  <section data-screen="camera" hidden class="camera-screen">
-    <div class="frame" id="frame">
+  <section data-screen="camera" hidden class="camera-screen" data-mode="photo">
+    <div class="frame" id="frame" data-way="photo">
       <video id="video" playsinline muted hidden></video>
       <svg class="pose" viewBox="0 0 120 240" role="img" data-i18n-aria-label="kiosk.camera.guide"><use href="/shared/icons.svg#pose"></use></svg>
+      <!-- Task 29: live framing hint, the parts of the body the camera sees light up -->
+      <svg class="parts" id="parts" viewBox="0 0 24 48" aria-hidden="true" hidden>
+        <circle data-part="eyes" cx="12" cy="5" r="4"></circle>
+        <rect data-part="shoulders" x="5" y="11" width="14" height="10" rx="3"></rect>
+        <rect data-part="hips" x="6" y="22" width="12" height="6" rx="2"></rect>
+        <path data-part="feet" d="M9 30v15M15 30v15"></path>
+      </svg>
+      <p class="framing" id="framing" aria-live="polite" hidden></p>
       <div class="count" id="count" aria-live="assertive"></div>
     </div>
     <div class="camera-copy">
       <h1 tabindex="-1" data-i18n="kiosk.camera.title"></h1>
-      <p data-i18n="kiosk.camera.intro"></p>
-      <ul class="tips">
-        <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#user"></use></svg><span data-i18n="kiosk.camera.tip_full"></span></li>
-        <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#ruler"></use></svg><span data-i18n="kiosk.camera.tip_arms"></span></li>
-        <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="kiosk.camera.tip_feet"></span></li>
-      </ul>
-      <p class="notice" id="cameraStatus" role="status" hidden></p>
-      <div class="stack-actions">
-        <button class="primary go" id="shoot"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#camera"></use></svg><span id="shootLabel" data-i18n="kiosk.camera.shoot"></span></button>
-        <button id="galleryBtn" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#image"></use></svg><span data-i18n="kiosk.camera.gallery"></span></button>
-        <button class="ghost" id="noPhoto" data-i18n="kiosk.camera.skip"></button>
+      <fieldset class="ways">
+        <legend class="visually-hidden" data-i18n="kiosk.size.ways"></legend>
+        <div class="chips three">
+          <label><input type="radio" name="way" value="photo" checked><span data-i18n="kiosk.size.way_photo"></span></label>
+          <label><input type="radio" name="way" value="usual"><span data-i18n="kiosk.size.way_usual"></span></label>
+          <label><input type="radio" name="way" value="tape"><span data-i18n="kiosk.size.way_tape"></span></label>
+        </div>
+      </fieldset>
+      <div data-way="photo">
+        <p data-i18n="kiosk.camera.intro"></p>
+        <ul class="tips">
+          <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#user"></use></svg><span data-i18n="kiosk.camera.tip_full"></span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#ruler"></use></svg><span data-i18n="kiosk.camera.tip_arms"></span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="kiosk.camera.tip_feet"></span></li>
+        </ul>
+        <p class="notice" id="cameraStatus" role="status" hidden></p>
+        <div id="partial" hidden></div>
+        <div class="stack-actions">
+          <button class="primary go" id="shoot"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#camera"></use></svg><span id="shootLabel" data-i18n="kiosk.camera.shoot"></span></button>
+          <button id="galleryBtn" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#image"></use></svg><span data-i18n="kiosk.camera.gallery"></span></button>
+          <button class="ghost" id="noPhoto" data-i18n="kiosk.camera.skip"></button>
+        </div>
+        <input type="file" id="gallery" accept="image/*" hidden>
+        <p class="meta privacy" data-i18n="kiosk.camera.privacy"></p>
       </div>
-      <input type="file" id="gallery" accept="image/*" hidden>
-      <p class="meta privacy" data-i18n="kiosk.camera.privacy"></p>
+      <!-- Task 29: a size without a photo, from the usual size or a tape measure -->
+      <form id="wayForm" class="way-form" data-way="usual tape" novalidate hidden>
+        <fieldset data-way="usual">
+          <legend data-i18n="kiosk.size.usual_top"></legend>
+          <div class="chips sizes-chips" id="usualTopChips"></div>
+        </fieldset>
+        <fieldset data-way="usual">
+          <legend data-i18n="kiosk.size.jeans"></legend>
+          <div class="chips sizes-chips" id="jeansChips"></div>
+        </fieldset>
+        <p class="muted" data-way="tape" data-i18n="kiosk.size.tape_intro"></p>
+        <div class="tape-grid" data-way="tape">
+          <label class="field"><span data-i18n="kiosk.size.chest"></span><input name="chest" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" data-i18n-placeholder="kiosk.size.cm_ph"></label>
+          <label class="field"><span data-i18n="kiosk.size.waist"></span><input name="tapeWaist" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" data-i18n-placeholder="kiosk.size.cm_ph"></label>
+          <label class="field"><span data-i18n="kiosk.size.hips"></span><input name="hips" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" data-i18n-placeholder="kiosk.size.cm_ph"></label>
+        </div>
+        <fieldset>
+          <legend data-i18n="kiosk.size.fit"></legend>
+          <div class="chips three">
+            <label><input type="radio" name="fit" value="tight"><span data-i18n="kiosk.size.fit_tight"></span></label>
+            <label><input type="radio" name="fit" value="regular" checked><span data-i18n="kiosk.size.fit_regular"></span></label>
+            <label><input type="radio" name="fit" value="loose"><span data-i18n="kiosk.size.fit_loose"></span></label>
+          </div>
+        </fieldset>
+        <p class="field-error" id="wayErr" role="alert"></p>
+        <button class="primary wide go" id="wayNext"><span data-i18n="kiosk.size.way_next"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></button>
+      </form>
     </div>
   </section>
 

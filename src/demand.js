@@ -3,6 +3,7 @@
 import express from 'express';
 import { fail, dayKey, msOf } from './admin/routes.js';
 import { dbTime } from './recommend/routes.js';
+import { METHODS } from './size/size.js';
 
 export const FUNNEL_STEPS = ['start', 'size', 'outfits', 'cart', 'order'];
 const ID = /^[a-f0-9]{32}$/;
@@ -78,6 +79,22 @@ export async function funnelStats(db, scope, { from, to = null, keys = [] }) {
     per_day: keys.map((day) => ({ day, ...perDay.get(day) })),
     per_kiosk: [...perKiosk.values()].sort((a, b) => b.start - a.start || a.store_id - b.store_id),
   };
+}
+
+// Task 29: how customers found their size (results screens per method) and the task 23 "how did it fit?" answers of the
+// orders made from those screens, so the pilot can see which way is accurate. Methods are zero-filled; null = not told.
+export async function methodStats(db, scope, { from, to = null }) {
+  const shown = await range(scope(db('recommendation_logs'), 'store_id'), 'created_at', dbTime(from), to && dbTime(to))
+    .groupBy('size_method').select('size_method').count({ n: '*' });
+  const fits = await range(scope(db('recommendation_logs as r'), 'r.store_id'), 'r.created_at', dbTime(from), to && dbTime(to))
+    .join('orders as o', 'o.recommendation_id', 'r.id').join('order_items as i', 'i.order_id', 'o.id').whereNotNull('i.fit')
+    .groupBy('r.size_method', 'i.fit').select('r.size_method', 'i.fit').count({ n: '*' });
+  return METHODS.map((method) => {
+    const row = { method, customers: Number(shown.find((x) => x.size_method === method)?.n ?? 0), small: 0, right: 0, big: 0 };
+    for (const f of fits) if (f.size_method === method && ['small', 'right', 'big'].includes(f.fit)) row[f.fit] = Number(f.n);
+    const answers = row.small + row.right + row.big;
+    return { ...row, answers, accuracy: answers ? Math.round((row.right / answers) * 100) : null };
+  });
 }
 
 // Public: POST /api/funnel { store_id, visit, step, device? } → 204, once per visit and step. Rate-limited in app.js.

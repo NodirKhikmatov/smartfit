@@ -15,7 +15,7 @@ import { publicTeamRoutes, settingsRoutes, ROLES } from './settings.js';
 import { orgRoutes } from './orgs.js';
 import { promoRoutes } from './promos.js';
 import { fitOf } from '../size/size.js';
-import { demandItems, funnelStats } from '../demand.js';
+import { demandItems, funnelStats, methodStats } from '../demand.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -797,7 +797,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   };
   r.get('/demand', async (req, res) => {
     const { days, keys, from, scope } = demandWindow(req);
-    res.json({ days, items: await demandItems(db, scope, { from }), funnel: await funnelStats(db, scope, { from, keys }) });
+    res.json({ days, items: await demandItems(db, scope, { from }), funnel: await funnelStats(db, scope, { from, keys }), methods: await methodStats(db, scope, { from }) });
   });
   r.get('/demand/export', async (req, res) => {
     const { days, from, scope } = demandWindow(req);

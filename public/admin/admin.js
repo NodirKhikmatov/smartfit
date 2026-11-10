@@ -1015,9 +1015,16 @@ async function loadDemand() {
   if (!f.per_kiosk.length) emptyRow($('dropKioskRows'), 6, { ic: 'store', title: t('adm.drop.empty'), text: t('adm.drop.empty_text') });
   else $('dropKioskRows').replaceChildren(...f.per_kiosk.map((k) => el('tr', {},
     el('td', { textContent: [k.kiosk ? t('adm.drop.kiosk_n', { id: k.kiosk }) : t('adm.drop.phone'), withStore && storeName(k.store_id)].filter(Boolean).join(' · ') }), ...cells(k))));
+  // Task 29: how the size was found, with the "how did it fit?" answers per way (accuracy = share answered "right").
+  $('methodRows').replaceChildren(...d.methods.map((m) => el('tr', {},
+    el('td', { textContent: t(METHOD_NAME[m.method]) }), el('td', { className: 'num', textContent: m.customers }), el('td', { className: 'num hide-sm', textContent: m.answers }),
+    ...['small', 'right', 'big'].map((k) => el('td', { className: 'num hide-sm', textContent: m[k] })),
+    el('td', { className: 'num' }, el('strong', { textContent: m.accuracy === null ? '—' : `${m.accuracy}%` })))));
   $('dropDayHead').replaceChildren(head('adm.stats.day'));
   $('dropDayRows').replaceChildren(...f.per_day.slice().reverse().map((x) => el('tr', {}, el('td', { textContent: day(x.day) }), ...cells(x))));
 }
+
+const METHOD_NAME = { full: 'adm.method.full', torso: 'adm.method.torso', upper: 'adm.method.upper', usual: 'adm.method.usual', tape: 'adm.method.tape', body: 'adm.method.body', profile: 'adm.method.profile' };
 
 // ---------- QR codes for the phone app, one card per store.
 

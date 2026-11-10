@@ -7,7 +7,7 @@ import express from 'express';
 import { randomBytes, createHash } from 'node:crypto';
 import { qrSvg } from './qr.js';
 import { fail } from './admin/routes.js';
-import { SIZES } from './size/size.js';
+import { SIZES, isFit } from './size/size.js';
 import { REC } from './recommend/routes.js';
 import { parseJson, setKey } from './cart/promo.js';
 import { stamp } from './cart/cart.js';
@@ -36,6 +36,12 @@ export function bodyNumbers(b = {}) {
     bottom: SIZES.includes(b.bottom) ? b.bottom : null,
     shoulder: intIn(b.shoulder, 25, 60), // the size step's photo estimates (src/size/size.js limits)
     hip: intIn(b.hip, 22, 60),
+    // Task 29: the no-photo ways (src/size/size.js limits).
+    fit: isFit(b.fit) ? b.fit : null,
+    jeans: intIn(b.jeans, 26, 40),
+    chest: intIn(b.chest, 60, 160),
+    waist: intIn(b.waist, 50, 160),
+    hips: intIn(b.hips, 60, 170),
   };
 }
 const NUMBERS = Object.keys(bodyNumbers());
@@ -57,7 +63,7 @@ export function createProfileRouter(db, { telegram, limit, pollLimit, now = Date
     return { poll, url, svg: qrSvg(url), expires_ms: ms };
   }
 
-  // { store_id, lang, gender, height, weight, shoes, top, bottom, shoulder, hip, rec?, looks?: [[product ids]] }
+  // { store_id, lang, gender, height, weight, shoes, top, bottom, shoulder, hip, fit, jeans, chest, waist, hips, rec?, looks?: [[product ids]] }
   // Looks count only if that results screen (rec) really showed them, so the client can't plant other items.
   r.post('/link', limit, async (req, res) => {
     const b = req.body ?? {};

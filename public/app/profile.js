@@ -48,7 +48,11 @@ function render() {
       row(t('kiosk.profile.weight'), n(p.weight, 'kiosk.profile.kg')),
       row(t('cat.top'), p.top ?? none()), row(t('cat.bottom'), p.bottom ?? none()), row(t('cat.shoes'), p.shoes ?? none()),
       row(t('kiosk.profile.shoulder'), n(p.shoulder, 'kiosk.profile.cm')),
-      row(t('kiosk.profile.hip'), n(p.hip, 'kiosk.profile.cm'))),
+      row(t('kiosk.profile.hip'), n(p.hip, 'kiosk.profile.cm')),
+      // Task 29: the no-photo ways, shown only when the customer used them.
+      ...(p.fit ? [row(t('kiosk.size.fit'), t(`kiosk.size.fit_${p.fit}`))] : []),
+      ...(p.jeans ? [row(t('kiosk.size.jeans'), `W${p.jeans}`)] : []),
+      ...['chest', 'waist', 'hips'].filter((k) => p[k] != null).map((k) => row(t(`kiosk.size.${k}`), n(p[k], 'kiosk.profile.cm')))),
     el('section', { className: 'sum card' }, el('h2', { textContent: t('kiosk.profile.looks') }),
       ...(p.looks.length ? p.looks.flatMap((l) => [
         el('p', { className: 'meta', textContent: `${l.store.name} · ${fmt.dateTime(l.created_at)}` }),

@@ -3,6 +3,10 @@
 export const SCREENS = ['start', 'form', 'camera', 'results', 'cart', 'done', 'catalog', 'item'];
 export const CLOTHES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 export const SHOES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
+// Task 29 (same lists as src/size/size.js, a test keeps them equal): usual jeans waist, fit preference, size methods.
+export const JEANS = Array.from({ length: 15 }, (_, i) => 26 + i);
+export const FITS = ['tight', 'regular', 'loose'];
+export const METHODS = ['full', 'torso', 'upper', 'usual', 'tape', 'body', 'profile'];
 const ROUTE_KEY = 'sfRoute';
 
 const str = (v) => String(v ?? '').trim();
@@ -40,9 +44,10 @@ export function toRequest(v, storeId) {
   };
 }
 
-// The whitelist of what survives a refresh: the screen, the form's numbers, the chosen sizes and the open item page.
+// The whitelist of what survives a refresh: the screen, the form's numbers, the chosen sizes, how they were found, the
+// fit preference and the open item page.
 // Never the photo, the name, the phone or the address.
-export function routeData({ screen, form = {}, sizes = {}, manual = false, item = null } = {}) {
+export function routeData({ screen, form = {}, sizes = {}, manual = false, method = null, fit = null, item = null } = {}) {
   return {
     screen: SCREENS.includes(screen) ? screen : 'start',
     form: Object.fromEntries(FORM.map((k) => [k, str(form?.[k]).slice(0, 12)])),
@@ -52,6 +57,8 @@ export function routeData({ screen, form = {}, sizes = {}, manual = false, item 
       shoes: SHOES.includes(sizes?.shoes) ? sizes.shoes : null,
     },
     manual: manual === true,
+    method: METHODS.includes(method) ? method : null,
+    fit: FITS.includes(fit) ? fit : null,
     item: Number.isInteger(item) && item > 0 ? item : null,
   };
 }

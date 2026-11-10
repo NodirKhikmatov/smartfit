@@ -221,7 +221,7 @@ test('kiosk login: the QR token is single-use and short-lived; the kiosk gets si
   const [a, b] = await Promise.all([poll(), poll()]);
   const got = [a, b].filter((x) => x.status === 200);
   assert.equal(got.length, 1, 'two parallel polls: exactly one gets the sizes');
-  assert.deepEqual(got[0].body, { state: 'done', profile: { lang: 'uz', gender: 'male', height: 178, weight: 74, shoes: '43', top: 'M', bottom: 'L', shoulder: 46, hip: 34 } });
+  assert.deepEqual(got[0].body, { state: 'done', profile: { lang: 'uz', gender: 'male', height: 178, weight: 74, shoes: '43', top: 'M', bottom: 'L', shoulder: 46, hip: 34, fit: null, jeans: null, chest: null, waist: null, hips: null } });
   assert.equal((await poll()).status, 404, 'gone after one read');
   await start(555, k.body.url);
   assert.match(last().text, /eskirgan/);

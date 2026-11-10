@@ -14,7 +14,7 @@ import { VENDOR, MODEL } from '../src/vendor.js';
 const M_POSE = { shoulder: 0.227, hip: 0.145 };
 
 test('no photo, no weight: size from height only, low confidence', () => {
-  assert.deepEqual(estimateSize({ gender: 'male', height: 176 }), { sizes: { top: 'M', bottom: 'M' }, confidence: 'low', source: 'height', measurements: null });
+  assert.deepEqual(estimateSize({ gender: 'male', height: 176 }), { sizes: { top: 'M', bottom: 'M' }, confidence: 'low', source: 'height', method: 'body', measured: [], measurements: null });
   assert.deepEqual(estimateSize({ gender: 'female', height: 164 }).sizes, { top: 'M', bottom: 'M' });
   assert.equal(estimateSize({ gender: 'male', height: 160 }).sizes.top, 'XS');
   assert.equal(estimateSize({ gender: 'male', height: 192 }).sizes.top, 'XL');
@@ -87,18 +87,19 @@ function body({ shoulderPx = 186, hipPx = 116, eyeY = 100, heelY = 900, vis = 0.
   return lm;
 }
 
-test('poseRatios: widths divided by the eye-to-heel span; null when the full body is not visible', () => {
-  assert.deepEqual(poseRatios(body(), 1000, 1000), { shoulder: 0.233, hip: 0.145 });
+test('poseRatios: widths divided by the eye-to-heel span; null when nothing usable is visible', () => {
+  assert.deepEqual(poseRatios(body(), 1000, 1000), { kind: 'full', shoulder: 0.233, hip: 0.145 });
   // Scale-free: the same body twice as large in a bigger photo gives the same ratios.
-  assert.deepEqual(poseRatios(body(), 2000, 2000), { shoulder: 0.233, hip: 0.145 });
+  assert.deepEqual(poseRatios(body(), 2000, 2000), { kind: 'full', shoulder: 0.233, hip: 0.145 });
 
   assert.equal(poseRatios(undefined, 1000, 1000), null, 'nobody in the photo');
+  // Task 29: these were refused before; now they are partial kinds (proportions are tested in size-partial.test.js).
   const noHeels = body();
   noHeels[29].visibility = 0.2;
-  assert.equal(poseRatios(noHeels, 1000, 1000), null, 'feet cut off');
+  assert.equal(poseRatios(noHeels, 1000, 1000).kind, 'torso', 'feet cut off');
   const headOut = body();
   headOut[2].y = -0.05;
-  assert.equal(poseRatios(headOut, 1000, 1000), null, 'head out of frame');
+  assert.equal(poseRatios(headOut, 1000, 1000).kind, 'full', 'head out of frame: scaled from the shoulders');
   assert.equal(poseRatios(body({ eyeY: 400, heelY: 600 }), 1000, 1000), null, 'too far away');
   assert.equal(poseRatios(body({ eyeY: 900, heelY: 100 }), 1000, 1000), null, 'upside down');
   const lunge = body();
@@ -142,7 +143,7 @@ after(async () => {
 test('POST /api/size: photo, weight-only and height-only modes', async () => {
   let r = await post('/api/size', { gender: 'male', height: 176, weight: 72, pose: M_POSE });
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body, { sizes: { top: 'M', bottom: 'M' }, confidence: 'high', source: 'photo+weight', measurements: { shoulder_cm: 40, hip_cm: 33.7 } });
+  assert.deepEqual(r.body, { sizes: { top: 'M', bottom: 'M' }, confidence: 'high', source: 'photo+weight', method: 'full', measured: ['top', 'bottom'], measurements: { shoulder_cm: 40, hip_cm: 33.7 } });
   r = await post('/api/size', { gender: 'female', height: 164, weight: 58, pose: null });
   assert.deepEqual([r.status, r.body.sizes, r.body.source], [200, { top: 'M', bottom: 'M' }, 'weight']);
   r = await post('/api/size', { gender: 'male', height: 176, weight: null });

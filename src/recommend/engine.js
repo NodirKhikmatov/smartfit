@@ -1,5 +1,5 @@
 import { sizesFor } from '../db/seed.js';
-import { fitOf, shiftSize } from '../size/size.js';
+import { fitOf, wantSize } from '../size/size.js';
 
 // Rule-based outfits. filterCandidates is the only source of items: task 7 sends its output to Claude as CANDIDATES.
 
@@ -15,7 +15,8 @@ export const totalOf = (items) => items.reduce((sum, i) => sum + i.unit_price, 0
 // sizes = { top, bottom, shoes? }. No shoe size → shoes with stock in any size (size: null, picked in the cart).
 // Each item carries fit_offset (+1 runs small, -1 runs big) and fit_from (the customer's size when it was shifted).
 // spread widens the temperature window to ±spread °C (the relaxation fallback in ruleOutfits).
-export async function filterCandidates(db, { storeId, gender, sizes, temperature, spread = 0 }) {
+// fit (task 29): the customer's preference tight|regular|loose shifts clothes one size first; fit_from is relative to that.
+export async function filterCandidates(db, { storeId, gender, sizes, temperature, spread = 0, fit = null }) {
   const rows = await db('products as p')
     .join('product_stock as s', 's.product_id', 'p.id')
     .where('p.store_id', storeId)
@@ -32,7 +33,7 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
   for (const { fit_offset, ...r } of rows) {
     const own = sizes[sizeKey[r.category]];
     const offset = fits.get(r.id).offset;
-    const want = own ? shiftSize(sizesFor(r.category), own, offset) : null;
+    const { base, want } = own ? wantSize(sizesFor(r.category), r.category, own, offset, fit) : {};
     if (want && r.size !== want) continue;
     const known = r.category === 'accessory' || own;
     // Several rows per item only when the shoe size is unknown: `sizes` lists them so the customer picks one.
@@ -41,7 +42,7 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
       continue;
     }
     byId.set(r.id, { ...r, waterproof: Boolean(r.waterproof), size: known ? r.size : null, ...(known ? {} : { sizes: [r.size] }), unit_price: unitPrice(r),
-      fit_offset: offset, fit_from: want && want !== own ? own : null });
+      fit_offset: offset, fit_from: want && want !== base ? base : null });
   }
   return [...byId.values()];
 }
@@ -49,7 +50,7 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
 // Task 24, missed demand: items this weather and gender would have been offered, but whose size (the customer's,
 // after the fit shift) has no free stock. Accessories and shoes without a size are left out: no size was asked for.
 // → [{ product_id, size }].
-export async function missedItems(db, { storeId, gender, sizes, temperature }) {
+export async function missedItems(db, { storeId, gender, sizes, temperature, fit = null }) {
   const rows = await db('products as p').leftJoin('product_stock as s', 's.product_id', 'p.id')
     .where('p.store_id', storeId)
     .whereIn('p.gender', [gender, 'unisex'])
@@ -61,7 +62,7 @@ export async function missedItems(db, { storeId, gender, sizes, temperature }) {
   const products = [...new Map(rows.map((r) => [r.id, r])).values()];
   const fits = await fitOf(db, products);
   return products.flatMap((p) => {
-    const size = shiftSize(sizesFor(p.category), sizes[sizeKey[p.category]], fits.get(p.id).offset);
+    const size = wantSize(sizesFor(p.category), p.category, sizes[sizeKey[p.category]], fits.get(p.id).offset, fit).want;
     return (free.get(`${p.id}:${size}`) ?? 0) > 0 ? [] : [{ product_id: p.id, size }];
   });
 }

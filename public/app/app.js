@@ -1,8 +1,8 @@
 import { watchIdle } from './idle.js';
-import { loadPose, measure } from './pose.js';
+import { loadPose, measure, framing, framingHint } from './pose.js';
 import { keypad } from './keypad.js';
 import { kioskShell, attract, kioskDevice, randomId } from './kiosk.js';
-import { CLOTHES, SHOES, nextError, fieldError, toRequest, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
+import { CLOTHES, SHOES, JEANS, nextError, fieldError, toRequest, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
 import { icon, confirmDialog, showAfter, skeletonCard, toast } from '/shared/ui.js';
 import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName } from '/shared/i18n.js';
 
@@ -34,6 +34,7 @@ let current = 'start';
 let request = null; // POST /api/recommend body
 let body = null; // { gender, height, weight } for POST /api/size
 let sizeInfo = null; // last /api/size answer: confidence for the results screen
+let sizeInput = null; // task 29: the usual size or tape numbers sent to /api/size (memory only; saved to a profile on request)
 let store = null;
 let lastOrder = null; // the done screen's order, in memory only
 let holdTimer = null, holdDeadline = 0; // cart hold countdown (cart screen)
@@ -69,7 +70,7 @@ $('langBox').replaceChildren(switcher);
 // History routing (U2): one entry per screen, so the phone's back button steps back inside the app.
 const formValues = () => ({ gender: form.gender.value, height: form.height.value, weight: form.weight.value, shoes: form.shoes.value, budget: form.budget.value });
 const appState = () => ({ formOk: !!request, sizesOk: !!(request?.sizes.top && request?.sizes.bottom), orderOk: !!lastOrder });
-const remember = () => saveRoute({ screen: current, form: formValues(), sizes: request?.sizes, manual: sizeInfo?.manual, item: current === 'item' ? itemId : null });
+const remember = () => saveRoute({ screen: current, form: formValues(), sizes: request?.sizes, manual: sizeInfo?.manual, method: request?.method, fit: request?.fit, item: current === 'item' ? itemId : null });
 const ENTER = {
   camera: () => showCamera(),
   results: () => (lastResult ? renderResults(lastResult) : loadResults()),
@@ -252,7 +253,7 @@ form.addEventListener('submit', (e) => {
   e.preventDefault();
   if (!checkAll(form, FORM_FIELDS)) return;
   ({ body, request } = toRequest(formValues(), storeId));
-  sizeInfo = lastResult = null;
+  sizeInfo = sizeInput = lastResult = null;
   go('camera');
 });
 
@@ -274,11 +275,13 @@ function status(text) {
 
 function setBusy(on) {
   busy = on;
-  for (const id of ['shoot', 'galleryBtn', 'noPhoto']) $(id).disabled = on;
+  for (const id of ['shoot', 'galleryBtn', 'noPhoto', 'wayNext']) $(id).disabled = on;
+  if (on) clearPartial();
 }
 
 function showCamera() {
   status('');
+  showWay(cameraScreen.dataset.mode);
   $('shootLabel').textContent = t('kiosk.camera.shoot');
   $('galleryBtn').hidden = kiosk;
   loadPose().catch(() => {}); // start the model download while the customer gets ready
@@ -292,6 +295,8 @@ function stopCamera() {
   stream = null;
   video.srcObject = null;
   video.hidden = true;
+  stopFraming();
+  clearPartial();
   $('frame').classList.remove('live');
   $('count').textContent = '';
   setBusy(false);
@@ -317,6 +322,7 @@ $('shoot').onclick = async () => {
   video.hidden = false;
   $('frame').classList.add('live'); // the pose figure becomes a guide line over the live picture (U6)
   await video.play().catch(() => {});
+  startFraming(mine);
   let left = COUNTDOWN;
   $('count').textContent = left;
   timer = setInterval(() => {
@@ -324,6 +330,7 @@ $('shoot').onclick = async () => {
     $('count').textContent = left || '';
     if (left > 0) return;
     clearInterval(timer);
+    stopFraming(); // the hint must not keep reading the last frame while the photo is analysed
     const canvas = document.createElement('canvas'); // in memory only, dropped right after measuring
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -353,7 +360,7 @@ $('gallery').onchange = async () => {
   }
 };
 
-$('noPhoto').onclick = () => findSizes(null);
+$('noPhoto').onclick = () => findSizes({});
 
 async function analyse(source, w, h) {
   status(t('kiosk.camera.analysing'));
@@ -370,7 +377,7 @@ async function analyse(source, w, h) {
     $('shootLabel').textContent = t('common.retry');
     return status(t('kiosk.camera.no_body'));
   }
-  await findSizes(pose, snapshot(source, w, h));
+  await findSizes({ pose }, snapshot(source, w, h));
 }
 
 // The stylist (task 7) gets one small JPEG: in memory only, sent with /api/recommend, dropped on reset.
@@ -385,22 +392,133 @@ function snapshot(source, w, h) {
   return jpeg;
 }
 
-async function findSizes(pose, photo = null) {
+// input: {} (height + weight only), { pose }, { usual } or { tape }.
+async function findSizes(input, photo = null) {
   setBusy(true);
   try {
-    sizeInfo = await api('/size', { ...body, pose });
+    sizeInfo = await api('/size', { ...body, ...input });
   } catch (err) {
     setBusy(false);
+    if (input.usual || input.tape) return wayError(err.message);
     $('shootLabel').textContent = t('common.retry');
     return status(err.message);
   }
   setBusy(false);
   if (cameraScreen.hidden) return;
+  sizeInput = input.usual || input.tape ? input : null;
+  // Task 29: a partial photo says what it measured; the customer retakes it or goes on with it.
+  if (sizeInfo.method === 'torso' || sizeInfo.method === 'upper') return askPartial(photo);
+  toResults(photo);
+}
+function toResults(photo) {
   Object.assign(request.sizes, sizeInfo.sizes);
+  request.method = sizeInfo.method;
   request.photo = photo ?? undefined; // undefined is left out of the JSON
   lastResult = null;
   go('results', { replace: true }); // back from the outfits goes to the form, not to the camera
 }
+
+// The JPEG for the stylist waits in these buttons only; any other step on this screen drops them.
+function askPartial(photo) {
+  const text = partialText();
+  status('');
+  const again = el('button', { type: 'button', onclick: () => {
+    clearPartial();
+    $('shootLabel').textContent = t('common.retry');
+    $('shoot').focus();
+  } }, icon('camera'), el('span', { textContent: t('kiosk.size.retake') }));
+  $('partial').replaceChildren(el('div', { className: 'notice', role: 'status' }, icon('info'), el('p', { textContent: text })),
+    el('div', { className: 'stack-actions' }, el('button', { type: 'button', className: 'primary', onclick: () => toResults(photo) }, t('kiosk.size.go_on')), again));
+  $('partial').hidden = false;
+}
+function clearPartial() {
+  $('partial').replaceChildren();
+  $('partial').hidden = true;
+}
+
+// Task 29: live framing hint. The model looks at the live video every FRAMING_MS (never a copy of it) and lights up the
+// parts it sees. A slow device stops after two slow frames and only checks the photo after capture.
+const FRAMING_MS = 700, SLOW_MS = 250;
+let framingTimer = null, slowFrames = 0;
+function startFraming(mine) {
+  if (slowFrames >= 2) return;
+  const tick = async () => {
+    if (mine !== attempt || !stream) return;
+    if (video.readyState >= 2) {
+      let parts, ms;
+      try {
+        await loadPose(); // the download doesn't count as slow
+        const t0 = performance.now();
+        parts = await framing(video);
+        ms = performance.now() - t0;
+      } catch {
+        return stopFraming();
+      }
+      if (mine !== attempt) return;
+      for (const p of $('parts').querySelectorAll('[data-part]')) p.classList.toggle('on', parts[p.dataset.part]);
+      $('framing').textContent = t(framingHint(parts));
+      $('parts').removeAttribute('hidden'); // an <svg> has no .hidden property
+      $('framing').hidden = false;
+      if (ms > SLOW_MS && ++slowFrames >= 2) return stopFraming();
+    }
+    framingTimer = setTimeout(tick, FRAMING_MS);
+  };
+  framingTimer = setTimeout(tick, FRAMING_MS);
+}
+function stopFraming() {
+  clearTimeout(framingTimer);
+  framingTimer = null;
+  $('parts').setAttribute('hidden', '');
+  $('framing').hidden = true;
+}
+
+// Task 29: three ways to a size on this screen: a photo, the usual size, or tape measurements.
+const wayForm = $('wayForm');
+const radioChips = (box, name, options) => box.append(...options.map(([v, text]) => el('label', {}, el('input', { type: 'radio', name, value: v }), el('span', { textContent: text }))));
+radioChips($('usualTopChips'), 'usualTop', CLOTHES.map((s) => [s, s]));
+radioChips($('jeansChips'), 'jeans', JEANS.map((w) => [String(w), `W${w}`]));
+function showWay(mode) {
+  cameraScreen.dataset.mode = mode;
+  for (const r of document.getElementsByName('way')) r.checked = r.value === mode;
+  for (const box of cameraScreen.querySelectorAll('[data-way]')) box.hidden = !box.dataset.way.split(' ').includes(mode);
+}
+cameraScreen.querySelector('.ways').addEventListener('change', (e) => {
+  if (busy) return showWay(cameraScreen.dataset.mode); // measuring: stay on this way
+  stopCamera();
+  status('');
+  wayError('');
+  showWay(e.target.value);
+});
+function wayError(text) {
+  $('wayErr').textContent = text;
+}
+// Like the form (U3): a pick or a keystroke clears the error at once; submit checks again.
+for (const ev of ['input', 'change']) wayForm.addEventListener(ev, () => wayError(''));
+const TAPE = [['chest', 'chest', 60, 160], ['tapeWaist', 'waist', 50, 160], ['hips', 'hip', 60, 170]];
+wayForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (busy) return;
+  const f = wayForm.elements;
+  let input;
+  if (cameraScreen.dataset.mode === 'usual') {
+    const usual = { ...(f.usualTop.value && { top: f.usualTop.value }), ...(f.jeans.value && { waist: Number(f.jeans.value) }) };
+    if (!Object.keys(usual).length) return wayError(t('kiosk.size.err_usual'));
+    input = { usual };
+  } else {
+    const tape = {};
+    for (const [name, key, lo, hi] of TAPE) {
+      const v = f[name].value.trim();
+      if (!v) continue;
+      if (!/^\d+$/.test(v) || Number(v) < lo || Number(v) > hi) return wayError(t('kiosk.size.err_tape'));
+      tape[key] = Number(v);
+    }
+    if (!Object.keys(tape).length) return wayError(t('kiosk.size.err_tape'));
+    input = { tape };
+  }
+  wayError('');
+  request.fit = f.fit.value || null;
+  findSizes(input);
+});
 
 // --- Screen 4: results, with - / + to correct the estimated size.
 const CONFIDENCE = { high: 'kiosk.conf.high', medium: 'kiosk.conf.medium', low: 'kiosk.conf.low' };
@@ -422,9 +540,16 @@ function renderSizes() {
   $('sizeBar').replaceChildren(
     el('div', { className: 'row' }, stepper('top'), stepper('bottom')),
     // After a refresh the confidence is gone (it is not stored), so only the − / + hint is left.
-    el('p', { className: 'meta', textContent: sizeInfo?.manual ? t('kiosk.size.manual') : t('kiosk.size.adjust', { conf: CONFIDENCE[sizeInfo?.confidence] ? t(CONFIDENCE[sizeInfo.confidence]) : '' }).trim() }),
+    el('p', { className: 'meta', textContent: sizeInfo?.manual ? t('kiosk.size.manual') : t('kiosk.size.adjust', { conf: sizeNote() }).trim() }),
   );
 }
+
+// A partial photo says what it measured (task 29); otherwise the confidence.
+function sizeNote() {
+  if (sizeInfo?.method === 'upper' || sizeInfo?.method === 'torso') return partialText();
+  return CONFIDENCE[sizeInfo?.confidence] ? t(CONFIDENCE[sizeInfo.confidence]) : '';
+}
+const partialText = () => (sizeInfo.method === 'upper' ? t('kiosk.size.measured_upper', { from: t(body?.weight ? 'kiosk.size.from_hw' : 'kiosk.size.from_h') }) : t('kiosk.size.measured_torso'));
 
 let loadSeq = 0; // only the newest /recommend answer may draw (fast − / + taps)
 let lastResult = null; // kept so a language switch can redraw without asking again
@@ -1212,8 +1337,9 @@ function pollProfile(poll, onState) {
 }
 // Numbers only (form, chosen sizes, the photo's cm estimates); never the photo, name or phone.
 function profileNumbers() {
-  const m = sizeInfo?.measurements;
-  return { ...body, ...(request && { top: request.sizes.top, bottom: request.sizes.bottom, shoes: request.sizes.shoes }), ...(m && { shoulder: m.shoulder_cm, hip: m.hip_cm }) };
+  const m = sizeInfo?.measurements, u = sizeInput?.usual, tp = sizeInput?.tape;
+  return { ...body, ...(request && { top: request.sizes.top, bottom: request.sizes.bottom, shoes: request.sizes.shoes, fit: request.fit }),
+    ...(m && { shoulder: m.shoulder_cm, hip: m.hip_cm }), ...(u && { jeans: u.waist }), ...(tp && { chest: tp.chest, waist: tp.waist, hips: tp.hip }) };
 }
 function profileBox(looks = null) {
   const box = el('div', { className: 'card profile-box' });
@@ -1299,9 +1425,11 @@ function applyProfile(p) {
   const r = toRequest(formValues(), storeId);
   if (!r) return go('form');
   ({ body, request } = r);
-  sizeInfo = lastResult = null;
+  sizeInfo = sizeInput = lastResult = null;
+  request.fit = p.fit ?? null;
   if (!p.top || !p.bottom) return go('form');
   Object.assign(request.sizes, { top: p.top, bottom: p.bottom });
+  request.method = 'profile';
   sizeInfo = { manual: true };
   go('results');
 }
@@ -1320,13 +1448,16 @@ function reset() {
   $('doneBody').replaceChildren(); // its profile QR must not wait for the next customer
   if (cart) api(`/cart/${cart.token}`, null, 'DELETE').catch(() => {}); // give the held stock back now, not in 15 min
   setCart(null);
-  request = body = sizeInfo = lastResult = lastOrder = visit = null;
+  request = body = sizeInfo = sizeInput = lastResult = lastOrder = visit = null;
   loadSeq++; // a results request still in flight must not draw for the next customer
   if (kiosk) {
     setLang('uz'); // the next customer starts in Uzbek
     switcher.sync();
   }
   form.reset();
+  wayForm.reset();
+  wayError('');
+  showWay('photo');
   budgetChips();
   clearCheckout();
   for (const n of FORM_FIELDS) showError(n, '');
@@ -1357,6 +1488,7 @@ if (saved) {
     ({ body, request } = r);
     if (saved.sizes.top && saved.sizes.bottom) {
       request.sizes = { ...request.sizes, top: saved.sizes.top, bottom: saved.sizes.bottom };
+      Object.assign(request, { method: saved.method, fit: saved.fit });
       sizeInfo = { manual: saved.manual };
     }
   }
