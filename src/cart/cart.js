@@ -11,8 +11,9 @@ import { qrSvg, publicBase } from '../qr.js';
 import { clientKey } from '../limits.js';
 import { FITS } from '../size/size.js';
 import { logMissed } from '../demand.js';
-import { price, findPromo, promoProblem, claimPromo, releasePromo, setKey, parseJson } from './promo.js';
+import { price, findPromo, promoProblem, claimPromo, releasePromo, setKey, parseJson, spread } from './promo.js';
 import { fmt } from '../../public/shared/i18n.js';
+import { pointsConfig, balanceOf, maxSpend, checkSpend, spend, refundSpent, earnPoints } from './points.js';
 
 export const HOLD_MS = 15 * 60 * 1000;
 export const HANDOFF_MS = 5 * 60 * 1000; // how long the kiosk's "continue on your phone" QR works
@@ -30,9 +31,10 @@ export function deliveryFee(store, subtotal, fulfillment) {
   return store.free_delivery_threshold != null && subtotal > store.free_delivery_threshold ? 0 : store.delivery_fee;
 }
 // discount (task 26) = bundle + promo; the free-delivery threshold looks at what the customer pays for the goods.
-export const totals = (store, subtotal, fulfillment, discount = 0) => {
+// points (task 34) pay part of the goods after that; they don't change the delivery fee and never pay it.
+export const totals = (store, subtotal, fulfillment, discount = 0, points = 0) => {
   const delivery_fee = deliveryFee(store, subtotal - discount, fulfillment);
-  return { subtotal, delivery_fee, total: subtotal - discount + delivery_fee };
+  return { subtotal, delivery_fee, total: subtotal - discount - points + delivery_fee };
 };
 
 // Takes n units of free stock; false when fewer than n are free.
@@ -79,6 +81,7 @@ export async function cancelPending(trx, orderId, now = Date.now(), { expiredOnl
   if (!(await q.update({ payment_status: 'cancelled', status: 'cancelled', expires_at: null, updated_at: trx.fn.now() }))) return false;
   await release(trx, await trx('order_items').where({ order_id: orderId }));
   await releasePromo(trx, orderId);
+  await refundSpent(trx, orderId);
   await trx('payment_transactions').where({ order_id: orderId, state: 1 }).update({ state: -1, reason: 4, cancel_time: now });
   return true;
 }
@@ -93,6 +96,7 @@ async function cancelPaid(trx, orderId) {
     await trx('product_stock').where({ product_id: i.product_id, size: i.size }).increment('quantity', i.quantity);
   }
   await releasePromo(trx, orderId);
+  await refundSpent(trx, orderId);
   return true;
 }
 
@@ -121,7 +125,9 @@ export function changeStatus(db, orderId, to) {
     const o = await trx('orders').where({ id: orderId }).first();
     if (!nextStatuses(o).includes(to)) return false;
     if (to === 'cancelled') return o.payment_status === 'pending' ? cancelPending(trx, o.id) : cancelPaid(trx, o.id);
-    return (await trx('orders').where({ id: o.id, status: o.status, payment_status: 'paid' }).update({ status: to, updated_at: trx.fn.now() })) === 1;
+    if (!(await trx('orders').where({ id: o.id, status: o.status, payment_status: 'paid' }).update({ status: to, updated_at: trx.fn.now() }))) return false;
+    if (to === 'delivered') await earnPoints(trx, o.id); // task 34: only the step that moved it here earns
+    return true;
   });
 }
 
@@ -171,6 +177,8 @@ async function cartView(db, cart, payments) {
   }));
   const pr = await pricing(db, cart, store, items);
   const off = pr.subtotal - pr.goods;
+  const points = await cartPoints(db, cart, store, pr.goods);
+  const withPoints = (f) => totals(store, pr.subtotal, f, off, points?.max ?? 0);
   return {
     token: cart.token,
     store_id: store.id,
@@ -181,16 +189,27 @@ async function cartView(db, cart, payments) {
     delivery: { city: store.city, lat: store.lat, lon: store.lon, fee: store.delivery_fee, free_over: store.free_delivery_threshold },
     discounts: { bundle: pr.bundle_discount, bundle_percent: store.bundle_percent, promo: pr.promo_discount, code: pr.promo && { code: pr.promo.code, error: pr.promo.error, min_order: pr.promo.min_order } },
     totals: { pickup: totals(store, pr.subtotal, 'pickup', off), delivery: totals(store, pr.subtotal, 'delivery', off) },
+    // Task 34: null when points are off in this organisation. linked = a profile confirmed "use my points" for this cart;
+    // max = what checkout accepts as `points` now, and totals = the totals when that much is used.
+    ...(points && { points: { ...points, totals: { pickup: withPoints('pickup'), delivery: withPoints('delivery') } } }),
   };
+}
+
+async function cartPoints(q, cart, store, goods) {
+  const cfg = await pointsConfig(q, store.id);
+  if (!cfg) return null;
+  const linked = cart.profile_id ? Boolean(await q('customer_profiles').where({ id: cart.profile_id, organization_id: cfg.orgId }).first('id')) : false;
+  const balance = linked ? await balanceOf(q, cart.profile_id) : 0;
+  return { percent: cfg.percent, share: cfg.share, linked, balance, max: linked ? maxSpend(goods, balance, cfg.share) : 0 };
 }
 
 export async function orderView(db, order) {
   const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').where('i.order_id', order.id).orderBy('i.id')
     .select('i.id', 'i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.sizes', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price', 'i.discount', 'i.returned', 'i.fit');
-  const { id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total, promo_code, promo_discount, bundle_discount } = order;
+  const { id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total, promo_code, promo_discount, bundle_discount, points_discount } = order;
   return {
     id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total,
-    promo_code, promo_discount, bundle_discount,
+    promo_code, promo_discount, bundle_discount, points_discount,
     expires_at: stamp(order.expires_at), paid_at: stamp(order.paid_at), created_at: stamp(order.created_at), items,
   };
 }
@@ -237,15 +256,19 @@ function parseItems(items) {
 
 // One order from lines priced from the DB ({ product_id, size, quantity, unit_price, discount? }); the caller already holds
 // their stock. pr (task 26) = price() of these lines and the claimed promo row, or nothing (no discounts).
+// points (task 34) = so'm of points spent and the profile they come from; split over the lines after the discounts.
 // Per-store display number: the UPDATE locks the store row, so parallel orders get 1, 2, 3… with no gaps or repeats.
-export async function insertOrder(trx, store, c, lines, { method = 'cashier', notifyToken, recommendationId = null, holdMs = HOLD_MS, client = null, pr = null, promo = null }) {
+export async function insertOrder(trx, store, c, lines, { method = 'cashier', notifyToken, recommendationId = null, holdMs = HOLD_MS, client = null, pr = null, promo = null, points = 0, profileId = null }) {
   const subtotal = lines.reduce((s, l) => s + l.unit_price * l.quantity, 0);
   const d = pr ? { bundle_discount: pr.bundle_discount, promo_discount: pr.promo_discount, promo_code_id: promo?.id ?? null, promo_code: promo?.code ?? null } : {};
-  const t = totals(store, subtotal, c.fulfillment, (d.bundle_discount ?? 0) + (d.promo_discount ?? 0));
+  const off = lines.map((l, i) => pr?.discounts[i] ?? 0);
+  const pts = spread(lines.map((l, i) => l.unit_price * l.quantity - off[i]), points);
+  const t = totals(store, subtotal, c.fulfillment, (d.bundle_discount ?? 0) + (d.promo_discount ?? 0), points);
   await trx('stores').where({ id: store.id }).increment('order_seq', 1);
   const { order_seq: number } = await trx('stores').where({ id: store.id }).first('order_seq');
-  const [{ id }] = await trx('orders').insert({ store_id: store.id, number, ...c, ...t, ...d, payment_method: method, notify_token: notifyToken, recommendation_id: recommendationId, client, expires_at: iso(Date.now() + holdMs) }).returning('id');
-  await trx('order_items').insert(lines.map((l, i) => ({ order_id: id, product_id: l.product_id, size: l.size, quantity: l.quantity, unit_price: l.unit_price, discount: pr?.discounts[i] ?? 0 })));
+  const [{ id }] = await trx('orders').insert({ store_id: store.id, number, ...c, ...t, ...d, points_discount: points, profile_id: profileId, payment_method: method, notify_token: notifyToken, recommendation_id: recommendationId, client, expires_at: iso(Date.now() + holdMs) }).returning('id');
+  // discount = everything taken off the line (points too), so a return refunds the money paid; points = the points part.
+  await trx('order_items').insert(lines.map((l, i) => ({ order_id: id, product_id: l.product_id, size: l.size, quantity: l.quantity, unit_price: l.unit_price, discount: off[i] + pts[i], points: pts[i] })));
   return id;
 }
 
@@ -411,6 +434,16 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
     res.json(await view(cart));
   });
 
+  // Task 34: stop using points on this cart (using them again needs a new Telegram confirmation).
+  r.delete('/:token/points', async (req, res) => {
+    const cart = await db.transaction(async (trx) => {
+      const cart = await liveCart(trx, req.params.token);
+      await trx('carts').where({ id: cart.id }).update({ profile_id: null });
+      return { ...cart, profile_id: null };
+    });
+    res.json(await view(cart));
+  });
+
   // Kiosk idle reset and "Savatni tozalash": give every held unit back at once.
   r.delete('/:token', async (req, res) => {
     await db.transaction(async (trx) => {
@@ -422,12 +455,16 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
     res.status(204).end();
   });
 
-  // { fulfillment, name, phone, address?, lat?, lon?, payment? } → order. The cart's holds move to the order
+  // { fulfillment, name, phone, address?, lat?, lon?, payment?, points? } → order. The cart's holds move to the order
   // (a fresh 15 minutes to pay); totals and discounts are computed here from DB prices (any amount in the body is ignored).
+  // points (task 34) = so'm of the linked profile's points to spend (the cart view's points.max); checked here against
+  // the cap and the balance, 409 when either changed, so the customer is never charged a total they didn't see.
   r.post('/:token/checkout', async (req, res) => {
     const b = req.body ?? {};
     const method = b.payment ?? 'cashier';
     if (typeof method !== 'string' || !Object.hasOwn(methods, method)) throw fail(400, 'err.invalid', { field: 'field.payment' });
+    const want = b.points ?? 0;
+    if (!Number.isInteger(want) || want < 0 || want > 1e9) throw fail(400, 'err.invalid', { field: 'field.points' });
     const notifyToken = randomBytes(16).toString('hex');
     const id = await db.transaction(async (trx) => {
       const cart = await liveCart(trx, req.params.token);
@@ -440,9 +477,13 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
       const pr = await pricing(trx, cart, store, priced);
       if (pr.promo?.error) throw promoError(pr);
       if (pr.promo) await claimPromo(trx, pr.promo, c.phone);
+      const cfg = await pointsConfig(trx, store.id);
+      if (want) await checkSpend(trx, cfg, cart.profile_id, pr.goods, want);
       // Payme/Click can't take 0 so'm: a fully discounted order is settled at the cashier.
-      if (method !== 'cashier' && totals(store, pr.subtotal, c.fulfillment, pr.subtotal - pr.goods).total < 1) throw fail(400, 'err.invalid', { field: 'field.payment' });
-      const id = await insertOrder(trx, store, c, priced, { method, notifyToken, recommendationId: cart.recommendation_id, pr, promo: pr.promo });
+      if (method !== 'cashier' && totals(store, pr.subtotal, c.fulfillment, pr.subtotal - pr.goods, want).total < 1) throw fail(400, 'err.invalid', { field: 'field.payment' });
+      const profileId = cfg && cart.profile_id ? cart.profile_id : null; // earns on hand-over even when no points were spent
+      const id = await insertOrder(trx, store, c, priced, { method, notifyToken, recommendationId: cart.recommendation_id, pr, promo: pr.promo, points: want, profileId });
+      if (want) await spend(trx, cfg, cart.profile_id, id, want);
       await trx('carts').where({ id: cart.id }).del(); // reserved stays: the order owns the hold now
       return id;
     });
@@ -469,7 +510,7 @@ export function createOrderRouter(db, { methods = CASHIER, link = () => null } =
       number: v.number, store, status: v.status, payment_status: v.payment_status, payment_method: v.payment_method, fulfillment: v.fulfillment,
       items: v.items.map(({ id, name, name_ru, category, color, size, quantity, unit_price, fit }) => ({ id, name, name_ru, category, color, size, quantity, unit_price, fit })),
       fit_open: fitOpen(o),
-      subtotal: v.subtotal, bundle_discount: v.bundle_discount, promo_discount: v.promo_discount, promo_code: v.promo_code,
+      subtotal: v.subtotal, bundle_discount: v.bundle_discount, promo_discount: v.promo_discount, promo_code: v.promo_code, points_discount: v.points_discount,
       delivery_fee: v.delivery_fee, total: v.total, created_at: v.created_at, paid_at: v.paid_at, expires_at: v.expires_at,
       pay_ms: o.payment_status === 'pending' ? msLeft(o.expires_at) : null, pay_url: pay?.url ?? null, telegram: link(o.notify_token)?.url ?? null,
     });

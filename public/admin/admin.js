@@ -605,7 +605,8 @@ rf.addEventListener('submit', async (e) => {
   } catch (err) { $('retError').textContent = err.message; } finally { $('retSave').disabled = false; }
 });
 // Task 26: the order's discounts as [label, so'm] rows, bundle first (the order the server applies them in).
-const discountLines = (o) => [...(o.bundle_discount ? [[t('common.bundle_off'), o.bundle_discount]] : []), ...(o.promo_discount ? [[t('common.promo_off', { code: o.promo_code }), o.promo_discount]] : [])];
+const discountLines = (o) => [...(o.bundle_discount ? [[t('common.bundle_off'), o.bundle_discount]] : []), ...(o.promo_discount ? [[t('common.promo_off', { code: o.promo_code }), o.promo_discount]] : []),
+  ...(o.points_discount ? [[t('common.points_off'), o.points_discount]] : [])]; // task 34
 function totalsBlock(o) {
   return el('dl', { className: 'totals' },
     el('dt', { textContent: t('adm.receipt.subtotal') }), el('dd', { className: 'num', textContent: money(o.subtotal) }),
@@ -1335,9 +1336,9 @@ function printQr(q) {
 // ---------- Settings: store profile, team, audit log, my account (#/settings?tab=…).
 // The server decides who may do what; the tabs only hide what a role can't open.
 
-const SET_TABS = [['store', 'adm.set.store'], ['team', 'adm.set.team'], ['promo', 'adm.set.promo'], ['sync', 'adm.set.sync'], ['audit', 'adm.set.audit'], ['account', 'adm.set.account']];
+const SET_TABS = [['store', 'adm.set.store'], ['team', 'adm.set.team'], ['promo', 'adm.set.promo'], ['points', 'adm.set.points'], ['sync', 'adm.set.sync'], ['audit', 'adm.set.audit'], ['account', 'adm.set.account']];
 function loadSettings() {
-  const tabs = SET_TABS.filter(([k]) => me.role !== 'manager' || k === 'store' || k === 'account');
+  const tabs = SET_TABS.filter(([k]) => me.role !== 'manager' || ['store', 'points', 'account'].includes(k));
   const tab = tabs.some(([k]) => k === route.params.tab) ? route.params.tab : stores.length ? 'store' : 'account'; // a new owner has no store yet
   $('setTabs').replaceChildren(...tabs.map(([k, label]) => {
     const a = el('a', { className: 'chip', href: buildHash('settings', k === 'store' ? {} : { tab: k }), textContent: t(label) });
@@ -1345,8 +1346,65 @@ function loadSettings() {
     return a;
   }));
   for (const s of document.querySelectorAll('[data-tab]')) s.hidden = s.dataset.tab !== tab;
-  ({ store: loadStore, team: loadTeam, promo: loadPromos, sync: loadKeys, audit: loadAudit, account: loadAccount })[tab]();
+  ({ store: loadStore, team: loadTeam, promo: loadPromos, points: loadPoints, sync: loadKeys, audit: loadAudit, account: loadAccount })[tab]();
 }
+
+// Task 34: cashback points of the organisation the picked store belongs to (owner/super edit; a manager reads), the
+// total customers can still spend and the customers with points (a manager: those from orders of their store).
+const ptf = $('pointsForm');
+const pointsStore = () => scope || String(stores[0]?.id ?? me.store_id ?? '');
+async function loadPoints() {
+  const seq = (loads.points = (loads.points || 0) + 1);
+  $('pointsError').textContent = '';
+  $('pointsFields').disabled = true;
+  $('pointsKpis').replaceChildren(...kpiSkeleton(2));
+  const stop = skeletonRows($('pointsRows'), 5, 3);
+  try {
+    const p = await call(`/points?store_id=${encodeURIComponent(pointsStore())}`);
+    if (seq !== loads.points) return;
+    stateBox($('pointsLoadError'));
+    ptf.cashback_percent.value = p.cashback_percent;
+    ptf.points_max_share.value = p.points_max_share;
+    $('pointsFields').disabled = !p.can_edit;
+    $('pointsReadOnly').hidden = p.can_edit;
+    $('pointsSave').hidden = !p.can_edit;
+    $('pointsKpis').replaceChildren(
+      kpi({ label: t('adm.points.outstanding'), value: money(p.outstanding) }),
+      kpi({ label: t('adm.points.count'), value: fmt.num(p.count), sub: p.cashback_percent ? t('adm.points.on', { pct: p.cashback_percent }) : t('adm.points.off') }));
+    if (!p.customers.length) emptyRow($('pointsRows'), 5, { ic: 'sparkle', title: t('adm.points.none'), text: t(p.cashback_percent ? 'adm.points.none_text' : 'adm.points.off_text') });
+    else {
+      $('pointsRows').replaceChildren(...p.customers.map((c) => el('tr', {},
+        el('td', {}, el('strong', { textContent: c.name || '—' }), el('div', { className: 'sizes', textContent: c.phone })),
+        el('td', { className: 'num', textContent: money(c.balance) }),
+        el('td', { className: 'num hide-sm', textContent: money(c.earned) }),
+        el('td', { className: 'num hide-sm', textContent: money(c.spent) }),
+        el('td', { className: 'hide-sm', textContent: c.last_at ? fmt.dateTime(c.last_at) : '' }))));
+    }
+    $('pointsMore').textContent = p.count > p.customers.length ? t('adm.points.more', { n: p.customers.length, total: p.count }) : '';
+  } catch (err) {
+    if (seq !== loads.points) return;
+    $('pointsRows').replaceChildren();
+    $('pointsKpis').replaceChildren();
+    stateBox($('pointsLoadError'), err, () => loadPoints());
+  } finally {
+    stop?.();
+  }
+}
+ptf.onsubmit = async (e) => {
+  e.preventDefault();
+  $('pointsError').textContent = '';
+  if (!ptf.reportValidity()) return;
+  $('pointsSave').disabled = true;
+  try {
+    await call('/points', { method: 'PATCH', body: { store_id: Number(pointsStore()), cashback_percent: Number(ptf.cashback_percent.value), points_max_share: Number(ptf.points_max_share.value) } });
+    toast(t('adm.points.saved'));
+    loadPoints();
+  } catch (err) {
+    $('pointsError').textContent = err.message;
+  } finally {
+    $('pointsSave').disabled = false;
+  }
+};
 
 // Store profile. A super-admin picks the store here (defaults to the sidebar's); everyone else has one.
 const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id', 'bundle_percent'];

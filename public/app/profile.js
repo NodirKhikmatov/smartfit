@@ -53,6 +53,13 @@ function render() {
       ...(p.fit ? [row(t('kiosk.size.fit'), t(`kiosk.size.fit_${p.fit}`))] : []),
       ...(p.jeans ? [row(t('kiosk.size.jeans'), `W${p.jeans}`)] : []),
       ...['chest', 'waist', 'hips'].filter((k) => p[k] != null).map((k) => row(t(`kiosk.size.${k}`), n(p[k], 'kiosk.profile.cm')))),
+    // Task 34: cashback balance and history, only when the organisation has points (or had, and rows are left).
+    ...(p.points ? [el('section', { className: 'sum card' }, el('h2', { textContent: t('kiosk.points.title') }),
+      row(t('kiosk.points.balance_label'), fmt.som(p.points.balance), 'grand'),
+      ...(p.points.percent ? [el('p', { className: 'meta', textContent: t('kiosk.points.rule', { pct: p.points.percent }) })] : []),
+      ...(p.points.history.length ? p.points.history.map((h) => row(`${t(`kiosk.points.kind.${h.kind}`)} · № ${h.number} · ${fmt.dateTime(h.created_at)}`,
+        `${h.amount > 0 ? '+' : '−'}${fmt.som(Math.abs(h.amount))}`, h.amount > 0 ? 'off' : '')) // green = points received
+        : [el('p', { className: 'muted', textContent: t('kiosk.points.history_none') })]))] : []),
     el('section', { className: 'sum card' }, el('h2', { textContent: t('kiosk.profile.looks') }),
       ...(p.looks.length ? p.looks.flatMap((l) => [
         el('p', { className: 'meta', textContent: `${l.store.name} · ${fmt.dateTime(l.created_at)}` }),

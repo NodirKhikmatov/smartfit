@@ -33,6 +33,7 @@ const form = $('form');
 // Server cart (task 8): each item holds its stock for 15 min. The phone keeps the token across reloads; the kiosk never stores it.
 const CART_KEY = 'sfCart'; // the only thing the app stores in the browser: the phone's cart token
 let cart = null;
+let usePoints = true; // task 34: the cart screen's "pay with points" switch
 let syncs = new Set(); // add-to-cart buttons on the results screen
 const savedCart = (t) => {
   if (kiosk) return null;
@@ -156,6 +157,10 @@ form.addEventListener('input', () => remember());
 form.addEventListener('change', () => remember());
 
 function setCart(c) {
+  if (c?.token !== cart?.token) { // another cart (or none): the next customer starts with points on and no QR waiting
+    usePoints = true;
+    delete $('pointsBox').dataset.waiting;
+  }
   cart = c;
   savedCart(c?.token ?? null);
   syncCartUi();
@@ -1252,6 +1257,7 @@ function renderCartScreen() {
   $('cartBody').replaceChildren(el('ul', { className: 'items lines' }, ...cart.items.map(cartLine)));
   renderPay();
   renderPromo();
+  renderPoints();
   renderSum();
 }
 
@@ -1355,19 +1361,68 @@ $('promoInput').addEventListener('keydown', (e) => {
   applyPromo();
 });
 $('promoRemove').onclick = () => cartAction(() => api(`/cart/${cart.token}/promo`, null, 'DELETE'));
-// Discount rows in the order the server applies them: bundle, then the promo code.
-const discountRows = (bundle, promo, code) => [
+// Discount rows in the order the server applies them: bundle, then the promo code, then points (task 34).
+const discountRows = (bundle, promo, code, points = 0) => [
   ...(bundle ? [sumRow(t('common.bundle_off'), `−${som(bundle)}`, 'off')] : []),
   ...(promo ? [sumRow(t('common.promo_off', { code }), `−${som(promo)}`, 'off')] : []),
+  ...(points ? [sumRow(t('common.points_off'), `−${som(points)}`, 'off')] : []),
 ];
+
+// Task 34: cashback points. The customer confirms "use my points" in their own Telegram (the same one-time login as
+// the kiosk's, with this cart's token); the server links the profile to the cart and computes how much may be used
+// (cart.points.max) and the totals with it. The screen only chooses whether to use that amount.
+const pointsUsed = () => (usePoints && cart?.points?.linked ? cart.points.max : 0);
+function renderPoints() {
+  const p = cart.points, box = $('pointsBox');
+  box.hidden = !p || (!p.linked && !store?.profile); // linking needs the Telegram bot
+  if (box.hidden || box.dataset.waiting) return; // keep the QR / link on screen while the customer is in Telegram
+  if (!p.linked) {
+    return box.replaceChildren(el('p', { className: 'muted', textContent: t('kiosk.points.ask', { pct: p.share }) }),
+      el('button', { type: 'button', className: 'secondary wide', onclick: linkPoints }, icon('sparkle'), el('span', { textContent: t('kiosk.points.use') })));
+  }
+  const toggle = el('input', { type: 'checkbox', checked: usePoints && p.max > 0, disabled: !p.max, onchange: (e) => { usePoints = e.target.checked; renderSum(); } });
+  box.replaceChildren(
+    el('label', { className: 'check' }, toggle, el('span', { textContent: p.max ? t('kiosk.points.pay', { sum: som(p.max) }) : t('kiosk.points.none') })),
+    el('p', { className: 'meta', textContent: t('kiosk.points.balance', { sum: som(p.balance), pct: p.share }) }),
+    el('button', { type: 'button', className: 'ghost', onclick: () => cartAction(() => api(`/cart/${cart.token}/points`, null, 'DELETE')) }, t('kiosk.points.unlink')));
+}
+async function linkPoints(e) {
+  const box = $('pointsBox');
+  e.currentTarget.disabled = true;
+  let r;
+  try {
+    r = await api('/profile/login', { store_id: storeId, lang: getLang(), cart: cart.token });
+  } catch (err) {
+    renderPoints();
+    return toast(err.message, { tone: 'danger' });
+  }
+  const qr = el('div', { className: 'tgqr' });
+  qr.innerHTML = r.svg; // built by our server from the bot's t.me link
+  const goTo = kiosk ? [el('p', { textContent: t('kiosk.profile.scan') }), qr]
+    : /^https:\/\/t\.me\//.test(r.url) ? [el('a', { className: 'button primary wide', href: r.url, target: '_blank', rel: 'noopener' }, t('kiosk.profile.open_tg'))] : [];
+  box.dataset.waiting = '1';
+  box.replaceChildren(el('p', { className: 'meta', textContent: t('kiosk.points.confirm') }), ...goTo, el('p', { className: 'meta', role: 'status', textContent: t('kiosk.profile.waiting') }));
+  pollProfile(r.poll, async (s) => {
+    if (!box.isConnected || !cart) return stopProfilePoll();
+    if (['new', 'opened'].includes(s.state)) return; // still in Telegram
+    delete box.dataset.waiting;
+    if (s.state === 'done') {
+      usePoints = true;
+      return cartAction(() => api(`/cart/${cart.token}`));
+    }
+    renderPoints();
+    box.append(el('p', { className: 'field-error', role: 'alert', textContent: t(s.state === 'missing' ? 'kiosk.profile.login_missing' : 'kiosk.profile.expired') }));
+  });
+}
 
 function renderSum() {
   const delivery = checkout.fulfillment.value === 'delivery';
-  const s = cart.totals[delivery ? 'delivery' : 'pickup'], d = cart.delivery, dc = cart.discounts;
+  const used = pointsUsed(), d = cart.delivery, dc = cart.discounts;
+  const s = (used ? cart.points.totals : cart.totals)[delivery ? 'delivery' : 'pickup'];
   $('deliveryFields').hidden = !delivery;
   $('cartSum').replaceChildren(
     sumRow(t('kiosk.checkout.items'), som(s.subtotal)),
-    ...discountRows(dc.bundle, dc.promo, dc.code?.code),
+    ...discountRows(dc.bundle, dc.promo, dc.code?.code, used),
     ...(delivery ? [sumRow(t('kiosk.checkout.delivery_in', { city: d.city }), s.delivery_fee ? som(s.delivery_fee) : t('common.free'))] : []),
     sumRow(t('common.total'), som(s.total), 'grand'),
     ...(delivery && s.delivery_fee && d.free_over !== null ? [el('p', { className: 'meta', style: 'margin:.35rem 0 0', textContent: t('kiosk.checkout.free_over', { sum: som(d.free_over) }) })] : []),
@@ -1416,7 +1471,7 @@ checkout.addEventListener('submit', async (e) => {
   $('placeOrder').disabled = true;
   try {
     const r = await api(`/cart/${cart.token}/checkout`, {
-      fulfillment: f.fulfillment.value, name: f.fullname.value, phone: f.phone.value, payment: f.payment?.value || 'cashier',
+      fulfillment: f.fulfillment.value, name: f.fullname.value, phone: f.phone.value, payment: f.payment?.value || 'cashier', points: pointsUsed(),
       ...(delivery && { address: f.address.value, ...(pin && { lat: pin.lat, lon: pin.lng }) }),
     });
     setCart(null);
@@ -1424,6 +1479,7 @@ checkout.addEventListener('submit', async (e) => {
     showDone(r.order, r.payment, r.notify, r.track);
   } catch (err) {
     if (err.status === 404) return cartAction(() => Promise.reject(err));
+    if (/^points_/.test(err.code)) await cartAction(() => api(`/cart/${cart.token}`)); // the balance or cap changed: show the new numbers
     $('checkoutError').textContent = err.message;
   } finally {
     $('placeOrder').disabled = false;
@@ -1437,7 +1493,7 @@ function showDone(o, pay = { method: 'cashier' }, notify = null, track = null) {
   $('doneBody').replaceChildren(
     el('div', { className: 'sum card' },
       ...o.items.map((i) => sumRow(`${productName(i)} · ${sizeName(i.size)}${i.quantity > 1 ? ` × ${i.quantity}` : ''}`, som(i.unit_price * i.quantity))),
-      ...discountRows(o.bundle_discount, o.promo_discount, o.promo_code),
+      ...discountRows(o.bundle_discount, o.promo_discount, o.promo_code, o.points_discount),
       ...(o.fulfillment === 'delivery' ? [sumRow(t('kiosk.done.delivery'), o.delivery_fee ? som(o.delivery_fee) : t('common.free'))] : []),
       sumRow(t('common.total'), som(o.total), 'grand')),
     el('p', { className: 'notice', textContent: t('kiosk.done.pay_note', { what: online ? t('kiosk.done.pay_online', { method: t(PAY[pay.method]) }) : t('kiosk.done.pay_cashier'), time: fmt.time(o.expires_at) }) }),

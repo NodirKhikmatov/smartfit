@@ -17,6 +17,8 @@ import { kioskStatus } from '../kiosk.js';
 import { publicTeamRoutes, settingsRoutes, ROLES } from './settings.js';
 import { orgRoutes } from './orgs.js';
 import { mallRoutes } from './malls.js';
+import { pointsRoutes } from './points.js';
+import { returnPoints } from '../cart/points.js';
 import { promoRoutes } from './promos.js';
 import { fitOf } from '../size/size.js';
 import { demandItems, funnelStats, methodStats, occasionStats } from '../demand.js';
@@ -590,7 +592,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     return dateRange(q, 'o.created_at', f);
   }
   const ORDER_COLS = ['o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.phone', 'o.fulfillment', 'o.address', 'o.status',
-    'o.payment_status', 'o.payment_method', 'o.subtotal', 'o.bundle_discount', 'o.promo_discount', 'o.promo_code', 'o.delivery_fee', 'o.total', 'o.created_at', 'o.expires_at', 'o.telegram_chat_id'];
+    'o.payment_status', 'o.payment_method', 'o.subtotal', 'o.bundle_discount', 'o.promo_discount', 'o.promo_code', 'o.points_discount', 'o.delivery_fee', 'o.total', 'o.created_at', 'o.expires_at', 'o.telegram_chat_id'];
 
   // → { items, total, limit, offset }, newest first (dir=asc: oldest first, so the cashier sees the soonest to expire on top).
   r.get('/orders', async (req, res) => {
@@ -622,7 +624,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
       ['№', tr('adm.orders.time'), tr('common.store'), tr('adm.orders.customer'), tr('adm.csv.phone'), tr('adm.orders.fulfillment'), tr('field.address'),
         tr('adm.csv.subtotal'), tr('adm.csv.discount'), tr('field.promo_code'), tr('adm.csv.fee'), tr('adm.csv.total'), tr('field.payment'), tr('adm.orders.payment'), tr('adm.orders.status')],
       ...rows.map((o) => [o.number, tashkent(o.created_at), o.store_name, o.customer_name, phoneText(o.phone), tr(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), o.address,
-        o.subtotal, o.bundle_discount + o.promo_discount, o.promo_code, o.delivery_fee, o.total, o.payment_method === 'cashier' ? tr('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] ?? o.payment_method, tr(`adm.pay.${o.payment_status}`),
+        o.subtotal, o.bundle_discount + o.promo_discount + o.points_discount, o.promo_code, o.delivery_fee, o.total, o.payment_method === 'cashier' ? tr('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] ?? o.payment_method, tr(`adm.pay.${o.payment_status}`),
         tr(o.status === 'delivered' && o.fulfillment === 'pickup' ? 'adm.status.handed' : `adm.status.${o.status}`)]),
     ]);
     res.type('text/csv; charset=utf-8').attachment(`orders-${dayKey(Date.now())}.csv`).send(csv);
@@ -704,8 +706,8 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     try {
       await db.transaction(async (trx) => {
         // The key row first: a parallel double submit waits on its unique index, then fails and is answered below.
-        await trx('order_returns').insert({ order_id: o.id, order_item_id: line.id, store_id: o.store_id, kind: b.kind, reason: b.reason, quantity: qty,
-          refund, restock: b.restock, new_size: newSize, request_key: b.key, admin_id: req.admin.id });
+        const [{ id: retId }] = await trx('order_returns').insert({ order_id: o.id, order_item_id: line.id, store_id: o.store_id, kind: b.kind, reason: b.reason, quantity: qty,
+          refund, restock: b.restock, new_size: newSize, request_key: b.key, admin_id: req.admin.id }).returning('id');
         if (!(await trx('order_items').where({ id: line.id }).whereRaw('returned + ? <= quantity', [qty]).increment('returned', qty))) {
           const { returned } = await trx('order_items').where({ id: line.id }).first('returned');
           throw fail(409, 'err.return_too_many', { n: line.quantity - returned });
@@ -715,6 +717,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
         if (newSize && !(await trx('product_stock').where({ product_id: line.product_id, size: newSize }).whereRaw('quantity - reserved >= ?', [qty]).decrement('quantity', qty))) {
           throw fail(409, 'err.out_of_stock', { product: p, size: newSize });
         }
+        await returnPoints(trx, { id: retId, order_id: o.id, order_item_id: line.id, kind: b.kind, quantity: qty }); // task 34
         await audit(trx, req.admin, { action: 'order.return', storeId: o.store_id, entityId: o.id, label: o.number,
           after: { product: p.name, size: line.size, kind: b.kind, reason: b.reason, quantity: qty, refund, restock: b.restock, new_size: newSize } });
       });
@@ -799,6 +802,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   promoRoutes(r, db); // task 26
   categoryRoutes(r, db, { uploadDir }); // task 36
   mallRoutes(r, db, { uploadDir }); // task 37
+  pointsRoutes(r, db, { resolveStore }); // task 34
 
   // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.
   const inScope = (req, q, col = 'store_id') => {

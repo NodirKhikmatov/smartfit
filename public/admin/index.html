@@ -530,6 +530,33 @@
           </div>
         </section>
 
+        <section data-tab="points" hidden>
+          <form class="card settings-card" id="pointsForm" aria-labelledby="pointsTitle">
+            <div class="panel-head"><div><h2 id="pointsTitle" data-i18n="adm.points.title"></h2><p class="panel-sub" data-i18n="adm.points.sub"></p></div></div>
+            <div id="pointsLoadError"></div>
+            <p class="notice" id="pointsReadOnly" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#info"></use></svg><span data-i18n="adm.points.read_only"></span></p>
+            <fieldset id="pointsFields">
+              <legend class="visually-hidden" data-i18n="adm.points.title"></legend>
+              <div class="form-grid">
+                <label class="field"><span data-i18n="field.cashback_percent"></span> <input name="cashback_percent" type="number" min="0" max="20" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.points.percent_hint"></span></label>
+                <label class="field"><span data-i18n="field.points_max_share"></span> <input name="points_max_share" type="number" min="0" max="100" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.points.share_hint"></span></label>
+              </div>
+            </fieldset>
+            <p class="error" id="pointsError" role="alert"></p>
+            <div class="actions"><button class="primary" id="pointsSave" data-i18n="adm.set.save"></button></div>
+          </form>
+          <div class="kpis" id="pointsKpis"></div>
+          <h2 class="section-title" data-i18n="adm.points.customers"></h2>
+          <div class="table-wrap">
+            <table class="table">
+              <caption class="visually-hidden" data-i18n="adm.points.customers"></caption>
+              <thead><tr><th data-i18n="adm.points.customer"></th><th class="num" data-i18n="adm.points.balance"></th><th class="num hide-sm" data-i18n="adm.points.earned"></th><th class="num hide-sm" data-i18n="adm.points.spent"></th><th class="hide-sm" data-i18n="adm.points.last"></th></tr></thead>
+              <tbody id="pointsRows"></tbody>
+            </table>
+          </div>
+          <p class="meta" id="pointsMore"></p>
+        </section>
+
         <section data-tab="audit" hidden>
           <form class="toolbar" id="auditFilters" role="search">
             <label><span data-i18n="adm.audit.what"></span> <select name="entity"><option value="" data-i18n="common.all"></option></select></label>

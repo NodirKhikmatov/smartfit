@@ -52,6 +52,10 @@ What phase 3 (tasks 23–28, features seen in similar products) added:
   raised it (admin edit, CSV, sync API, a return, a cancelled order). Waiting requests on the profile page (cancel) and
   per product and size on Admin → Talab.
 - **Staff app (28):** `/staff/` for the shop floor (see below) and a new `staff` role.
+- **Cashback points (34):** per organisation (Admin → Sozlamalar → Ballar; off by default): a percent of the money paid
+  for the goods comes back as points when the order is handed over or delivered; at checkout the customer confirms in
+  Telegram and points pay up to a set share of the goods (never delivery). Balance and history on the profile page and
+  `/points` in the bot; a per-customer list for the owner and managers. Points stay inside one organisation.
 
 Stack: Node.js 22 + Express 5, Knex with PostgreSQL in production (SQLite file in development), vanilla JS frontend,
 Caddy for HTTPS.
@@ -390,6 +394,9 @@ the 2-week pilot.
 - [ ] Fit feedback: with `PUBLIC_URL` set, a handed-over order's status page and Telegram message ask "how did it fit?";
       check a product's fit offset only after it has ≥ 5 answers. Refunds for returns are paid back by hand (cash or the
       Payme/Click cabinet); staff know this.
+- [ ] Cashback points: decide the percent and the share points may pay; tell cashiers that a returned item gives back
+      its points share as points (not cash) and takes back the points it earned, and that "delete my data" forfeits
+      the balance. Add `/points` to the bot's command list in @BotFather.
 - [ ] Promo codes: decide the codes, dates and limits. The per-phone limit uses the typed phone (not verified), and
       Telegram order messages show only the total.
 - [ ] Missed demand and funnel logs have no cleanup yet: decide a retention period. The funnel endpoint is public

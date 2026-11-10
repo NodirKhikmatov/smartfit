@@ -12,7 +12,8 @@ import { SIZES, isFit } from './size/size.js';
 import { REC } from './recommend/routes.js';
 import { parseJson, setKey } from './cart/promo.js';
 import { stamp } from './cart/cart.js';
-import { t, LANGS, productName } from '../public/shared/i18n.js';
+import { pointsView, balanceOf } from './cart/points.js';
+import { t, fmt, LANGS, productName } from '../public/shared/i18n.js';
 
 export const SAVE_MS = 10 * 60 * 1000; // time to open Telegram and share the contact
 export const LOGIN_MS = 3 * 60 * 1000; // the kiosk QR
@@ -81,9 +82,13 @@ export function createProfileRouter(db, { telegram, limit, pollLimit, now = Date
     res.status(201).json(await issue('save', store, langOf(b.lang), { ...bodyNumbers(b), looks }));
   });
 
+  // { store_id, lang, cart? }. Task 34: with the cart token, confirming in Telegram links that profile to the cart, so
+  // its points can pay part of the order (the screen only learns "done" and reloads the cart).
   r.post('/login', limit, async (req, res) => {
     const store = await storeOf(req.body?.store_id);
-    res.status(201).json(await issue('login', store, langOf(req.body?.lang)));
+    const cart = req.body?.cart;
+    if (cart != null && !(typeof cart === 'string' && TOKEN.test(cart))) throw fail(400, 'err.bad_request');
+    res.status(201).json(await issue('login', store, langOf(req.body?.lang), cart ? { cart } : null));
   });
 
   // Task 31: { store_id, product_id, size, lang } → a deep link that keeps a waiting request for this size once the
@@ -139,13 +144,14 @@ export function createProfileRouter(db, { telegram, limit, pollLimit, now = Date
     const orders = await db('orders as o').join('stores as s', 's.id', 'o.store_id').where('s.organization_id', p.organization_id)
       .where('o.phone', p.phone).orderBy('o.id', 'desc').limit(50)
       .select('o.number', 'o.created_at', 'o.status', 'o.payment_status', 'o.fulfillment', 'o.total', 'o.notify_token', 's.name as store_name');
+    const points = await profilePoints(db, p);
     const alerts = await db('stock_alerts as a').join('products as pr', 'pr.id', 'a.product_id').join('stores as s', 's.id', 'a.store_id')
       .where('a.profile_id', p.id).whereNull('a.notified_at').orderBy('a.id', 'desc')
       .select('a.id', 'a.size', 'a.created_at', 'pr.id as product_id', 'pr.name', 'pr.name_ru', 'pr.image_url', 's.name as store_name');
     res.json({
       organization: org?.name ?? '', name: p.name, phone: p.phone, lang: p.lang, consent_at: stamp(p.consent_at),
       ...Object.fromEntries(NUMBERS.map((k) => [k, p[k]])), looks,
-      alerts: alerts.map((a) => ({ ...a, created_at: stamp(a.created_at) })),
+      alerts: alerts.map((a) => ({ ...a, created_at: stamp(a.created_at) })), points,
       orders: orders.map(({ notify_token, created_at, ...o }) => ({ ...o, created_at: stamp(created_at), url: notify_token ? `/order/${notify_token}` : null })),
     });
   });
@@ -168,9 +174,14 @@ export function createProfileRouter(db, { telegram, limit, pollLimit, now = Date
 // verified phone) keep only what a sale record needs: number, items, sums, payment, dates and the phone (receipts,
 // returns, the per-phone promo limit); the name, address, map pin and Telegram chat are erased. Open orders are
 // still being served, so they keep their contact details until they finish.
+// Task 34: the points ledger rows go too (the balance is given up; the confirm dialog says so). Orders keep
+// points_discount as part of the sale record; their and any open cart's link to the profile is cleared.
 export async function deleteProfiles(db, ids) {
   if (!ids.length) return 0;
   return db.transaction(async (trx) => {
+    await trx('points_ledger').whereIn('profile_id', ids).del();
+    await trx('orders').whereIn('profile_id', ids).update({ profile_id: null });
+    await trx('carts').whereIn('profile_id', ids).update({ profile_id: null });
     for (const p of await trx('customer_profiles').whereIn('id', ids)) {
       await trx('orders').where({ phone: p.phone }).whereIn('status', ['delivered', 'cancelled'])
         .whereIn('store_id', trx('stores').where({ organization_id: p.organization_id }).select('id'))
@@ -222,7 +233,7 @@ export async function handleProfileMessage(db, m, send, { now = Date.now(), base
       .update({ state: 'opened', telegram_user_id: from });
     const row = await db('profile_tokens as k').join('stores as s', 's.id', 'k.store_id').join('organizations as o', 'o.id', 'k.organization_id')
       .where({ 'k.token': token, 'k.state': 'opened', 'k.telegram_user_id': from }).where('k.expires_at', '>', iso(now))
-      .first('k.kind', 'k.lang', 's.name as store', 'o.name as org');
+      .first('k.kind', 'k.lang', 'k.data', 's.name as store', 'o.name as org');
     if (!row || row.kind !== KIND[start[1]]) return send(chat, t('kiosk.bot.expired', {}, userLang)).then(() => true);
     if (row.kind === 'alert') {
       // Already has a profile here (consent given before): keep the request now, no contact needed again.
@@ -235,7 +246,9 @@ export async function handleProfileMessage(db, m, send, { now = Date.now(), base
       });
       if (done) return send(chat, done).then(() => true);
     }
-    const ask = row.kind !== 'login' ? t('kiosk.bot.consent', { org: row.org }, row.lang) : t('kiosk.bot.login', { store: row.store }, row.lang);
+    // Task 34: a login that links points to a cart says so, so nobody confirms a stranger's QR without knowing.
+    const ask = row.kind !== 'login' ? t('kiosk.bot.consent', { org: row.org }, row.lang)
+      : t(parseJson(row.data, {})?.cart ? 'kiosk.bot.login_points' : 'kiosk.bot.login', { store: row.store }, row.lang);
     await send(chat, ask, contactKeyboard(row.lang));
     return true;
   }
@@ -254,7 +267,9 @@ export async function handleProfileMessage(db, m, send, { now = Date.now(), base
       if (row.kind === 'login') {
         if (p) await trx('customer_profiles').where({ id: p.id }).update({ phone, updated_at: iso(now) });
         await trx('profile_tokens').where({ id: row.id }).update({ state: p ? 'done' : 'missing', profile_id: p?.id ?? null });
-        return { kind: 'login', found: !!p };
+        const cart = p && parseJson(row.data, {}).cart; // task 34: a live cart of the store that asked
+        const linked = cart && await trx('carts').where({ token: cart, store_id: row.store_id }).where('expires_at', '>', iso(now)).update({ profile_id: p.id });
+        return { kind: 'login', found: !!p, points: linked ? await balanceOf(trx, p.id) : null };
       }
       const data = parseJson(row.data, {});
       const numbers = Object.fromEntries(NUMBERS.filter((k) => data[k] != null).map((k) => [k, data[k]])); // a later save fills in, never blanks
@@ -274,7 +289,10 @@ export async function handleProfileMessage(db, m, send, { now = Date.now(), base
     });
     if (!result) return true;
     const lang = row.lang;
-    if (result.kind === 'login') await send(chat, t(result.found ? 'kiosk.bot.logged_in' : 'kiosk.bot.no_profile', {}, lang), NO_KEYBOARD);
+    if (result.kind === 'login') {
+      const msg = result.points != null ? t('kiosk.bot.points_linked', { sum: fmt.num(result.points) }, lang) : t(result.found ? 'kiosk.bot.logged_in' : 'kiosk.bot.no_profile', {}, lang);
+      await send(chat, msg, NO_KEYBOARD);
+    }
     else await send(chat, [result.alert ?? t('kiosk.bot.saved', {}, lang), result.url && t('kiosk.bot.page', { url: result.url }, lang), t('kiosk.bot.delete_hint', {}, lang)].filter(Boolean).join('\n\n'), NO_KEYBOARD);
     return true;
   }
@@ -283,6 +301,20 @@ export async function handleProfileMessage(db, m, send, { now = Date.now(), base
     const ids = (await db('customer_profiles').where({ telegram_user_id: from }).select('id')).map((p) => p.id);
     await deleteProfiles(db, ids);
     await send(chat, t(ids.length ? 'kiosk.bot.deleted' : 'kiosk.bot.none', {}, userLang), NO_KEYBOARD);
+    return true;
+  }
+  // Task 34: balance and the last rows per organisation where this Telegram user has a profile with points.
+  if (/^\/points(?:@\w+)?$/.test(text)) {
+    const mine = await db('customer_profiles as p').join('organizations as o', 'o.id', 'p.organization_id').where('p.telegram_user_id', from)
+      .select('p.id', 'p.organization_id', 'p.lang', 'o.name as org');
+    const lines = [];
+    for (const p of mine) {
+      const v = await profilePoints(db, p, 5);
+      if (!v) continue;
+      lines.push([`${p.org}: ${t('kiosk.points.balance_line', { sum: fmt.num(v.balance) }, p.lang)}`,
+        ...v.history.map((h) => `${h.amount > 0 ? '+' : '−'}${fmt.num(Math.abs(h.amount))} · ${t(`kiosk.points.kind.${h.kind}`, {}, p.lang)} · №${h.number}`)].join('\n'));
+    }
+    await send(chat, lines.length ? lines.join('\n\n') : t('kiosk.bot.no_points', {}, mine[0]?.lang ?? userLang));
     return true;
   }
   if (/^\/profile(?:@\w+)?$/.test(text)) {
@@ -297,4 +329,13 @@ export async function handleProfileMessage(db, m, send, { now = Date.now(), base
     return true;
   }
   return false;
+}
+
+// Task 34: { percent, balance, history } when this organisation has points on, or the customer still has rows from
+// when it had; null otherwise (the page and the bot then show nothing about points).
+async function profilePoints(db, p, limit = 20) {
+  const { cashback_percent: percent } = await db('organizations').where({ id: p.organization_id }).first('cashback_percent');
+  const v = await pointsView(db, p.id, limit);
+  if (!percent && !v.history.length) return null;
+  return { percent, balance: v.balance, history: v.history.map((h) => ({ ...h, created_at: stamp(h.created_at) })) };
 }

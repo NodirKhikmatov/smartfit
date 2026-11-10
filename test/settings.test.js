@@ -327,6 +327,11 @@ test('every mutating admin route writes an audit row', async () => {
       return admin('DELETE', `/categories/${c.id}/image`, undefined, ownerToken);
     }],
     'POST /orgs': ['org.create', () => admin('POST', '/orgs', { name: 'Audit brand', owner_email: `org${Date.now()}@smartfit.uz` }, superToken)],
+    // Task 34: the organisation's cashback setting (owner); a value that changes, so a row is written.
+    'PATCH /points': ['org.points', async () => {
+      const g = (await admin('GET', '/points', undefined, ownerToken)).body;
+      return admin('PATCH', '/points', { cashback_percent: g.cashback_percent === 5 ? 6 : 5 }, ownerToken);
+    }],
     // Task 37: malls (super) and the mall admin's own mall.
     'POST /malls': ['mall.create', () => newMall()],
     'PATCH /malls/:id': ['mall.update', async () => admin('PATCH', `/malls/${(await newMall()).body.id}`, { name: `Yangi ${Date.now()}`, store_ids: [] }, superToken)],

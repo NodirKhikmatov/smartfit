@@ -79,6 +79,7 @@ test('every key used in code exists, and every dictionary key is used', () => {
     'kiosk.track.step': ['placed', 'paid', 'packing', 'shipping', 'delivered', 'handed'],
     'adm.ent': AUDIT_ENTITIES, 'adm.act': AUDIT_ACTIONS,
     'kiosk.style': STYLES,
+    'kiosk.points.kind': ['earn', 'spend', 'refund', 'clawback', 'return'],
   };
   const all = Object.values(sources).join('\n');
   for (const [prefix, members] of Object.entries(FAMILIES)) {

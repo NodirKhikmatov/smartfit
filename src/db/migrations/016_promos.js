@@ -8,11 +8,11 @@
 export const config = { transaction: false };
 
 const OLD_CHECK = 'subtotal >= 0 and delivery_fee >= 0 and total = subtotal + delivery_fee';
-const NEW_CHECK = 'subtotal >= 0 and delivery_fee >= 0 and bundle_discount >= 0 and promo_discount >= 0'
+export const NEW_CHECK = 'subtotal >= 0 and delivery_fee >= 0 and bundle_discount >= 0 and promo_discount >= 0'
   + ' and bundle_discount + promo_discount <= subtotal and total = subtotal - bundle_discount - promo_discount + delivery_fee';
 const isPg = (knex) => knex.client.config.client === 'pg';
 
-async function withFksOff(knex, fn) {
+export async function withFksOff(knex, fn) {
   if (isPg(knex)) return knex.transaction(fn);
   await knex.raw('pragma foreign_keys = off');
   try {
@@ -25,7 +25,7 @@ async function withFksOff(knex, fn) {
 }
 
 // Swaps the orders total CHECK. SQLite: same table SQL with the new CHECK, rows copied, swapped in, indexes recreated.
-async function setTotalCheck(trx, from, to) {
+export async function setTotalCheck(trx, from, to) {
   if (isPg(trx)) {
     await trx.raw('alter table orders drop constraint orders_total_check');
     return trx.raw(`alter table orders add constraint orders_total_check check (${to})`);

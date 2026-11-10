@@ -74,6 +74,7 @@ function render() {
       // Task 26: discounts, bundle first (the order the server applies them in).
       ...(o.bundle_discount ? [el('div', { className: 'off' }, el('span', { textContent: t('common.bundle_off') }), el('span', { textContent: `−${fmt.som(o.bundle_discount)}` }))] : []),
       ...(o.promo_discount ? [el('div', { className: 'off' }, el('span', { textContent: t('common.promo_off', { code: o.promo_code }) }), el('span', { textContent: `−${fmt.som(o.promo_discount)}` }))] : []),
+      ...(o.points_discount ? [el('div', { className: 'off' }, el('span', { textContent: t('common.points_off') }), el('span', { textContent: `−${fmt.som(o.points_discount)}` }))] : []),
       ...(o.fulfillment === 'delivery' ? [el('div', {}, el('span', { textContent: t('kiosk.done.delivery') }), el('span', { textContent: o.delivery_fee ? fmt.som(o.delivery_fee) : t('common.free') }))] : []),
       el('div', { className: 'grand' }, el('span', { textContent: t('common.total') }), el('span', { textContent: fmt.som(o.total) }))),
     ...(o.fit_open ? [fitBox(o)] : []),

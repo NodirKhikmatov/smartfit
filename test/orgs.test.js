@@ -78,6 +78,10 @@ async function orgBRecords() {
   await db('qr_scans').insert({ token: 'd'.repeat(32), store_id: b1, product_id: product.id }); // task 32: a label scan
   await db('recommendation_logs').insert({ store_id: b1, product_ids: '[]', source: 'rules', occasion: 'party' }); // task 33
   const promo = (await admin('POST', '/promos', { code: 'ORGBPROMO', kind: 'percent', value: 10, store_id: b1 }, ownerB)).body; // task 26
+  // Task 34: org B has points on and a customer with points from that order (same name and phone the walk looks for).
+  await db('organizations').where({ id: orgB }).update({ cashback_percent: 5 });
+  const [{ id: profile }] = await db('customer_profiles').insert({ organization_id: orgB, telegram_user_id: 777001, phone: '+998901112233', name: 'Bobur', consent_at: new Date().toISOString() }).returning('id');
+  await db('points_ledger').insert({ organization_id: orgB, profile_id: profile, order_id: order.id, kind: 'earn', amount: 5000, ref: `earn:${order.id}` });
   return { product, order, fitting, invite, key, member, promo };
 }
 
@@ -245,6 +249,19 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       refused(await admin('PATCH', `/promos/${mine.id}`, { store_id: b1 }, ownerA)); // can't move a code into org B's store
       await db('promo_codes').where({ id: mine.id }).del();
     },
+    // Task 34: org B's points setting and customer list (names, phones) are org B's.
+    'GET /points': async () => {
+      refused(await admin('GET', `/points?store_id=${b1}`, undefined, ownerA));
+      const r = await admin('GET', '/points', undefined, ownerA);
+      noB(r);
+      assert.equal(r.body.outstanding, 0);
+    },
+    'PATCH /points': async () => {
+      refused(await admin('PATCH', '/points', { store_id: b1, cashback_percent: 20 }, ownerA));
+      const r = await admin('PATCH', '/points', { cashback_percent: 3 }, ownerA);
+      assert.equal(r.status, 200);
+      await db('organizations').where({ id: orgA }).update({ cashback_percent: 0 });
+    },
     // Task 37: malls are super's; a mall's own routes are the mall admin's. A shop owner gets neither, even in that mall.
     'GET /malls': async () => refused(await admin('GET', '/malls', undefined, ownerA)),
     'POST /malls': async () => refused(await admin('POST', '/malls', { name: 'X', city: 'T', address: 'A', admin_email: 'm@smartfit.uz' }, ownerA)),
@@ -282,6 +299,7 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
   assert.equal((await db('admins').where({ id: B.member.id }).first()).disabled_at, null);
   assert.equal((await db('sync_keys').where({ id: B.key.id }).first()).revoked_at, null);
   assert.equal((await db('promo_codes').where({ id: B.promo.id }).first()).value, 10);
+  assert.equal((await db('organizations').where({ id: orgB }).first()).cashback_percent, 5);
   const bStore = await db('stores').where({ id: b1 }).first();
   assert.equal(Boolean(bStore.mall_hidden), false);
   assert.equal(bStore.logo_url, null);
@@ -352,7 +370,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 25; i > 12; i--) await m.migrate.down(); // 025 … 013
+    for (let i = 26; i > 12; i--) await m.migrate.down(); // 026 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);
