@@ -20,11 +20,11 @@ export const HOLD_MS = 15 * 60 * 1000;
 export const HANDOFF_MS = 5 * 60 * 1000; // how long the kiosk's "continue on your phone" QR works
 const MAX_UNITS = 20; // per cart; open carts per client are capped by maxOpenCarts (task 21)
 const DELIVERY_RADIUS_KM = 30; // "within the city" = the map pin is this close to the store
-const TOKEN = /^[a-f0-9]{32}$/;
-const iso = (ms) => new Date(ms).toISOString(); // ISO strings compare correctly in SQLite text and Postgres timestamptz
+export const TOKEN = /^[a-f0-9]{32}$/;
+export const iso = (ms) => new Date(ms).toISOString(); // ISO strings compare correctly in SQLite text and Postgres timestamptz
 
 // Payment methods offered at checkout. Each returns what the client needs; online ones add a pay `url` (src/cart/payments.js).
-const CASHIER = { cashier: async () => ({ method: 'cashier' }) };
+export const CASHIER = { cashier: async () => ({ method: 'cashier' }) };
 
 // Pickup is free. Delivery: the store's flat city fee, free when the goods amount is above the store's threshold (null = never free).
 export function deliveryFee(store, subtotal, fulfillment) {
@@ -42,15 +42,21 @@ export const totals = (store, subtotal, fulfillment, discount = 0, points = 0) =
 export const hold = async (trx, productId, size, n) =>
   (await trx('product_stock').where({ product_id: productId, size }).whereRaw('quantity - reserved >= ?', [n]).increment('reserved', n)) === 1;
 // Clamped at 0 so one inconsistent row (e.g. a hand-edited DB) can't make the sweep, and with it every cart request, fail.
-const release = (trx, lines) =>
+export const release = (trx, lines) =>
   Promise.all(lines.map((l) => trx('product_stock').where({ product_id: l.product_id, size: l.size })
     .update({ reserved: trx.raw('case when reserved >= ? then reserved - ? else 0 end', [l.quantity, l.quantity]) })));
 
+// Task 38: extends every live store cart of one mall cart, so all its shops' holds run out at the same moment.
+// One UPDATE over the whole group locks its rows in one go (the same order for every caller, so no deadlock on Postgres).
+export const extendGroup = (trx, mallToken, now = Date.now()) =>
+  trx('carts').where({ mall_token: mallToken }).where('expires_at', '>', iso(now)).update({ expires_at: iso(now + HOLD_MS), updated_at: trx.fn.now() });
+
 // Extends a live cart's hold and returns it. The UPDATE also locks the row against a concurrent expiry sweep.
-async function lockCart(trx, token, now = Date.now()) {
-  const n = typeof token === 'string' && TOKEN.test(token)
-    ? await trx('carts').where({ token }).where('expires_at', '>', iso(now)).update({ expires_at: iso(now + HOLD_MS), updated_at: trx.fn.now() })
-    : 0;
+export async function lockCart(trx, token, now = Date.now()) {
+  if (typeof token !== 'string' || !TOKEN.test(token)) return null;
+  const { mall_token: mallToken } = (await trx('carts').where({ token }).first('mall_token')) ?? {};
+  if (mallToken) await extendGroup(trx, mallToken, now);
+  const n = await trx('carts').where({ token }).where('expires_at', '>', iso(now)).update({ expires_at: iso(now + HOLD_MS), updated_at: trx.fn.now() });
   return n ? trx('carts').where({ token }).first() : null;
 }
 async function liveCart(trx, token) {
@@ -164,7 +170,7 @@ async function pricing(q, cart, store, lines) {
 const promoError = (pr) => fail(409, pr.promo.error, pr.promo.error === 'err.promo_min' ? { sum: fmt.num(pr.promo.min_order) } : {});
 
 // Prices always come from the products table, never from the request.
-async function cartView(db, cart, payments) {
+export async function cartView(db, cart, payments) {
   const store = await storeOf(db, cart.store_id);
   const rows = await db('cart_items as c').join('products as p', 'p.id', 'c.product_id').leftJoin('categories as k', 'k.id', 'p.category_id')
     .where('c.cart_id', cart.id).orderBy('c.id')
@@ -215,10 +221,11 @@ export async function orderView(db, order) {
   const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').where('i.order_id', order.id).orderBy('i.id')
     .select('i.id', 'i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.sizes', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price', 'i.discount', 'i.returned', 'i.fit');
   const { id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total, promo_code, promo_discount, bundle_discount, points_discount,
-    instalment_months, instalment_percent, instalment_monthly } = order;
+    instalment_months, instalment_percent, instalment_monthly, group_number } = order;
   return {
     id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total,
     promo_code, promo_discount, bundle_discount, points_discount, instalment_months, instalment_percent, instalment_monthly,
+    group_number: group_number ?? null, // task 38: the mall order this shop's order is part of
     expires_at: stamp(order.expires_at), paid_at: stamp(order.paid_at), created_at: stamp(order.created_at), items,
   };
 }
@@ -255,7 +262,7 @@ export function customer(b, store) {
   return c;
 }
 
-function parseItems(items) {
+export function parseItems(items) {
   if (!Array.isArray(items) || items.length < 1 || items.length > 10) throw fail(400, 'err.invalid', { field: 'field.items' });
   return items.map((i) => {
     if (!Number.isInteger(i?.product_id) || i.product_id < 1 || typeof i.size !== 'string') throw fail(400, 'err.item_missing');
@@ -267,7 +274,7 @@ function parseItems(items) {
 // their stock. pr (task 26) = price() of these lines and the claimed promo row, or nothing (no discounts).
 // points (task 34) = so'm of points spent and the profile they come from; split over the lines after the discounts.
 // Per-store display number: the UPDATE locks the store row, so parallel orders get 1, 2, 3… with no gaps or repeats.
-export async function insertOrder(trx, store, c, lines, { method = 'cashier', notifyToken, recommendationId = null, holdMs = HOLD_MS, client = null, pr = null, promo = null, points = 0, profileId = null, instalment = null }) {
+export async function insertOrder(trx, store, c, lines, { method = 'cashier', notifyToken, recommendationId = null, holdMs = HOLD_MS, client = null, pr = null, promo = null, points = 0, profileId = null, instalment = null, group = {} }) {
   const subtotal = lines.reduce((s, l) => s + l.unit_price * l.quantity, 0);
   const d = pr ? { bundle_discount: pr.bundle_discount, promo_discount: pr.promo_discount, promo_code_id: promo?.id ?? null, promo_code: promo?.code ?? null } : {};
   const off = lines.map((l, i) => pr?.discounts[i] ?? 0);
@@ -277,20 +284,106 @@ export async function insertOrder(trx, store, c, lines, { method = 'cashier', no
   const inst = instalment ? { instalment_months: instalment.months, instalment_percent: instalment.percent, instalment_monthly: monthly(t.total, instalment.months, instalment.percent) } : {};
   await trx('stores').where({ id: store.id }).increment('order_seq', 1);
   const { order_seq: number } = await trx('stores').where({ id: store.id }).first('order_seq');
-  const [{ id }] = await trx('orders').insert({ store_id: store.id, number, ...c, ...t, ...d, ...inst, points_discount: points, profile_id: profileId, payment_method: method, notify_token: notifyToken, recommendation_id: recommendationId, client, expires_at: iso(Date.now() + holdMs) }).returning('id');
+  const [{ id }] = await trx('orders').insert({ store_id: store.id, number, ...c, ...t, ...d, ...inst, points_discount: points, profile_id: profileId, payment_method: method, notify_token: notifyToken, recommendation_id: recommendationId, client, ...group, expires_at: iso(Date.now() + holdMs) }).returning('id');
   // discount = everything taken off the line (points too), so a return refunds the money paid; points = the points part.
   await trx('order_items').insert(lines.map((l, i) => ({ order_id: id, product_id: l.product_id, size: l.size, quantity: l.quantity, unit_price: l.unit_price, discount: off[i] + pts[i], points: pts[i] })));
+  return id;
+}
+
+// A 409 carrying `missed` (task 24) is logged as missed demand after its transaction rolled back, then rethrown.
+export const missedThen = (db) => async (err) => {
+  if (err.missed) await logMissed(db, { ...err.missed, source: 'cart' }).catch((e) => console.error('missed demand not logged:', e.message));
+  throw err;
+};
+
+// A new store cart. Inventory DoS guard (X2): one client can't hold stock in more than maxOpenCarts live carts
+// (0 = no check); task 38: a mall cart counts once however many shops it spans. `extra` = { mall_token, mall_id }.
+export async function openCart(trx, req, storeId, maxOpenCarts, extra = {}) {
+  const client = clientKey(req.ip);
+  if (maxOpenCarts) {
+    const [{ n }] = await trx('carts').where({ client }).where('expires_at', '>', iso(Date.now())).select(trx.raw('count(distinct coalesce(mall_token, token)) as n'));
+    if (Number(n) >= maxOpenCarts) throw fail(429, 'err.too_many_carts');
+  }
+  const token = randomBytes(16).toString('hex');
+  await trx('carts').insert({ store_id: storeId, token, client, ...extra, expires_at: iso(Date.now() + HOLD_MS) });
+  return trx('carts').where({ token }).first();
+}
+
+// Adds parsed items to a locked cart, all or nothing (the caller's transaction rolls back on a throw).
+// b.rec / b.outfit (task 26): the results screen the items came from and the outfit card's product ids.
+export async function addLines(trx, cart, items, b) {
+  const [{ n }] = await trx('cart_items').where({ cart_id: cart.id }).sum({ n: 'quantity' });
+  if (Number(n ?? 0) + items.length > MAX_UNITS) throw fail(409, 'err.cart_full', { max: MAX_UNITS });
+  for (const { product_id, size } of items) {
+    const p = await trx('products').where({ id: product_id, store_id: cart.store_id }).first('name', 'name_ru', 'category', 'sizes');
+    if (!p) throw fail(404, 'err.product_not_found');
+    if (!sizesOf(p).includes(size)) throw fail(400, 'err.product_size', { product: p });
+    if (!(await hold(trx, product_id, size, 1))) {
+      // Task 24: logged after the rollback (missedThen) as missed demand, once per results screen or cart.
+      throw Object.assign(fail(409, 'err.out_of_stock', { product: p, size: size === 'ONE' ? 'common.size_one' : size }),
+        { item: { product_id, size }, // task 31: the app offers "Kelganda xabar bering" for this size
+          missed: { storeId: cart.store_id, session: typeof b.rec === 'string' && REC.test(b.rec) ? b.rec : cart.token, items: [{ product_id, size }] } });
+    }
+    await trx('cart_items').insert({ cart_id: cart.id, product_id, size, quantity: 1 })
+      .onConflict(['cart_id', 'product_id', 'size']).merge({ quantity: trx.raw('?? + 1', ['cart_items.quantity']) });
+  }
+  // Pilot funnel: added from a results screen (`rec`) → that suggestion was accepted; the order inherits it.
+  const rec = typeof b.rec === 'string' && REC.test(b.rec) ? await trx('recommendation_logs').where({ token: b.rec, store_id: cart.store_id }).first('id', 'accepted_at', 'outfits') : null;
+  if (rec) {
+    if (!rec.accepted_at) await trx('recommendation_logs').where({ id: rec.id }).update({ accepted_at: iso(Date.now()) });
+    await trx('carts').where({ id: cart.id }).update({ recommendation_id: rec.id });
+    const shown = parseJson(rec.outfits, []);
+    const key = Array.isArray(b.outfit) && b.outfit.length <= 6 && b.outfit.every((x) => Number.isInteger(x)) ? setKey(b.outfit) : null;
+    const bundles = parseJson((await trx('carts').where({ id: cart.id }).first('bundles')).bundles, []);
+    if (key && shown.some((o) => setKey(o) === key) && !bundles.some((o) => setKey(o) === key) && bundles.length < MAX_UNITS) {
+      await trx('carts').where({ id: cart.id }).update({ bundles: JSON.stringify([...bundles, [...b.outfit].sort((x, y) => x - y)]) });
+    }
+  }
+  return trx('carts').where({ id: cart.id }).first(); // fresh: the view prices with the bundles just saved
+}
+
+// Checkout options from the body, checked before any transaction: { method, want (so'm of points), months (term or null) }.
+export function checkoutInput(b, methods) {
+  const method = b.payment ?? 'cashier';
+  if (typeof method !== 'string' || !Object.hasOwn(methods, method)) throw fail(400, 'err.invalid', { field: 'field.payment' });
+  const want = b.points ?? 0;
+  if (!Number.isInteger(want) || want < 0 || want > 1e9) throw fail(400, 'err.invalid', { field: 'field.points' });
+  // Task 35: instalment = the term in months; only at the cashier (the store's Nasiya terminal), never online.
+  const months = b.instalment ?? null;
+  if (months !== null && (!Number.isInteger(months) || method !== 'cashier')) throw fail(400, 'err.invalid', { field: 'field.instalment' });
+  return { method, want, months };
+}
+
+// A locked cart → one order, inside the caller's transaction (task 38: the mall checkout calls it once per shop, with
+// `group` = { group_id, group_number }). The cart's holds move to the order; it gets a fresh 15 minutes to pay.
+export async function placeOrder(trx, cart, b, { method, want, months }, notifyToken, group = {}) {
+  const store = await storeOf(trx, cart.store_id);
+  const c = customer(b, store);
+  const lines = await trx('cart_items as c').join('products as p', 'p.id', 'c.product_id').where('c.cart_id', cart.id)
+    .orderBy('c.id').select('c.product_id', 'c.size', 'c.quantity', 'p.price', 'p.discount_price');
+  if (!lines.length) throw fail(400, 'err.cart_empty');
+  const priced = lines.map((l) => ({ ...l, unit_price: unitPrice(l) }));
+  const pr = await pricing(trx, cart, store, priced);
+  if (pr.promo?.error) throw promoError(pr);
+  if (pr.promo) await claimPromo(trx, pr.promo, c.phone);
+  const cfg = await pointsConfig(trx, store.id);
+  if (want) await checkSpend(trx, cfg, cart.profile_id, pr.goods, want);
+  const owed = totals(store, pr.subtotal, c.fulfillment, pr.subtotal - pr.goods, want).total;
+  // Payme/Click can't take 0 so'm: a fully discounted order is settled at the cashier.
+  if (method !== 'cashier' && owed < 1) throw fail(400, 'err.invalid', { field: 'field.payment' });
+  // A term the store doesn't offer (or instalments off, or nothing left to pay) is refused, never silently dropped.
+  const instalment = months === null ? null : termsOf(store)?.find((x) => x.months === months);
+  if (months !== null && (!instalment || owed < 1)) throw fail(409, 'err.instalment_term');
+  const profileId = cfg && cart.profile_id ? cart.profile_id : null; // earns on hand-over even when no points were spent
+  const id = await insertOrder(trx, store, c, priced, { method, notifyToken, recommendationId: cart.recommendation_id, pr, promo: pr.promo, points: want, profileId, instalment, group });
+  if (want) await spend(trx, cfg, cart.profile_id, id, want);
+  await trx('carts').where({ id: cart.id }).del(); // reserved stays: the order owns the hold now
   return id;
 }
 
 // Public, keyed by an unguessable cart token. The token is the customer's only handle on the cart.
 // `link(notifyToken)` → how the customer subscribes to order messages ({ url, svg } for Telegram), or null when off.
 export function createCartRouter(db, { methods = CASHIER, link = () => null, maxOpenCarts = 0, promoLimit = (req, res, next) => next() } = {}) {
-  // A 409 carrying `missed` (task 24) is logged as missed demand after its transaction rolled back, then rethrown.
-  const missedThen = async (err) => {
-    if (err.missed) await logMissed(db, { ...err.missed, source: 'cart' }).catch((e) => console.error('missed demand not logged:', e.message));
-    throw err;
-  };
   const r = express.Router();
   const view = (cart) => cartView(db, cart, Object.keys(methods));
   r.use(async (req, res, next) => {
@@ -309,45 +402,10 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
       if (cart && Number.isInteger(b.store_id) && cart.store_id !== b.store_id) cart = null; // phone scanned another store's QR
       if (!cart) {
         if (!Number.isInteger(b.store_id) || !(await trx('stores').where({ id: b.store_id }).first('id'))) throw fail(404, 'err.store_not_found');
-        // Inventory DoS guard (X2): one client can't hold stock in more than maxOpenCarts live carts.
-        const client = clientKey(req.ip);
-        if (maxOpenCarts) {
-          const [{ n }] = await trx('carts').where({ client }).where('expires_at', '>', iso(Date.now())).count({ n: '*' });
-          if (Number(n) >= maxOpenCarts) throw fail(429, 'err.too_many_carts');
-        }
-        const token = randomBytes(16).toString('hex');
-        await trx('carts').insert({ store_id: b.store_id, token, client, expires_at: iso(Date.now() + HOLD_MS) });
-        cart = await trx('carts').where({ token }).first();
+        cart = await openCart(trx, req, b.store_id, maxOpenCarts);
       }
-      const [{ n }] = await trx('cart_items').where({ cart_id: cart.id }).sum({ n: 'quantity' });
-      if (Number(n ?? 0) + items.length > MAX_UNITS) throw fail(409, 'err.cart_full', { max: MAX_UNITS });
-      for (const { product_id, size } of items) {
-        const p = await trx('products').where({ id: product_id, store_id: cart.store_id }).first('name', 'name_ru', 'category', 'sizes');
-        if (!p) throw fail(404, 'err.product_not_found');
-        if (!sizesOf(p).includes(size)) throw fail(400, 'err.product_size', { product: p });
-        if (!(await hold(trx, product_id, size, 1))) {
-          // Task 24: logged after the rollback (below) as missed demand, once per results screen or cart.
-          throw Object.assign(fail(409, 'err.out_of_stock', { product: p, size: size === 'ONE' ? 'common.size_one' : size }),
-            { item: { product_id, size }, // task 31: the app offers "Kelganda xabar bering" for this size
-              missed: { storeId: cart.store_id, session: typeof b.rec === 'string' && REC.test(b.rec) ? b.rec : cart.token, items: [{ product_id, size }] } });
-        }
-        await trx('cart_items').insert({ cart_id: cart.id, product_id, size, quantity: 1 })
-          .onConflict(['cart_id', 'product_id', 'size']).merge({ quantity: trx.raw('?? + 1', ['cart_items.quantity']) });
-      }
-      // Pilot funnel: added from a results screen (`rec`) → that suggestion was accepted; the order inherits it.
-      const rec = typeof b.rec === 'string' && REC.test(b.rec) ? await trx('recommendation_logs').where({ token: b.rec, store_id: cart.store_id }).first('id', 'accepted_at', 'outfits') : null;
-      if (rec) {
-        if (!rec.accepted_at) await trx('recommendation_logs').where({ id: rec.id }).update({ accepted_at: iso(Date.now()) });
-        await trx('carts').where({ id: cart.id }).update({ recommendation_id: rec.id });
-        const shown = parseJson(rec.outfits, []);
-        const key = Array.isArray(b.outfit) && b.outfit.length <= 6 && b.outfit.every((x) => Number.isInteger(x)) ? setKey(b.outfit) : null;
-        const bundles = parseJson((await trx('carts').where({ id: cart.id }).first('bundles')).bundles, []);
-        if (key && shown.some((o) => setKey(o) === key) && !bundles.some((o) => setKey(o) === key) && bundles.length < MAX_UNITS) {
-          await trx('carts').where({ id: cart.id }).update({ bundles: JSON.stringify([...bundles, [...b.outfit].sort((x, y) => x - y)]) });
-        }
-      }
-      return trx('carts').where({ id: cart.id }).first(); // fresh: the view prices with the bundles just saved
-    }).catch(missedThen);
+      return addLines(trx, cart, items, b);
+    }).catch(missedThen(db));
     res.json(await view(cart));
   });
 
@@ -376,7 +434,7 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
       await release(trx, [line]);
       await trx('cart_items').where({ id: line.id }).update({ size });
       return cart;
-    }).catch(missedThen);
+    }).catch(missedThen(db));
     res.json(await view(cart));
   });
 
@@ -416,7 +474,7 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
     // One conditional UPDATE: a second scan (or a race) finds no row.
     const n = typeof handoff === 'string' && TOKEN.test(handoff)
       ? await db('carts').where({ handoff_token: handoff }).where('handoff_expires_at', '>', iso(now)).where('expires_at', '>', iso(now))
-        .update({ token, client: clientKey(req.ip), handoff_token: null, handoff_expires_at: null, expires_at: iso(now + HOLD_MS), updated_at: db.fn.now() })
+        .update({ token, client: clientKey(req.ip), mall_token: null, mall_id: null, handoff_token: null, handoff_expires_at: null, expires_at: iso(now + HOLD_MS), updated_at: db.fn.now() })
       : 0;
     if (!n) throw fail(404, 'err.handoff_invalid');
     res.json(await view(await db('carts').where({ token }).first()));
@@ -472,39 +530,10 @@ export function createCartRouter(db, { methods = CASHIER, link = () => null, max
   // the cap and the balance, 409 when either changed, so the customer is never charged a total they didn't see.
   r.post('/:token/checkout', async (req, res) => {
     const b = req.body ?? {};
-    const method = b.payment ?? 'cashier';
-    if (typeof method !== 'string' || !Object.hasOwn(methods, method)) throw fail(400, 'err.invalid', { field: 'field.payment' });
-    const want = b.points ?? 0;
-    if (!Number.isInteger(want) || want < 0 || want > 1e9) throw fail(400, 'err.invalid', { field: 'field.points' });
-    // Task 35: instalment = the term in months; only at the cashier (the store's Nasiya terminal), never online.
-    const months = b.instalment ?? null;
-    if (months !== null && (!Number.isInteger(months) || method !== 'cashier')) throw fail(400, 'err.invalid', { field: 'field.instalment' });
+    const input = checkoutInput(b, methods);
+    const { method } = input;
     const notifyToken = randomBytes(16).toString('hex');
-    const id = await db.transaction(async (trx) => {
-      const cart = await liveCart(trx, req.params.token);
-      const store = await storeOf(trx, cart.store_id);
-      const c = customer(b, store);
-      const lines = await trx('cart_items as c').join('products as p', 'p.id', 'c.product_id').where('c.cart_id', cart.id)
-        .orderBy('c.id').select('c.product_id', 'c.size', 'c.quantity', 'p.price', 'p.discount_price');
-      if (!lines.length) throw fail(400, 'err.cart_empty');
-      const priced = lines.map((l) => ({ ...l, unit_price: unitPrice(l) }));
-      const pr = await pricing(trx, cart, store, priced);
-      if (pr.promo?.error) throw promoError(pr);
-      if (pr.promo) await claimPromo(trx, pr.promo, c.phone);
-      const cfg = await pointsConfig(trx, store.id);
-      if (want) await checkSpend(trx, cfg, cart.profile_id, pr.goods, want);
-      const owed = totals(store, pr.subtotal, c.fulfillment, pr.subtotal - pr.goods, want).total;
-      // Payme/Click can't take 0 so'm: a fully discounted order is settled at the cashier.
-      if (method !== 'cashier' && owed < 1) throw fail(400, 'err.invalid', { field: 'field.payment' });
-      // A term the store doesn't offer (or instalments off, or nothing left to pay) is refused, never silently dropped.
-      const instalment = months === null ? null : termsOf(store)?.find((x) => x.months === months);
-      if (months !== null && (!instalment || owed < 1)) throw fail(409, 'err.instalment_term');
-      const profileId = cfg && cart.profile_id ? cart.profile_id : null; // earns on hand-over even when no points were spent
-      const id = await insertOrder(trx, store, c, priced, { method, notifyToken, recommendationId: cart.recommendation_id, pr, promo: pr.promo, points: want, profileId, instalment });
-      if (want) await spend(trx, cfg, cart.profile_id, id, want);
-      await trx('carts').where({ id: cart.id }).del(); // reserved stays: the order owns the hold now
-      return id;
-    });
+    const id = await db.transaction(async (trx) => placeOrder(trx, await liveCart(trx, req.params.token), b, input, notifyToken));
     const order = await orderView(db, await db('orders').where({ id }).first());
     const url = `${publicBase(req)}/order/${notifyToken}`; // the public status page
     res.status(201).json({ order, payment: await methods[method]({ ...order, notify_token: notifyToken }), notify: link(notifyToken), track: { url, svg: qrSvg(url) } });

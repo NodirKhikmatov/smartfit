@@ -130,7 +130,7 @@ export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {})
       // Inventory DoS guard (X2), shared with carts: one client can't hold stock in too many places at once.
       if (maxOpen) {
         const live = iso(Date.now());
-        const [{ n: carts }] = await trx('carts').where({ client }).where('expires_at', '>', live).count({ n: '*' });
+        const [{ n: carts }] = await trx('carts').where({ client }).where('expires_at', '>', live).select(trx.raw('count(distinct coalesce(mall_token, token)) as n')); // a mall cart counts once (task 38)
         const [{ n: orders }] = await trx('orders').where({ client, payment_status: 'pending' }).where('expires_at', '>', live).count({ n: '*' });
         if (Number(carts) + Number(orders) >= maxOpen) throw fail(429, 'err.too_many_reserves');
       }

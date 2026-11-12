@@ -593,7 +593,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
   }
   const ORDER_COLS = ['o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.phone', 'o.fulfillment', 'o.address', 'o.status',
     'o.payment_status', 'o.payment_method', 'o.subtotal', 'o.bundle_discount', 'o.promo_discount', 'o.promo_code', 'o.points_discount', 'o.delivery_fee', 'o.total', 'o.created_at', 'o.expires_at', 'o.telegram_chat_id',
-    'o.instalment_months', 'o.instalment_monthly']; // task 35
+    'o.instalment_months', 'o.instalment_monthly', 'o.group_number']; // task 35; task 38: the mall order it is part of
 
   // → { items, total, limit, offset }, newest first (dir=asc: oldest first, so the cashier sees the soonest to expire on top).
   r.get('/orders', async (req, res) => {
@@ -623,11 +623,11 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const tashkent = (v) => new Date(msOf(v)).toLocaleString('sv-SE', { timeZone: STATS_TZ }).slice(0, 16);
     const csv = toCsv([
       ['№', tr('adm.orders.time'), tr('common.store'), tr('adm.orders.customer'), tr('adm.csv.phone'), tr('adm.orders.fulfillment'), tr('field.address'),
-        tr('adm.csv.subtotal'), tr('adm.csv.discount'), tr('field.promo_code'), tr('adm.csv.fee'), tr('adm.csv.total'), tr('field.payment'), tr('adm.csv.instalment_months'), tr('adm.csv.instalment_monthly'), tr('adm.orders.payment'), tr('adm.orders.status')],
+        tr('adm.csv.subtotal'), tr('adm.csv.discount'), tr('field.promo_code'), tr('adm.csv.fee'), tr('adm.csv.total'), tr('field.payment'), tr('adm.csv.instalment_months'), tr('adm.csv.instalment_monthly'), tr('adm.orders.payment'), tr('adm.orders.status'), tr('adm.csv.mall_order')],
       ...rows.map((o) => [o.number, tashkent(o.created_at), o.store_name, o.customer_name, phoneText(o.phone), tr(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), o.address,
         o.subtotal, o.bundle_discount + o.promo_discount + o.points_discount, o.promo_code, o.delivery_fee, o.total, o.payment_method === 'cashier' ? tr('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] ?? o.payment_method,
         o.instalment_months, o.instalment_monthly, tr(`adm.pay.${o.payment_status}`),
-        tr(o.status === 'delivered' && o.fulfillment === 'pickup' ? 'adm.status.handed' : `adm.status.${o.status}`)]),
+        tr(o.status === 'delivered' && o.fulfillment === 'pickup' ? 'adm.status.handed' : `adm.status.${o.status}`), o.group_number]),
     ]);
     res.type('text/csv; charset=utf-8').attachment(`orders-${dayKey(Date.now())}.csv`).send(csv);
   });
@@ -777,7 +777,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     const now = Date.now();
     const orders = await inStores(req.admin, db('orders as o').join('stores as s', 's.id', 'o.store_id').where('o.payment_status', 'paid')
       .whereIn('o.status', ['new', 'packing', 'shipping']).orderBy('o.paid_at').limit(50)
-      .select('o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.fulfillment', 'o.status', 'o.payment_status', 'o.paid_at', 'o.instalment_months'), 'o.store_id');
+      .select('o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.fulfillment', 'o.status', 'o.payment_status', 'o.paid_at', 'o.instalment_months', 'o.group_number'), 'o.store_id');
     const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').whereIn('i.order_id', orders.map((o) => o.id))
       .select('i.order_id', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity')
       .orderByRaw('p.shelf_location is null, p.shelf_location, p.category, p.name');

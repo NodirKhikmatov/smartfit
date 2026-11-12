@@ -165,9 +165,18 @@ payment. The mall gets its own admin, who sees the shops and summary numbers onl
    orders count and kiosks online, never sums, products, customers or the team. The page has the mall QR (`/m?mall=ID`)
    and the link for the mall's own kiosks (`/kiosk?mall=ID`).
 3. Customers: `/kiosk?mall=ID` and `/m?mall=ID` show the shop directory and a search over every shop's in-stock items.
-   A shop or an item opens that shop's usual flow (`?store=&mall=`); the cart stays the shop's, and leaving the shop with
-   items in it asks first and empties it. A mall kiosk sends no shop heartbeat and has no staff PIN exit (close it from
-   the OS). A store outside any mall works exactly as before (`?store=`).
+   A shop or an item opens that shop's usual flow (`?store=&mall=`). A mall kiosk sends no shop heartbeat and has no
+   staff PIN exit (close it from the OS). A store outside any mall works exactly as before (`?store=`).
+4. **One cart across the mall** (task 38): items picked in several shops go into one mall cart (`/api/mall-cart`), which
+   is one ordinary cart per shop under one token. In a shop, the cart screen keeps that shop's lines, promo code and
+   points (they belong to the shop's organisation); "Barcha do'konlar bo'yicha rasmiylashtirish" opens the mall cart
+   (`?mall=ID#cart`): every shop with its floor/unit, discounts and total, an instalment term per shop where the shop
+   offers one, and one name + phone form. Checkout makes **one order per shop** (each with its own number, total and
+   15 minutes to pay at **that shop's cashier**) tied by a mall order number and a status page `/mall-order/<token>`.
+   All or nothing: if one shop's part fails (a promo code switched off, points changed), nothing is created and the
+   message names the shop. Pickup only (no delivery from a mall cart). Each shop's admin, cashier and staff app see only
+   their own order, marked "Savdo markazi buyurtmasi № N qismi"; the mall admin still sees counts only. Every shop's
+   hold runs out at the same moment; the kiosk idle reset empties the whole mall cart.
 
 The demo seed has one mall, "Demo Savdo Markazi" (id 1), holding both demo stores.
 
@@ -403,6 +412,11 @@ the 2-week pilot.
       flagged "muddatli · N oy" is settled by making the contract on the terminal, then "Pul olindi: to'landi"; the
       order total stays the shelf price. The order still expires 15 min after checkout, like every cashier order, so a
       slow contract may need the order placed again. A later API integration would replace the manual step.
+- [ ] Mall cart (task 38): **online payment (Click / Payme) for a mall order is off**: it needs a mall-level merchant
+      account and a split of the money between the shops' accounts. Until then each shop's part is paid at that shop's
+      cashier. Delivery from a mall cart and moving a mall cart from the kiosk to the phone (QR) are not built: a
+      customer who wants delivery orders in one shop's own flow. Tell cashiers that an order marked "Savdo markazi
+      buyurtmasi № N" is only their shop's part: the customer pays the other shops separately.
 - [ ] Promo codes: decide the codes, dates and limits. The per-phone limit uses the typed phone (not verified), and
       Telegram order messages show only the total.
 - [ ] Missed demand and funnel logs have no cleanup yet: decide a retention period. The funnel endpoint is public

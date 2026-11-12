@@ -205,6 +205,24 @@
     <ul class="store-list" id="mallShops" aria-labelledby="mallShopsTitle"></ul>
   </section>
 
+  <!-- Task 38: the mall cart (every shop's part) and its one checkout; public/app/mall.js -->
+  <section data-screen="mallcart" hidden>
+    <h1 tabindex="-1" id="mcTitle" data-i18n="kiosk.mcart.title"></h1>
+    <div class="cart-layout">
+      <div>
+        <p class="notice" id="mcHold" hidden></p>
+        <div id="mcBody"></div>
+      </div>
+      <form id="mcForm" novalidate hidden class="card checkout">
+        <label class="field"><span data-i18n="kiosk.checkout.name"></span><input name="fullname" autocomplete="name" maxlength="80" data-keys="letters"></label>
+        <label class="field"><span data-i18n="kiosk.checkout.phone"></span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+998 90 123 45 67" maxlength="20" data-keys="phone"></label>
+        <p class="meta" data-i18n="kiosk.mcart.pay_note"></p>
+        <p class="error" id="mcError" role="alert"></p>
+        <button class="primary wide go" id="mcPlace" data-i18n="kiosk.checkout.place"></button>
+      </form>
+    </div>
+  </section>
+
   <section data-screen="catalog" hidden>
     <h1 tabindex="-1" data-i18n="kiosk.catalog.title"></h1>
     <div class="filters card" id="catalogFilters"></div>
@@ -228,25 +246,25 @@
         <button class="ghost" id="cartBack"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-left"></use></svg><span data-i18n="kiosk.cart.back"></span></button>
       </div>
       <form id="checkout" novalidate hidden class="card checkout">
-        <fieldset>
+        <fieldset class="mall-hide">
           <legend data-i18n="kiosk.checkout.how"></legend>
           <div class="chips two">
             <label><input type="radio" name="fulfillment" value="pickup" checked><span data-i18n="kiosk.checkout.pickup"></span></label>
             <label><input type="radio" name="fulfillment" value="delivery"><span data-i18n="kiosk.checkout.delivery"></span></label>
           </div>
         </fieldset>
-        <label class="field"><span data-i18n="kiosk.checkout.name"></span><input name="fullname" autocomplete="name" maxlength="80" data-keys="letters" aria-describedby="fullnameErr"><span class="field-error" id="fullnameErr"></span></label>
-        <label class="field"><span data-i18n="kiosk.checkout.phone"></span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+998 90 123 45 67" maxlength="20" data-keys="phone" aria-describedby="phoneErr"><span class="field-error" id="phoneErr"></span></label>
-        <div id="deliveryFields" hidden>
+        <label class="field mall-hide"><span data-i18n="kiosk.checkout.name"></span><input name="fullname" autocomplete="name" maxlength="80" data-keys="letters" aria-describedby="fullnameErr"><span class="field-error" id="fullnameErr"></span></label>
+        <label class="field mall-hide"><span data-i18n="kiosk.checkout.phone"></span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+998 90 123 45 67" maxlength="20" data-keys="phone" aria-describedby="phoneErr"><span class="field-error" id="phoneErr"></span></label>
+        <div id="deliveryFields" class="mall-hide" hidden>
           <label class="field"><span data-i18n="kiosk.checkout.address"></span><input name="address" autocomplete="street-address" maxlength="200" data-keys="letters" data-i18n-placeholder="kiosk.checkout.address_ph" aria-describedby="addressErr"><span class="field-error" id="addressErr"></span></label>
           <p class="meta" id="mapHint" data-i18n="kiosk.checkout.map_hint"></p>
           <div id="map"></div>
         </div>
-        <fieldset id="payFields" hidden>
+        <fieldset id="payFields" class="mall-hide" hidden>
           <legend data-i18n="kiosk.checkout.pay_how"></legend>
           <div class="chips" id="payChoices"></div>
         </fieldset>
-        <fieldset id="termFields" hidden>
+        <fieldset id="termFields" class="mall-hide" hidden>
           <legend data-i18n="kiosk.inst.terms"></legend>
           <div class="chips terms" id="termChoices"></div>
           <p class="meta" data-i18n="kiosk.inst.note"></p>
@@ -264,9 +282,12 @@
         </div>
         <div class="points" id="pointsBox" hidden></div>
         <div class="sum" id="cartSum"></div>
-        <p class="meta" id="payNote"></p>
+        <p class="meta mall-hide" id="payNote"></p>
         <p class="error" id="checkoutError" role="alert"></p>
-        <button class="primary wide go" id="placeOrder" data-i18n="kiosk.checkout.place"></button>
+        <button class="primary wide go mall-hide" id="placeOrder" data-i18n="kiosk.checkout.place"></button>
+        <!-- Task 38: in a mall shop this cart is one part of the mall cart, checked out once on the mall screen -->
+        <p class="meta mall-only" data-i18n="kiosk.mcart.shop_note"></p>
+        <button type="button" class="primary wide go mall-only" id="mallGo" data-i18n="kiosk.mcart.go"></button>
       </form>
     </div>
   </section>

@@ -405,3 +405,12 @@ a.button.wide { margin: var(--s-3) 0; }
 .chips.terms small { font-weight: normal; font-size: var(--text-sm); }
 #termFields .meta { margin-top: var(--s-2); }
 #payChoices { grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); }
+
+/* Task 38: the mall cart. In a mall shop the cart screen keeps lines, promo code and points; checkout is the mall's. */
+html:not(.in-mall) .mall-only, html.in-mall .mall-hide { display: none !important; }
+.mc-shop { margin-bottom: var(--s-4); }
+.mc-shop .mall-head { margin-bottom: var(--s-2); flex-wrap: wrap; gap: var(--s-2) var(--s-4); }
+.mc-shop .mall-head h2 { margin: 0; font-size: var(--text-lg); }
+.mc-shop .mall-head > div { flex: 1 1 10rem; min-width: 0; } /* on a phone the edit link wraps under the name */
+.mc-shop .shop-logo { width: 3rem; height: 3rem; flex: none; display: grid; place-items: center; object-fit: contain; border-radius: var(--r-md); background: var(--sunken); color: var(--accent); }
+.mc-shop .field select { width: 100%; }

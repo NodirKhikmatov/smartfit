@@ -31,12 +31,15 @@ const catSizes = (c) => (c.size_kind === 'custom' ? String(c.sizes ?? '').split(
 const form = $('form');
 
 // Server cart (task 8): each item holds its stock for 15 min. The phone keeps the token across reloads; the kiosk never stores it.
+// Task 38: in a mall it is the mall cart's token instead, also on a mall kiosk (the page reloads between the mall screen
+// and its shops); the kiosk idle reset deletes that cart and the token.
 const CART_KEY = 'sfCart'; // the only thing the app stores in the browser: the phone's cart token
 let cart = null;
+let mallCart = null; // task 38: the mall cart view; `cart` is this shop's part of it
 let usePoints = true; // task 34: the cart screen's "pay with points" switch
 let syncs = new Set(); // add-to-cart buttons on the results screen
 const savedCart = (t) => {
-  if (kiosk) return null;
+  if (kiosk && !inMall) return null;
   try {
     if (t === undefined) return sessionStorage.getItem(CART_KEY);
     t ? sessionStorage.setItem(CART_KEY, t) : sessionStorage.removeItem(CART_KEY);
@@ -134,6 +137,7 @@ function track(name) {
 }
 const NO_STEPS = ['start', 'done', 'catalog', 'item']; // the catalogue is outside the four-step flow
 function render(name, data = {}) {
+  if (mallHome) return; // task 38: the mall screen routes itself by its #cart hash (mall.js); no shop screen here
   track(name);
   if (name !== 'camera') stopCamera();
   if (name !== 'cart') clearInterval(holdTimer);
@@ -162,10 +166,15 @@ function setCart(c) {
     delete $('pointsBox').dataset.waiting;
   }
   cart = c;
-  savedCart(c?.token ?? null);
+  savedCart(inMall ? mallCart?.token ?? null : c?.token ?? null);
   syncCartUi();
   syncs.forEach((f) => f());
   if (current === 'cart') renderCartScreen();
+}
+// Task 38: a mall cart from the server; this shop's part becomes the cart the shop screens work with.
+function setMall(v) {
+  mallCart = v;
+  setCart(v?.shops.find((s) => s.store.id === storeId)?.cart ?? null);
 }
 // Topbar bag button, or on the results screen a sticky bar with the count and the running total (D2).
 function syncCartUi() {
@@ -194,7 +203,7 @@ async function api(path, body, method = body ? 'POST' : 'GET') {
   const headers = { 'accept-language': getLang(), ...(body && { 'content-type': 'application/json' }) };
   const res = await fetch('/api' + path, { method, headers, ...(body && { body: JSON.stringify(body) }) });
   const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || t('common.error')), { status: res.status, code: data.code, item: data.item });
+  if (!res.ok) throw Object.assign(new Error(data.error || t('common.error')), { status: res.status, code: data.code, item: data.item, store: data.store });
   return data;
 }
 
@@ -861,7 +870,9 @@ function addButton(items, card, className = 'primary wide', label = 'kiosk.add.b
     try {
       const todo = items.filter((p) => !has(p)).map((p) => ({ product_id: p.id, size: size(p) }));
       // outfit (task 26): the whole card, so the server can match it to an outfit it showed (bundle discount).
-      setCart(await api('/cart/items', { token: cart?.token, store_id: storeId, items: todo, rec, ...(rec && { outfit: items.map((p) => p.id) }) }));
+      const add = { store_id: storeId, items: todo, rec, ...(rec && { outfit: items.map((p) => p.id) }) };
+      if (inMall) setMall(await api('/mall-cart/items', { ...add, token: mallCart?.token, mall_id: mallId }));
+      else setCart(await api('/cart/items', { ...add, token: cart?.token }));
     } catch (err) {
       msg.textContent = err.message;
       // Task 31: that size just sold out → offer to wait for it (once per card).
@@ -1254,7 +1265,7 @@ async function extendHold() {
 function renderCartScreen() {
   const empty = !cart?.items.length;
   checkout.hidden = $('holdNote').hidden = $('handoffBtn').hidden = empty;
-  if (!kiosk) $('handoffBtn').hidden = true;
+  if (!kiosk || inMall) $('handoffBtn').hidden = true; // task 38: a mall cart moves to the phone as a whole, not built
   startHold();
   if (empty) return $('cartBody').replaceChildren(el('div', { className: 'empty' }, icon('bag'), el('p', { textContent: t('kiosk.cart.empty') })));
   $('cartBody').replaceChildren(el('ul', { className: 'items lines' }, ...cart.items.map(cartLine)));
@@ -1672,20 +1683,21 @@ function applyProfile(p) {
   go('results');
 }
 
-// Task 37: back to the mall screen. The cart is this shop's (each shop takes its own payment), so leaving the shop with
-// items in it asks first and then gives the held stock back.
+// Task 37: back to the mall screen. Task 38: this shop's cart stays in the mall cart, so leaving asks nothing; the kiosk
+// idle reset gives every shop's held stock back and the next customer starts at the mall screen in Uzbek.
 $('mallBtn').hidden = !inMall || mallHome;
 document.documentElement.classList.toggle('in-mall', inMall && !mallHome);
-$('mallBtn').onclick = async () => {
-  if (cart?.items.length && !(await confirmDialog({ title: t('kiosk.mall.leave_title'), text: t('kiosk.mall.leave_text'), ok: t('kiosk.mall.leave_ok'), cancel: t('kiosk.leave.stay') }))) return;
-  leaveShop(false);
-};
+$('mallBtn').onclick = () => leaveShop(false);
+$('mallGo').onclick = () => location.assign(`${location.pathname}?mall=${mallId}#cart`);
 async function leaveShop(idle) {
-  const c = cart;
-  setCart(null);
   clearRoute();
-  if (idle) setLang('uz'); // the next customer starts in Uzbek
-  if (c) await api(`/cart/${c.token}`, null, 'DELETE').catch(() => {});
+  if (idle) {
+    const token = mallCart?.token ?? savedCart();
+    mallCart = null;
+    setCart(null);
+    setLang('uz');
+    if (token) await api(`/mall-cart/${token}`, null, 'DELETE').catch(() => {});
+  }
   location.replace(`${location.pathname}?mall=${mallId}`);
 }
 
@@ -1737,7 +1749,7 @@ if (kiosk) {
   attract(true);
 }
 
-const mall = mallHome ? mallScreen({ mallId, api }) : null;
+const mall = mallHome ? mallScreen({ mallId, api, kiosk, saved: savedCart }) : null;
 if (mallHome) {
   clearRoute(); // a shop's saved screen must not open in the next shop picked here
   mall.show();
@@ -1796,5 +1808,13 @@ function startShop() {
       $('startError').textContent = err.message;
       if (savedCart()) api('/cart/' + savedCart()).then((c) => setCart(c.store_id === storeId ? c : null), () => setCart(null));
     });
+  } else if (inMall) {
+    // Task 38: ?open=cart (the mall cart's "Do'konda o'zgartirish") opens this shop's part of the cart once.
+    if (params.get('open') === 'cart') {
+      params.delete('open');
+      history.replaceState(history.state, '', `${location.pathname}?${params}`);
+      go('cart', { replace: true });
+    }
+    if (savedCart()) api('/mall-cart/' + savedCart()).then(setMall, () => setMall(null));
   } else if (savedCart()) api('/cart/' + savedCart()).then((c) => setCart(c.store_id === storeId ? c : null), () => setCart(null));
 }

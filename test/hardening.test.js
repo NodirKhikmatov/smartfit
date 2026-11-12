@@ -72,12 +72,12 @@ test('security headers on HTML and API responses; CSP is same-origin plus OSM ti
 });
 
 test('no inline <script>/<style> or style="" in the product pages, and no runtime CDN URL left in browser code', () => {
-  for (const p of ['public/app/index.html', 'public/app/order.html', 'public/app/profile.html', 'public/admin/index.html', 'public/landing/index.html', 'public/staff/index.html']) {
+  for (const p of ['public/app/index.html', 'public/app/order.html', 'public/app/group.html', 'public/app/profile.html', 'public/admin/index.html', 'public/landing/index.html', 'public/staff/index.html']) {
     const html = read(p);
     assert.doesNotMatch(html, /<style|style="|<script(?![^>]*\bsrc=)/, p);
     assert.doesNotMatch(html, /\son[a-z]+="/, `${p}: inline event handler`);
   }
-  for (const p of ['public/app/app.js', 'public/app/pose.js', 'public/app/kiosk.js', 'public/app/mall.js', 'public/admin/admin.js', 'public/app/order.js', 'public/app/profile.js', 'public/landing/landing.js', 'public/landing/index.html', 'public/landing/landing.css', 'public/staff/staff.js', 'public/staff/sw.js']) {
+  for (const p of ['public/app/app.js', 'public/app/pose.js', 'public/app/kiosk.js', 'public/app/mall.js', 'public/admin/admin.js', 'public/app/order.js', 'public/app/group.js', 'public/app/profile.js', 'public/landing/landing.js', 'public/landing/index.html', 'public/landing/landing.css', 'public/staff/staff.js', 'public/staff/sw.js']) {
     const urls = read(p).match(/https?:\/\/[^'"`\s)]+/g) ?? [];
     for (const u of urls) assert.match(u, /^https:\/\/(tile\.openstreetmap\.org|www\.openstreetmap\.org|t\.me)\//, `${p}: ${u}`);
   }
@@ -320,6 +320,7 @@ test('migration 011 down and up', async () => {
   try {
     await m.migrate.latest();
     await seed(m);
+    await m.migrate.down(); // 028
     await m.migrate.down(); // 027
     await m.migrate.down(); // 026
     await m.migrate.down(); // 025

@@ -8,6 +8,7 @@ import { createWeather } from './recommend/weather.js';
 import { createStylist } from './recommend/stylist.js';
 import { createSizeRouter } from './size/size.js';
 import { createCartRouter, createOrderRouter } from './cart/cart.js';
+import { createMallCartRouter, createOrderGroupRouter } from './cart/mall.js';
 import { paymentConfig, paymentMethods, createPaymentRouter } from './cart/payments.js';
 import { telegramConfig, telegramLink } from './notify/telegram.js';
 import { fail, langOf, errorBody } from './admin/routes.js';
@@ -77,12 +78,14 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/size', bucket('size'), createSizeRouter());
   const methods = paymentMethods(payments), link = telegramLink(telegram);
   api.use('/cart', bucket('cart'), createCartRouter(db, { methods, link, maxOpenCarts: lim.openCarts, promoLimit: bucket('promo') }));
+  api.use('/mall-cart', bucket('cart'), createMallCartRouter(db, { maxOpenCarts: lim.openCarts })); // task 38
   api.post('/kiosk/exit', bucket('pin'));
   api.use('/kiosk', bucket('kiosk'), createKioskRouter(db));
   api.use('/malls', bucket('mall'), createMallRouter(db)); // task 37: mall directory and search
   api.use('/catalog', bucket('catalog'), createCatalogRouter(db, { link, maxOpen: lim.openCarts })); // task 25
   api.use('/funnel', bucket('funnel'), createFunnelRouter(db)); // task 24: drop-off by step
   api.use('/orders', createOrderRouter(db, { methods, link }));
+  api.use('/order-groups', createOrderGroupRouter(db)); // task 38: the mall order's status page
   // Task 27: customer profiles exist only with a Telegram bot (it verifies the phone); without one the routes are 404.
   if (telegram) api.use('/profile', createProfileRouter(db, { telegram, limit: bucket('profile'), pollLimit: bucket('profilePoll'), now }));
   api.use('/demo-requests', bucket('demo'), createDemoRouter(db));
@@ -121,6 +124,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   });
   // Order status page; the token in its URL must not leak to the payment provider through Referer.
   app.get('/order/:token', (req, res) => res.set('Referrer-Policy', 'no-referrer').sendFile('order.html', { root: customer }));
+  app.get('/mall-order/:token', (req, res) => res.set('Referrer-Policy', 'no-referrer').sendFile('group.html', { root: customer }));
   app.get('/profile/:token', (req, res) => res.set('Referrer-Policy', 'no-referrer').sendFile('profile.html', { root: customer }));
   app.use('/app', express.static(customer, { index: false }));
   app.use('/uploads', express.static(uploadDir, { index: false, setHeaders: (res) => res.set('X-Content-Type-Options', 'nosniff') }));
@@ -130,7 +134,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
     const status = err.status || err.statusCode || 500;
     if (status >= 500) console.error(err);
     const key = status >= 500 ? 'err.server' : err.type === 'entity.too.large' ? 'err.too_large' : err.publicKey || 'err.bad_request';
-    res.status(status).json({ ...errorBody(langOf(req), { publicKey: key, vars: err.vars }), ...(status === 409 && err.item && { item: err.item }) });
+    res.status(status).json({ ...errorBody(langOf(req), { publicKey: key, vars: err.vars }), ...(status === 409 && err.item && { item: err.item }), ...(status < 500 && err.store && { store: err.store }) });
   });
 
   return app;

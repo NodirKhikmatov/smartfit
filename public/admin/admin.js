@@ -478,7 +478,7 @@ async function loadOrders(quiet) {
         : { ic: 'receipt', title: t('adm.orders.empty_title'), text: t('adm.orders.empty') });
     } else {
       $('orderRows').replaceChildren(...r.items.map((o) => el('tr', { tabIndex: 0, id: `order-${o.id}`, onclick: () => openOrder(o.id), onkeydown: (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), openOrder(o.id)) },
-        el('td', {}, el('strong', { className: 'num', textContent: `№ ${o.number}` })),
+        el('td', {}, el('strong', { className: 'num', textContent: `№ ${o.number}` }), groupMark(o)),
         el('td', { className: 'num nowrap hide-sm', textContent: fmt.dateTime(o.created_at) }),
         el('td', {}, o.customer_name, el('div', { className: 'sizes hide-sm', textContent: [o.phone, showStore() && o.store_name].filter(Boolean).join(' · ') }),
           el('div', { className: 'sizes show-sm', textContent: fmt.dateTime(o.created_at) })),
@@ -617,6 +617,8 @@ function totalsBlock(o) {
 const method = (o) => (o.payment_method === 'cashier' ? t('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] || o.payment_method);
 // Task 35: an instalment order. The total stays the price; the term and monthly amount are what was shown at checkout.
 const instText = (o) => t('adm.order.instalment', { n: o.instalment_months, sum: money(o.instalment_monthly), pct: o.instalment_percent });
+// Task 38: this shop's order is one part of a mall order (the other shops' parts are theirs and never shown here).
+const groupMark = (o) => (o.group_number ? el('div', { className: 'sizes', textContent: t('adm.order.mall_group', { n: o.group_number }) }) : null);
 const instNotice = (o) => (o.instalment_months ? [el('div', { className: 'notice inst' }, icon('info'),
   el('p', {}, el('strong', { textContent: instText(o) }), ' ', ...(o.payment_status === 'pending' ? [t('adm.order.instalment_note')] : [])))] : []);
 function renderOrder(o) {
@@ -632,7 +634,7 @@ function renderOrder(o) {
       ...fact('adm.orders.fulfillment', o.fulfillment === 'pickup' ? t('adm.orders.pickup') : t('adm.order.delivery_to', { address: o.address })),
       ...fact('adm.orders.payment', payBadge(o), ` ${method(o)}`, ...(o.payment_status === 'pending' && o.expires_at ? [' · ', deadline(Math.max(0, Date.parse(o.expires_at) - Date.now()))] : [])),
       ...fact('adm.order.tg', t(o.telegram ? 'adm.order.tg_on' : 'adm.order.tg_off'))),
-    ...instNotice(o), el('h3', { textContent: t('adm.order.items') }), itemsList(o, true), totalsBlock(o), ...returnsList(o));
+    groupMark(o), ...instNotice(o), el('h3', { textContent: t('adm.order.items') }), itemsList(o, true), totalsBlock(o), ...returnsList(o));
   $('orderActions').replaceChildren(
     ...(o.payment_status === 'pending' ? [el('button', { type: 'button', className: 'primary', onclick: (e) => markPaid(o, e.currentTarget) }, icon('cash'), t('adm.paydlg.confirm'))] : []),
     ...o.next.map((s) => el('button', { type: 'button', className: s === 'cancelled' ? 'danger' : 'primary', textContent: stepName(o, s), onclick: (e) => setStatus(o, s, e.currentTarget) })),
@@ -709,7 +711,7 @@ async function loadPending(quiet) {
     $('pendingCount').textContent = r.total;
     $('pendingList').replaceChildren(...(r.items.length ? r.items.map((o) => el('li', {}, el('button', { type: 'button', id: `pay-${o.id}`, className: `pending-item${payOrder?.id === o.id ? ' on' : ''}`, onclick: () => selectPay(o.id) },
       el('strong', { className: 'pending-no num', textContent: `№ ${o.number}` }),
-      el('span', { className: 'pending-who' }, el('span', { textContent: o.customer_name }), el('span', { className: 'muted', textContent: [t(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), o.instalment_months && t('adm.order.instalment_short', { n: o.instalment_months }), showStore() && o.store_name].filter(Boolean).join(' · ') })),
+      el('span', { className: 'pending-who' }, el('span', { textContent: o.customer_name }), el('span', { className: 'muted', textContent: [t(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), o.instalment_months && t('adm.order.instalment_short', { n: o.instalment_months }), o.group_number && t('adm.order.mall_group', { n: o.group_number }), showStore() && o.store_name].filter(Boolean).join(' · ') })),
       el('span', { className: 'pending-sum' }, el('strong', { className: 'num', textContent: som(o.total) }), deadline(o.pay_ms ?? 0))))) :
       [el('li', { className: 'li-empty' }, emptyState({ ic: 'cash', title: t('adm.cash.none'), text: t('adm.cash.none_text') }))]));
   } catch (err) {
@@ -734,6 +736,7 @@ function renderPay(o) {
     el('div', { className: 'pay-head' }, el('h2', { textContent: t('adm.order.title', { id: o.number }) }), payBadge(o),
       o.payment_status === 'pending' && o.expires_at ? deadline(Math.max(0, Date.parse(o.expires_at) - Date.now())) : null),
     el('p', { className: 'muted', textContent: [o.customer_name, o.phone, o.fulfillment === 'pickup' ? t('adm.orders.pickup') : t('adm.order.delivery_to', { address: o.address })].join(' · ') }),
+    groupMark(o),
     ...instNotice(o), itemsList(o), totalsBlock(o), err,
     el('div', { className: 'actions' },
       o.payment_status === 'pending' ? el('button', { type: 'button', className: 'primary', onclick: (e) => markPaid(o, e.currentTarget, err) }, icon('cash'), t('adm.paydlg.confirm')) : null,

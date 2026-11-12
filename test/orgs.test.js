@@ -370,7 +370,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 27; i > 12; i--) await m.migrate.down(); // 027 … 013
+    for (let i = 28; i > 12; i--) await m.migrate.down(); // 028 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);
