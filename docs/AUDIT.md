@@ -168,3 +168,16 @@ The user's direction changed: the main customer is a shopping mall. A mall has m
 | The mall as a tenant above shops, with its own admin page | Only super sees more than one organisation | **Task 37**: `malls`, a `mall` admin role limited to summary numbers, shop invites |
 | One entry for the whole mall | A kiosk and QR per store | **Task 37**: mall kiosk and phone screen with a shop directory and search across shops; cart and payment stay per shop |
 | One cart and one payment across shops | — | **Defer**: needs a mall-level merchant account and money split between shops |
+
+## Phase 6 — what was still missing (2026-11-13)
+
+After the full browser walk the user asked to build the items still listed as missing.
+
+| Need | Today | Verdict |
+|---|---|---|
+| One cart across the shops of a mall | Cart and order per shop (task 37) | **Task 38**: a mall cart and one checkout that creates one order per shop under one group number; payment stays at each shop's cashier |
+| One online payment across shops | — | **Defer**: needs a mall-level merchant account and a money split |
+| Points never expire; staff can't correct a balance | Ledger with earn, spend, refund, clawback (task 34) | **Task 39**: expiry by a sweep, an audited correction by the owner, search and CSV |
+| Children's sizes | Adult sizes only | **Task 40**: sizes by height, an audience on products, a child flow without a photo |
+| AI image try-on | — | **Task 41**: behind a provider key, off by default, explicit consent, nothing stored |
+| Uzum / Alif Nasiya API | Instalments at the store's terminal (task 35) | **Defer**: needs a merchant agreement and non-public documentation |
