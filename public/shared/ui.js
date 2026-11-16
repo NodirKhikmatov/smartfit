@@ -75,3 +75,21 @@ export function skeletonCard(lines = 3) {
   card.append(...Array.from({ length: lines }, (_, i) => Object.assign(document.createElement('span'), { className: `skeleton ${i === 0 ? 'line short' : 'block'}` })));
   return card;
 }
+
+// Task 46: a 1–5 rating as stars, read out as "4 / 5".
+export function stars(n) {
+  const s = document.createElement('span');
+  s.className = 'stars';
+  s.textContent = '★'.repeat(n) + '☆'.repeat(5 - n);
+  s.setAttribute('role', 'img');
+  s.setAttribute('aria-label', t('kiosk.review.stars', { n }));
+  return s;
+}
+// The visible average and count ("★ 4,3 · 12 ta baho"); null when the server sends no average (below its minimum).
+export function ratingLine(r) {
+  if (r?.avg == null) return null;
+  const s = document.createElement('span');
+  s.className = 'rating';
+  s.textContent = t('kiosk.review.avg', { avg: String(r.avg).replace('.', ','), n: r.count });
+  return s;
+}

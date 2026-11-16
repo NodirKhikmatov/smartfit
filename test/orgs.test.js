@@ -85,7 +85,9 @@ async function orgBRecords() {
   // Task 43: an offer of org B linked to its promo code.
   const [{ id: offer }] = await db('offers').insert({ organization_id: orgB, store_id: b1, title: 'B aksiya', title_ru: 'B акция', starts_at: new Date().toISOString(),
     ends_at: new Date(Date.now() + 86400000).toISOString(), promo_code_id: promo.id, status: 'draft' }).returning('id');
-  return { product, order, fitting, invite, key, member, promo, profile, offer };
+  // Task 46: a review of org B's order line (with a word the walk looks for).
+  const [{ id: review }] = await db('product_reviews').insert({ order_item_id: order.items[0].id, order_id: order.id, store_id: b1, product_id: product.id, rating: 1, fit: 'small', text: 'ORGB-REVIEW' }).returning('id');
+  return { product, order, fitting, invite, key, member, promo, profile, offer, review };
 }
 
 // The isolation walk: every admin route, called by org A's owner against org B's records. A route not listed here
@@ -350,6 +352,21 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
     },
     'PATCH /orgs/:id/plan': async () => refused(await admin('PATCH', `/orgs/${orgB}/plan`, { plan: 'start', paid_until: null, note: 'Sinov' }, ownerA)),
     'POST /demo-requests/:id/org': async () => refused(await admin('POST', '/demo-requests/1/org', { owner_email: 'x3@smartfit.uz' }, ownerA)),
+    // Task 46: reviews.
+    'GET /reviews': async () => {
+      for (const q of ['', `?store_id=${b1}`, '?show=hidden', '?show=low']) {
+        const r = await admin('GET', `/reviews${q}`, undefined, ownerA);
+        noB(r);
+        assert.ok(!json(r).includes('ORGB-REVIEW'), `no org B review (${q})`);
+      }
+    },
+    'POST /reviews/:id/hide': async () => refused(await admin('POST', `/reviews/${B.review}/hide`, { reason: 'Boshqa tashkilot' }, ownerA)),
+    'POST /reviews/:id/show': async () => refused(await admin('POST', `/reviews/${B.review}/show`, undefined, ownerA)),
+    'POST /reviews/:id/reply': async () => {
+      refused(await admin('POST', `/reviews/${B.review}/reply`, { text: 'Javob' }, ownerA));
+      const row = await db('product_reviews').where({ id: B.review }).first();
+      assert.deepEqual([row.hidden_at, row.reply], [null, null], 'org B review untouched');
+    },
     'GET /checklist': async () => assert.equal((await admin('GET', '/checklist', undefined, ownerA)).status, 200),
     'POST /checklist/dismiss': async () => {
       assert.equal((await admin('POST', '/checklist/dismiss', undefined, ownerA)).status, 204);
@@ -447,7 +464,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 35; i > 12; i--) await m.migrate.down(); // 035 … 013
+    for (let i = 36; i > 12; i--) await m.migrate.down(); // 036 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

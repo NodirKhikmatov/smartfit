@@ -52,6 +52,7 @@
           <li id="navCats" hidden><a href="#/categories" data-route="categories"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#bag"></use></svg><span data-i18n="adm.route.categories"></span></a></li>
           <li><a href="#/stats" data-route="stats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.route.stats"></span></a></li>
           <li><a href="#/demand" data-route="demand"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trend-up"></use></svg><span data-i18n="adm.route.demand"></span></a></li>
+          <li><a href="#/reviews" data-route="reviews"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#star"></use></svg><span data-i18n="adm.route.reviews"></span></a></li>
           <li><a href="#/qr" data-route="qr"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg><span data-i18n="adm.route.qr"></span></a></li>
           <li><a href="/staff/" data-route="staff"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#user"></use></svg><span data-i18n="adm.route.staff"></span></a></li>
           <li id="navOrgs" hidden><a href="#/orgs" data-route="orgs"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#store"></use></svg><span data-i18n="adm.route.orgs"></span></a></li>
@@ -124,6 +125,13 @@
             <div class="panel-head"><div><h2 id="dashReturnsTitle" data-i18n="adm.dash.returns"></h2><p class="panel-sub" id="dashReturnsSub"></p></div><strong class="kpi-inline num" id="dashReturnsRate"></strong></div>
             <ol class="rank" id="dashReturns"></ol>
             <p class="panel-sub" id="dashReturnsRefund"></p>
+          </section>
+          <section class="card panel span-2" aria-labelledby="dashReviewsTitle">
+            <div class="panel-head">
+              <div><h2 id="dashReviewsTitle" data-i18n="adm.reviews.report"></h2><p class="panel-sub" data-i18n="adm.dash.reviews_sub"></p></div>
+              <a class="button ghost" href="#/reviews"><span data-i18n="adm.dash.reviews_all"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chevron-right"></use></svg></a>
+            </div>
+            <ol class="rank" id="dashReviews"></ol>
           </section>
           <section class="card panel span-2" aria-labelledby="dashLowTitle">
             <div class="panel-head">
@@ -328,6 +336,27 @@
       </section>
 
       <!-- QR -->
+      <section data-page="reviews" hidden>
+        <p class="muted" data-i18n="adm.reviews.sub"></p>
+        <div id="reviewsError"></div>
+        <div class="dash-grid">
+          <section class="card panel span-2" aria-labelledby="revReportTitle">
+            <div class="panel-head"><div><h2 id="revReportTitle" data-i18n="adm.reviews.report"></h2><p class="panel-sub" data-i18n="adm.reviews.report_sub"></p></div></div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th data-i18n="adm.demand.product"></th><th class="num" data-i18n="adm.reviews.avg"></th><th class="num" data-i18n="adm.reviews.count"></th><th class="num hide-sm" data-i18n="kiosk.track.fit_small"></th><th class="num hide-sm" data-i18n="kiosk.track.fit_right"></th><th class="num hide-sm" data-i18n="kiosk.track.fit_big"></th><th data-i18n="adm.reviews.fit"></th></tr></thead>
+                <tbody id="revReport"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="card panel span-2" aria-labelledby="revListTitle">
+            <div class="panel-head"><div><h2 id="revListTitle" data-i18n="adm.reviews.list"></h2></div><div class="seg" role="group" data-i18n-aria-label="field.filter" id="revShow"></div></div>
+            <ul class="rev-list" id="revRows"></ul>
+            <nav class="pager" id="revPager" data-i18n-aria-label="adm.pager"></nav>
+          </section>
+        </div>
+      </section>
+
       <section data-page="qr" hidden>
         <p class="muted lead" data-i18n="adm.qrdlg.text"></p>
         <div id="qrError"></div>
@@ -1010,6 +1039,20 @@
       <button type="button" class="danger ghost push-left" id="offerDelete"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trash"></use></svg><span data-i18n="common.delete"></span></button>
       <button type="button" id="offerCancel" data-i18n="common.cancel"></button>
       <button class="primary" id="offerSave" data-i18n="adm.form.save"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="revDlg" class="narrow" aria-labelledby="revDlgTitle">
+  <form id="revForm" method="dialog" novalidate>
+    <h2 id="revDlgTitle"></h2>
+    <p class="muted review-text" id="revDlgText"></p>
+    <label><span id="revDlgLabel"></span> <textarea name="text" required rows="4" autofocus aria-describedby="revDlgHint"></textarea></label>
+    <p class="hint" id="revDlgHint"></p>
+    <p class="error" id="revDlgError" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="revDlgCancel" data-i18n="common.cancel"></button>
+      <button class="primary" id="revDlgGo"></button>
     </div>
   </form>
 </dialog>

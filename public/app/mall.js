@@ -2,7 +2,7 @@
 // every shop in the mall. Choosing a shop or an item continues in that shop's own flow (?store=&mall=).
 // Task 38: #cart is the mall cart: every shop's part with that shop's own discounts and totals (all from the server),
 // one form, and one checkout that makes one order per shop. Shop and mall names come from the database: always set as text.
-import { icon, showAfter, skeletonCard } from '/shared/ui.js';
+import { icon, showAfter, skeletonCard, ratingLine } from '/shared/ui.js';
 import { t, fmt, getLang, productName } from '/shared/i18n.js';
 import { offerCard, countOffers } from './offers.js';
 import { openAt, floorsOf, categoriesOf, filterShops } from './directory.js';
@@ -385,7 +385,7 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
     $('mallStatus').textContent = items.length ? t('kiosk.mall.found', { n: items.length, q }) : t('kiosk.mall.nothing', { q });
     $('mallResults').replaceChildren(...items.map((p) => el('a', { className: 'button tile', href: shopUrl(p.store_id, p.id) },
       p.image_url ? el('img', { src: p.image_url, alt: '' }) : el('span', { className: 'ph' }, icon(p.category || 'hanger')),
-      el('span', { className: 'name', textContent: productName(p) }), price(p),
+      el('span', { className: 'name', textContent: productName(p) }), price(p), ratingLine(p.rating), // task 46: the catalogue's visible rating
       el('span', { className: 'meta', textContent: p.sizes.map((s) => (s === 'ONE' ? t('common.size_one') : s)).join(' ') }),
       el('span', { className: 'meta shop', textContent: [p.store_name, where(p)].filter(Boolean).join(' · ') }))));
   }

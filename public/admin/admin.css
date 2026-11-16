@@ -389,3 +389,11 @@ dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }
 .plan-list .grow, .low-list .grow { flex: 1; min-width: 0; }
 .ending .low-list li { flex-wrap: wrap; }
 .ending .low-list .grow { min-width: 12rem; }
+
+/* Task 46: the reviews list. */
+.rev-list { list-style: none; margin: 0; padding: 0; }
+.rev-list > li { display: flex; gap: var(--s-3); align-items: flex-start; padding: var(--s-3) 0; border-top: 1px solid var(--line); }
+.rev-list > li:first-child { border-top: 0; }
+.rev-list .grow { flex: 1; min-width: 0; display: grid; gap: var(--s-1); }
+.rev-list .is-hidden .grow { color: var(--ink-2); }
+.rev-list .row-actions { display: flex; gap: var(--s-1); }

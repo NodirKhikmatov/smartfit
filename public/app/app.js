@@ -6,7 +6,7 @@ import { CLOTHES, SHOES, KIDS, KIDS_SHOES, ageHint, JEANS, WANT, nextError, fiel
 import { mallScreen } from './mall.js';
 import { createTryon } from './tryon.js';
 import { offerCard, countOffers, idleSlides } from './offers.js';
-import { icon, confirmDialog, showAfter, skeletonCard, toast } from '/shared/ui.js';
+import { icon, confirmDialog, showAfter, skeletonCard, toast, stars, ratingLine } from '/shared/ui.js';
 import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName, COLORS, STYLES } from '/shared/i18n.js';
 
 // One app: /kiosk (big buttons, idle reset) and /m (phone, opened from the store QR).
@@ -1126,7 +1126,7 @@ function partialCard(p) {
 
 // --- Task 25: catalogue and item page. The server sends only items and sizes with free stock now.
 const PRICE_BANDS = [[null, 300_000], [300_000, 800_000], [800_000, null]]; // what the customer pays (discount price first)
-const NO_FILTER = { audience: 'adult', category: '', gender: '', size: '', price: '' }; // task 40: adults' items unless asked
+const NO_FILTER = { audience: 'adult', category: '', gender: '', size: '', price: '', sort: '' }; // task 40: adults' items unless asked; task 46: sort
 let filters = { ...NO_FILTER };
 let itemId = null; // the open item page
 let catalogSeq = 0, itemSeq = 0; // only the newest answer may draw
@@ -1166,14 +1166,26 @@ function renderFilters() {
     group('gender', t('kiosk.catalog.gender'), [['male', t(child ? 'kiosk.child.boy' : 'gender.male')], ['female', t(child ? 'kiosk.child.girl' : 'gender.female')]]),
     group('price', t('field.price'), PRICE_BANDS.map((b, i) => [String(i), bandName(b)])),
     ...(sizes.length ? [group('size', t('kiosk.catalog.size'), sizes.map((x) => [x, x]))] : []),
+    sortRow(),
   );
+}
+// Task 46: the shop's usual order, or the best visible rating first (the server sorts; unrated items follow).
+function sortRow() {
+  const g = el('div', { className: 'filter' }, el('div', { className: 'meta', textContent: t('field.sort') }),
+    chipRow([['', t('kiosk.catalog.sort_default')], ['rating', t('kiosk.catalog.sort_rating')]], filters.sort, t('field.sort'), (v) => {
+      filters = { ...filters, sort: v };
+      loadCatalog();
+      $('catalogFilters').querySelector('[data-group="sort"] [aria-pressed="true"]')?.focus();
+    }));
+  g.dataset.group = 'sort';
+  return g;
 }
 
 async function loadCatalog() {
   const seq = ++catalogSeq;
   renderFilters();
   const band = PRICE_BANDS[filters.price] ?? [null, null];
-  const q = new URLSearchParams(Object.entries({ audience: filters.audience, category: filters.category, gender: filters.gender, size: filters.size, min: band[0] ?? '', max: band[1] ?? '' })
+  const q = new URLSearchParams(Object.entries({ audience: filters.audience, category: filters.category, gender: filters.gender, size: filters.size, min: band[0] ?? '', max: band[1] ?? '', sort: filters.sort })
     .filter(([, v]) => v !== ''));
   $('catalogStatus').textContent = t('kiosk.catalog.loading');
   const done = showAfter(300, () => seq === catalogSeq && $('catalogGrid').replaceChildren(skeletonCard(2), skeletonCard(2), skeletonCard(2)));
@@ -1198,7 +1210,7 @@ async function loadCatalog() {
 // A catalogue or "goes well with" tile: photo, name, price and the sizes in stock. Opens the item page.
 const tile = (p) => el('button', { type: 'button', className: 'tile', onclick: () => go('item', { data: { item: p.id } }) },
   p.image_url ? el('img', { src: p.image_url, alt: '' }) : el('span', { className: 'ph' }, icon(p.category || 'hanger')),
-  el('span', { className: 'name', textContent: productName(p) }), priceEl(p),
+  el('span', { className: 'name', textContent: productName(p) }), priceEl(p), ratingLine(p.rating) ?? '', // task 46: from 3 visible reviews
   el('span', { className: 'meta', textContent: p.sizes.map(sizeName).join(' ') }));
 
 async function loadItem(id) {
@@ -1256,19 +1268,44 @@ function renderItem(p, pairs) {
   page.replaceChildren(
     el('div', { className: 'item-page' },
       p.image_url ? el('img', { className: 'item-photo', src: p.image_url, alt: '' }) : el('div', { className: 'item-photo ph' }, icon(p.category || 'hanger')),
-      el('div', { className: 'item-info card' }, priceEl(p),
+      el('div', { className: 'item-info card' }, priceEl(p), reviewSum(p),
         // Task 35: the lowest monthly amount the store offers for this price (server-made).
         ...(p.instalments ? [el('p', { className: 'meta inst-line', textContent: t('kiosk.inst.item', { sum: som(lowest(p.instalments).monthly), n: lowest(p.instalments).months }) })] : []),
         el('p', { className: 'meta', textContent: [catOf(p), colorName(p.color), p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }),
         ...(description(p) ? [el('p', { textContent: description(p) })] : []),
         // Task 36: the shop's free details ("Mato: 100% paxta"), as text.
         ...(p.details.length ? [el('dl', { className: 'details' }, ...p.details.flatMap((d) => [el('dt', { textContent: d.name }), el('dd', { textContent: d.value })]))] : []),
-        fitHint(p), pick, other,
+        fitHint(p), reviewFit(p), pick, other,
         addButton([{ ...p, size: null }], page, 'primary wide', 'kiosk.add.btn', null),
         tryon.button(p), // task 41: '' for a child's item, an item without a photo, or when the shop has it off
         ...(scanToken ? [fittingBox([{ ...p, size: null }], page, { scan: scanToken })] : []))), // task 32: in the shop, from a label
     ...(pairs.length ? [el('section', { className: 'pairs' }, el('h2', { textContent: t('kiosk.item.pairs') }), el('div', { className: 'catalog-grid' }, ...pairs.map(tile)))] : []),
+    reviewList(p),
   );
+}
+
+// Task 46: the average and count (only from the server's minimum of visible reviews; below it just the count), the
+// buyers' fit summary as a hint line (it never changes a size), and the newest reviews: "Xaridor", never a name.
+const FIT_SUM = { small: 'kiosk.review.fit_small', big: 'kiosk.review.fit_big', right: 'kiosk.review.fit_right', mixed: 'kiosk.review.fit_mixed' };
+const FIT_SAID = { small: 'kiosk.track.fit_small', right: 'kiosk.track.fit_right', big: 'kiosk.track.fit_big' };
+function reviewSum(p) {
+  const r = p.rating;
+  if (!r?.count) return '';
+  return el('p', { className: 'review-sum' }, ratingLine(r) ?? el('span', { className: 'meta', textContent: t('kiosk.review.count', { n: r.count }) }));
+}
+const reviewFit = (p) => (p.rating?.fit ? el('div', { className: 'fit-hint' }, icon('info'), el('span', { textContent: t(FIT_SUM[p.rating.fit]) })) : '');
+function reviewList(p) {
+  if (!p.reviews?.length) return '';
+  return el('section', { className: 'reviews' }, el('h2', { textContent: t('kiosk.review.list') }), ...p.reviews.map((r) => {
+    const box = el('div', { className: 'review-item' },
+      el('div', { className: 'review-head' }, el('strong', { textContent: t('kiosk.review.buyer') }), stars(r.rating),
+        el('span', { className: 'meta', textContent: [sizeName(r.size), fmt.date(r.created_at)].join(' · ') })));
+    if (r.returned) box.querySelector('.review-head').append(el('span', { className: 'badge', textContent: t('kiosk.review.returned') }));
+    if (r.fit) box.append(el('p', { className: 'meta', textContent: t('kiosk.review.fit_said', { fit: t(FIT_SAID[r.fit]) }) }));
+    if (r.text) box.append(el('p', { className: 'review-text', textContent: r.text }));
+    if (r.reply) box.append(el('div', { className: 'review-reply' }, el('strong', { textContent: t('kiosk.review.reply') }), el('p', { className: 'review-text', textContent: r.reply })));
+    return box;
+  }));
 }
 
 // The chosen size has none free here: where else in this organisation it is (logged as missed demand by the server).

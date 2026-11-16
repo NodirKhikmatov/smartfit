@@ -11,6 +11,7 @@ import { hold, customer, insertOrder, orderView, releaseExpired, storeOf, planIn
 import { termsOf, plan } from './cart/instalment.js';
 import { clientKey } from './limits.js';
 import { qrSvg, publicBase } from './qr.js';
+import { ratingsOf, withRatings, publicReviews, visibleRatings, byRating } from './reviews.js';
 
 export const RESERVE_MS = 3 * 60 * 60 * 1000; // pay at that store's cashier within 3 h, then the hold is released
 const MAX_LIST = 200; // shortcut: one page (category order, newest first); add paging when a store has more items
@@ -65,15 +66,19 @@ export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {})
     if (size && !SIZE.test(size)) throw fail(400, 'err.invalid', { field: 'field.size' });
     const min = int(q.min, 'field.price'), max = int(q.max, 'field.price');
     const audience = audienceOf(q.audience, category);
+    const sort = one(q.sort);
+    if (sort && sort !== 'rating') throw fail(400, 'err.invalid', { field: 'field.sort' });
     const rows = visible(db('products as p')).where('p.store_id', store.id)
-      .whereExists(size ? inStock(db).where('s.size', size) : inStock(db))
-      .orderByRaw(`c.sort, case p.category ${CATEGORIES.map((c, i) => `when '${c}' then ${i}`).join(' ')} end, p.id desc`).limit(MAX_LIST).select(COLS);
+      .whereExists(size ? inStock(db).where('s.size', size) : inStock(db));
+    // Task 46: ?sort=rating puts the best visible average first (only from REVIEW_MIN reviews), then the usual order.
+    if (sort) byRating(rows.leftJoin(visibleRatings(db).as('rv'), 'rv.product_id', 'p.id'));
+    rows.orderByRaw(`c.sort, case p.category ${CATEGORIES.map((c, i) => `when '${c}' then ${i}`).join(' ')} end, p.id desc`).limit(MAX_LIST).select(COLS);
     if (category) /^\d+$/.test(category) ? rows.where('p.category_id', Number(category)) : rows.where('p.category', category);
     if (gender) rows.whereIn('p.gender', genders(gender));
     if (audience) rows.where('p.audience', audience);
     if (min !== null) rows.whereRaw('coalesce(p.discount_price, p.price) >= ?', [min]);
     if (max !== null) rows.whereRaw('coalesce(p.discount_price, p.price) <= ?', [max]);
-    res.json({ items: await withSizes(db, await rows) });
+    res.json({ items: await withRatings(db, await withSizes(db, await rows)) });
   });
 
   // GET /:store/items/:id → { item, pairs }: the item with its in-stock sizes and fit hint, and 2–4 in-stock items
@@ -90,10 +95,11 @@ export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {})
       .whereExists(inStock(db)).orderBy('p.id').select(COLS);
     const pairs = pairWith(row, pool).map((p) => p.id);
     const { fit_offset, details, ...rest } = item;
+    // Task 46: the visible average, count and fit summary (null below REVIEW_MIN) and the newest visible reviews.
     res.json({
-      item: { ...rest, all_sizes: sizesOf(row), details: details ? JSON.parse(details) : [], fit_offset: (await fitOf(db, [row])).get(id).offset,
+      item: { ...rest, all_sizes: sizesOf(row), rating: (await ratingsOf(db, [id])).get(id), reviews: await publicReviews(db, id), details: details ? JSON.parse(details) : [], fit_offset: (await fitOf(db, [row])).get(id).offset,
         ...(termsOf(store) && { instalments: plan(termsOf(store), rest.unit_price) }) }, // task 35: per-month figures, server-made
-      pairs: await withSizes(db, pool.filter((p) => pairs.includes(p.id)).sort((a, b) => pairs.indexOf(a.id) - pairs.indexOf(b.id))),
+      pairs: await withRatings(db, await withSizes(db, pool.filter((p) => pairs.includes(p.id)).sort((a, b) => pairs.indexOf(a.id) - pairs.indexOf(b.id)))),
     });
   });
 

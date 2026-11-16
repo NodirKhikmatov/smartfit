@@ -16,6 +16,7 @@ import { fmt } from '../../public/shared/i18n.js';
 import { pointsConfig, balanceOf, maxSpend, checkSpend, spend, refundSpent, earnPoints } from './points.js';
 import { termsOf, plan, monthly } from './instalment.js';
 import { allows, shopOpen } from '../plans.js';
+import { orderLines } from '../reviews.js';
 
 export const HOLD_MS = 15 * 60 * 1000;
 export const HANDOFF_MS = 5 * 60 * 1000; // how long the kiosk's "continue on your phone" QR works
@@ -563,7 +564,11 @@ export function createOrderRouter(db, { methods = CASHIER, link = () => null } =
     const pay = online ? await methods[o.payment_method]({ ...v, notify_token: o.notify_token }) : null;
     res.json({
       number: v.number, store, status: v.status, payment_status: v.payment_status, payment_method: v.payment_method, fulfillment: v.fulfillment,
-      items: v.items.map(({ id, name, name_ru, category, color, size, quantity, unit_price, fit }) => ({ id, name, name_ru, category, color, size, quantity, unit_price, fit })),
+      // Task 46: per line its review (the customer's own, also when the shop hid it), the kept size and returned units.
+      items: (await orderLines(db, o, v.items)).map((x, n) => {
+        const { id, name, name_ru, category, color, size, quantity, unit_price, fit } = v.items[n];
+        return { id, name, name_ru, category, color, size, quantity, unit_price, fit, ...x };
+      }),
       fit_open: fitOpen(o),
       subtotal: v.subtotal, bundle_discount: v.bundle_discount, promo_discount: v.promo_discount, promo_code: v.promo_code, points_discount: v.points_discount,
       instalment_months: v.instalment_months, instalment_monthly: v.instalment_monthly,

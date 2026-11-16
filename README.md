@@ -110,7 +110,7 @@ docker stop smartfit-testpg
 | `DOMAIN` | `localhost` | docker compose only: the HTTPS domain Caddy serves and gets a certificate for. |
 | `NODE_ENV` | empty | `production` requires `ADMIN_TOKEN_SECRET` and blocks `npm run seed`. compose sets it. |
 | `TRUST_PROXY` | empty | Number of reverse proxies in front of the app. compose sets `1` (Caddy), so client IPs (login lock, rate limits, open-cart cap) and `https` (QR links) are right. Leave empty when the app is reached directly. |
-| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN`, `RATE_DEMO_PER_MIN`, `RATE_FUNNEL_PER_MIN`, `RATE_CATALOG_PER_MIN`, `RATE_PROMO_PER_MIN`, `RATE_PROFILE_PER_MIN`, `RATE_PROFILE_POLL_PER_MIN`, `RATE_SCAN_PER_MIN`, `RATE_MALL_PER_MIN`, `RATE_OFFER_PER_MIN`, `RATE_TRYON_PER_MIN` | 60, 30, 300, 20, 30, 5, 3, 120, 300, 20, 20, 300, 120, 300, 60, 4 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat, the kiosk exit PIN, the landing page's demo form, the customer funnel events (`/api/funnel`), the catalogue (`/api/catalog/*`), promo code tries (`POST /api/cart/:token/promo`), new profile links / kiosk login QRs and the profile page (`/api/profile/*`), the screens waiting for the bot (`GET /api/profile/token/*`), garment QR label scans (`GET /q/*`; over the limit the phone is still redirected, the scan just isn't logged), the mall screen's directory and search (`/api/malls/*`), offer shown / tapped counts (`POST /api/offers/events`; each offer also counts once per IP every 30 s), and AI try-on pictures (`POST /api/tryon`, each one paid). Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
+| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN`, `RATE_DEMO_PER_MIN`, `RATE_FUNNEL_PER_MIN`, `RATE_CATALOG_PER_MIN`, `RATE_PROMO_PER_MIN`, `RATE_PROFILE_PER_MIN`, `RATE_PROFILE_POLL_PER_MIN`, `RATE_SCAN_PER_MIN`, `RATE_MALL_PER_MIN`, `RATE_OFFER_PER_MIN`, `RATE_TRYON_PER_MIN`, `RATE_REVIEW_PER_MIN` | 60, 30, 300, 20, 30, 5, 3, 120, 300, 20, 20, 300, 120, 300, 60, 4, 10 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat, the kiosk exit PIN, the landing page's demo form, the customer funnel events (`/api/funnel`), the catalogue (`/api/catalog/*`), promo code tries (`POST /api/cart/:token/promo`), new profile links / kiosk login QRs and the profile page (`/api/profile/*`), the screens waiting for the bot (`GET /api/profile/token/*`), garment QR label scans (`GET /q/*`; over the limit the phone is still redirected, the scan just isn't logged), the mall screen's directory and search (`/api/malls/*`), offer shown / tapped counts (`POST /api/offers/events`; each offer also counts once per IP every 30 s), AI try-on pictures (`POST /api/tryon`, each one paid), and review submits (`POST /api/orders/:token/reviews`). Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
 | `MAX_OPEN_CARTS_PER_IP` | 30 | Live carts (each holds stock for 15 min) one client IP may have at once; the next new cart → `429 too_many_carts`. Unpaid other-store reservations (task 25, held 3 h) count against the same cap (`429 too_many_reserves`). `0` = off. |
 | `ERROR_WEBHOOK_URL` | empty | Optional error monitoring: every error log line is POSTed as JSON `{text, content, level, time}` (works with Slack, Discord and Mattermost incoming webhooks), at most 10 a minute. |
 
@@ -189,6 +189,25 @@ outside it, and super marks the organisation as paid.
   PIN, a kiosk seen or a first customer visit, a colleague) that ticks itself and can be hidden.
 - Super-admins are never limited (they fix things for a shop). Each shop in a mall has its own plan; the mall admin
   neither sees nor changes it, and the mall itself is not billed in the app.
+
+## Ratings and reviews (task 46)
+
+After an order is handed over (paid + delivered / picked up), its status page `/order/<token>` asks for a 1–5 rating
+per item, a fit answer (kichik / mos / katta, sized items only) and an optional comment (plain text, ≤ 500 characters).
+One review per order line, only through that order's token, and it can't be edited afterwards. A review stores no
+name, phone or profile: the item page shows "Xaridor". The Telegram hand-over message (where the bot is on) links to the
+form; a mall order's page links to each shop order's form.
+
+- The item page shows the average and count from **3 visible reviews** (below that, only the count), the buyers' fit
+  summary as a hint line (it never changes the size the engine picks), and the newest 20 reviews with the shop's answer.
+  The catalogue can sort by rating; the mall search tiles show the same number.
+- Admin → **Sharhlar**: lowest-rated products with their fit answers (also a dashboard card next to returns), and the
+  list. The owner hides a review with a reason (audited `review.hide`, and can show it again); the owner or a manager
+  answers once (`review.reply`). Staff and the mall admin don't see reviews.
+- A returned line keeps its review, marked "Qaytarilgan", and stays in the average; an exchanged line shows the size
+  the customer kept. "Delete my data" removes that customer's reviews in the organisation.
+- `npm run seed` adds a few handed-over demo orders with reviews to the first demo shop (older than 30 days, so the
+  dashboards don't count them).
 
 ## Shopping malls (several shops, one entry screen)
 

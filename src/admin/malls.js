@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fail, text, imageExt, DAY_MS, msOf } from './routes.js';
 import { createInvite } from './settings.js';
 import { audit, diff } from './audit.js';
+import { withRatings } from '../reviews.js';
 import { builtinRows } from '../db/migrations/023_categories.js';
 import { qrSvg, publicBase } from '../qr.js';
 import { stamp } from '../cart/cart.js';
@@ -534,7 +535,7 @@ export function createMallRouter(db) {
       .select(...COLS, 'p.store_id', 'st.name as store_name', 'st.mall_floor as floor', 'st.mall_unit as unit');
     if (gender) rows.whereIn('p.gender', genders(gender));
     rows.where('p.audience', audience);
-    res.json({ items: await withSizes(db, await rows) });
+    res.json({ items: await withRatings(db, await withSizes(db, await rows)) }); // task 46: the same visible rating as the catalogue
   });
   return r;
 }

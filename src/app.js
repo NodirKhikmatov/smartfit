@@ -13,6 +13,7 @@ import { paymentConfig, paymentMethods, createPaymentRouter } from './cart/payme
 import { telegramConfig, telegramLink } from './notify/telegram.js';
 import { fail, langOf, errorBody } from './admin/routes.js';
 import { limitConfig, rateLimit } from './limits.js';
+import { createReviewRouter } from './reviews.js';
 import { createKioskRouter } from './kiosk.js';
 import { createDemoRouter } from './admin/orgs.js';
 import { createMallRouter } from './admin/malls.js';
@@ -90,6 +91,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/offers', bucket('offer'), createOfferRouter(db, { now })); // task 43: offer counts
   api.use('/catalog', bucket('catalog'), createCatalogRouter(db, { link, maxOpen: lim.openCarts })); // task 25
   api.use('/funnel', bucket('funnel'), createFunnelRouter(db)); // task 24: drop-off by step
+  api.use('/orders', createReviewRouter(db, { limit: bucket('review') })); // task 46: reviews through the status token
   api.use('/orders', createOrderRouter(db, { methods, link }));
   api.use('/order-groups', createOrderGroupRouter(db)); // task 38: the mall order's status page
   // Task 27: customer profiles exist only with a Telegram bot (it verifies the phone); without one the routes are 404.

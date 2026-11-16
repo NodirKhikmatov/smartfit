@@ -305,3 +305,11 @@ dialog h2 { margin-bottom: var(--s-3); }
 .pin.here .pin-dot { background: var(--ink); }
 .pin.here .pin-label { background: var(--ink); border-color: var(--ink); color: var(--surface); }
 .pin.off .pin-label { border-style: dashed; color: var(--ink-2); } /* admin: a hidden shop's pin */
+
+/* Task 46: ratings. The star glyphs are text, so they follow the font size; the accent marks the filled ones. */
+.stars { color: var(--accent); letter-spacing: .05em; white-space: nowrap; }
+.rating { font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--ink-2); white-space: nowrap; }
+.review-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.review-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.review-reply { padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--sunken); }
+.review-reply p { margin: var(--s-1) 0 0; }

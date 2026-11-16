@@ -278,7 +278,20 @@ test('every mutating admin route writes an audit row', async () => {
     await admin('POST', `/offers/${o.id}/image`, undefined, ownerToken, { raw: png, type: 'image/png' });
     return (await admin('POST', `/offers/${o.id}/submit`, undefined, ownerToken)).body;
   };
+  // Task 46: a review on a line of a new order (inserted directly: the walk is about the admin side).
+  const newReview = async () => {
+    const o = await pendingOrder();
+    const [{ id }] = await db('product_reviews').insert({ order_item_id: o.items[0].id, order_id: o.id, store_id: tashkent, product_id: o.items[0].product_id, rating: 2, fit: 'small', text: 'Kichik' }).returning('id');
+    return id;
+  };
   const recipes = {
+    'POST /reviews/:id/hide': ['review.hide', async () => admin('POST', `/reviews/${await newReview()}/hide`, { reason: 'Haqoratli' }, ownerToken)],
+    'POST /reviews/:id/show': ['review.show', async () => {
+      const id = await newReview();
+      await admin('POST', `/reviews/${id}/hide`, { reason: 'Xato' }, ownerToken);
+      return admin('POST', `/reviews/${id}/show`, undefined, ownerToken);
+    }],
+    'POST /reviews/:id/reply': ['review.reply', async () => admin('POST', `/reviews/${await newReview()}/reply`, { text: 'Rahmat!' }, managerToken)],
     'POST /offers': ['offer.create', () => admin('POST', '/offers', { store_id: tashkent, title: 'Yangi', title_ru: 'Новая', starts_on: today, ends_on: today }, ownerToken)],
     'PATCH /offers/:id': ['offer.update', async () => admin('PATCH', `/offers/${(await newOffer()).id}`, { body: 'Matn' }, ownerToken)],
     'DELETE /offers/:id': ['offer.delete', async () => admin('DELETE', `/offers/${(await newOffer()).id}`, undefined, ownerToken)],

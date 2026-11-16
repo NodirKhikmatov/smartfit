@@ -1,5 +1,5 @@
 // Public order status page (/order/<token>, audit U7): timeline, items, pay-by countdown. Shows no name or phone.
-import { icon } from '/shared/ui.js';
+import { icon, stars } from '/shared/ui.js';
 import { t, fmt, initLang, getLang, langSwitch, productName } from '/shared/i18n.js';
 
 const $ = (id) => document.getElementById(id);
@@ -85,41 +85,75 @@ function render() {
   $('updated').textContent = error || t('kiosk.track.updated', { time: fmt.time(new Date().toISOString()) });
 }
 
-// Task 23: "how did it fit?" per sized item, once the order is handed over. Redraws only itself (the page is a live region).
+// Task 23 / 46: once the order is handed over, each line gets a 1–5 rating, a fit answer (sized items) and an optional
+// short text, once. A sent review is shown as sent (with the shop's answer); only that line's card is redrawn.
 const FIT = { small: 'kiosk.track.fit_small', right: 'kiosk.track.fit_right', big: 'kiosk.track.fit_big' };
-function fitBox(o, said = '') {
-  const items = o.items.filter((i) => i.category !== 'accessory');
-  const box = el('section', { className: 'card fit-ask', id: 'fit' }, el('h2', { textContent: t('kiosk.track.fit_title') }), el('p', { className: 'muted', textContent: t('kiosk.track.fit_text') }),
-    ...items.map((i) => {
-      const chips = el('div', { className: 'size-chips', role: 'group', ariaLabel: t('kiosk.track.fit_aria', { name: productName(i) }) }, ...Object.entries(FIT).map(([fit, key]) => {
-        const b = el('button', { type: 'button', className: 'chip', textContent: t(key) });
-        b.setAttribute('aria-pressed', String(i.fit === fit));
-        b.onclick = () => answer(o, i, fit, box);
-        return b;
-      }));
-      return el('div', { className: 'fit-row' }, el('span', { textContent: `${productName(i)} · ${i.size}` }), chips);
-    }),
-    el('p', { className: 'meta', role: 'status', textContent: said }));
-  return box;
+const sizeText = (i) => { const s = i.kept_size ?? i.size; return s === 'ONE' ? t('common.size_one') : s; };
+function fitBox(o) {
+  return el('section', { className: 'card fit-ask', id: 'review' }, el('h2', { textContent: t('kiosk.track.fit_title') }), el('p', { className: 'muted', textContent: t('kiosk.track.fit_text') }),
+    ...o.items.map((i) => reviewItem(i)));
 }
-async function answer(o, item, fit, box) {
-  let said;
-  try {
-    const res = await fetch(`/api/orders/${token}/fit`, { method: 'POST', headers: { 'content-type': 'application/json', 'accept-language': getLang() }, body: JSON.stringify({ item: item.id, fit }) });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || t('common.error'));
-    item.fit = fit;
-    said = t('kiosk.track.fit_thanks');
-  } catch (err) {
-    said = err.message;
+function reviewItem(i, said = '') {
+  const head = el('div', { className: 'review-head' }, el('strong', { textContent: `${productName(i)} · ${sizeText(i)}` }),
+    ...(i.returned ? [el('span', { className: 'badge', textContent: t('kiosk.review.returned') })] : []));
+  const box = el('div', { className: 'review-item' }, head);
+  const r = i.review;
+  if (r) {
+    box.append(stars(r.rating),
+      ...(r.fit ? [el('p', { className: 'meta', textContent: t('kiosk.review.fit_said', { fit: t(FIT[r.fit]) }) })] : []),
+      ...(r.text ? [el('p', { className: 'review-text', textContent: r.text })] : []),
+      ...(r.hidden ? [el('p', { className: 'meta', textContent: t('kiosk.review.hidden') })] : []),
+      ...(r.reply ? [el('div', { className: 'review-reply' }, el('strong', { textContent: t('kiosk.review.reply') }), el('p', { className: 'review-text', textContent: r.reply }))] : []),
+      el('p', { className: 'meta', role: 'status', textContent: said }));
+    return box;
   }
-  const next = fitBox(o, said);
-  box.replaceWith(next);
-  const row = next.querySelectorAll('.fit-row')[o.items.filter((i) => i.category !== 'accessory').indexOf(item)];
-  (row?.querySelector('[aria-pressed="true"]') ?? row?.querySelector('.chip'))?.focus();
+  const pick = { rating: 0, fit: i.fit ?? null }; // a task 23 answer given before reviews existed is kept as the default
+  const chips = (label, options, key) => {
+    const g = el('div', { className: 'size-chips', role: 'group', ariaLabel: label }, ...options.map(([v, text, aria]) => {
+      const b = el('button', { type: 'button', className: 'chip', textContent: text });
+      if (aria) b.ariaLabel = aria;
+      b.setAttribute('aria-pressed', String(pick[key] === v));
+      b.onclick = () => {
+        pick[key] = v;
+        for (const c of g.children) c.setAttribute('aria-pressed', String(c === b));
+        err.textContent = '';
+      };
+      return b;
+    }));
+    return g;
+  };
+  const err = el('p', { className: 'field-error', role: 'alert' });
+  const id = `rv${i.id}`;
+  const area = el('textarea', { id, maxLength: 500, rows: 3 });
+  const send = el('button', { type: 'button', className: 'primary', textContent: t('kiosk.review.send') });
+  send.onclick = async () => {
+    if (!pick.rating) return (err.textContent = t('kiosk.review.need_rating'));
+    if (i.sized && !pick.fit) return (err.textContent = t('kiosk.review.need_fit'));
+    send.disabled = true; // one submit; the server's unique line also keeps a double tap to one review
+    try {
+      const res = await fetch(`/api/orders/${token}/reviews`, { method: 'POST', headers: { 'content-type': 'application/json', 'accept-language': getLang() },
+        body: JSON.stringify({ item: i.id, rating: pick.rating, ...(i.sized && { fit: pick.fit }), text: area.value }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && data.code !== 'review_exists') throw new Error(data.error || t('common.error'));
+      if (data.review) i.review = data.review;
+      else return load(); // sent from another tab meanwhile: show what the server has
+      box.replaceWith(reviewItem(i, t('kiosk.track.fit_thanks')));
+    } catch (e) {
+      err.textContent = e.message;
+      send.disabled = false;
+    }
+  };
+  box.append(
+    el('div', { className: 'meta', textContent: t('field.rating') }),
+    chips(t('kiosk.review.rating_aria', { name: productName(i) }), [1, 2, 3, 4, 5].map((n) => [n, `${n} ★`, t('kiosk.review.stars', { n })]), 'rating'),
+    ...(i.sized ? [el('div', { className: 'meta', textContent: t('kiosk.review.fit_q') }),
+      chips(t('kiosk.track.fit_aria', { name: productName(i) }), Object.entries(FIT).map(([v, k]) => [v, t(k)]), 'fit')] : []),
+    el('label', { htmlFor: id, className: 'meta', textContent: t('kiosk.review.text_label') }), area, err, send);
+  return box;
 }
 
 await load();
 $('title').focus({ preventScroll: true });
+if (location.hash === '#review') $('review')?.scrollIntoView(); // task 46: the mall order page's "rate" link
 // Follow the order while it is still moving.
 setInterval(() => { if (!document.hidden && order && !['delivered', 'cancelled'].includes(stageOf(order))) load(); }, REFRESH_MS);

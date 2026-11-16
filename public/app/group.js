@@ -57,7 +57,9 @@ function render() {
       el('div', { className: 'grand' }, el('span', { textContent: t('common.total') }), el('span', { textContent: fmt.som(o.total) }))),
     el('p', { className: `badge${o.status === 'cancelled' ? ' danger' : ''}`, textContent: status(o) }),
     o.payment_status === 'pending' && o.expires_at ? el('p', { className: 'meta', textContent: t('kiosk.mcart.pay_by', { time: fmt.time(o.expires_at) }) }) : null,
-    el('a', { className: 'button wide', href: o.track, textContent: t('kiosk.group.open') }))));
+    // Task 46: once this shop's part is handed over, its own page asks for the ratings (per shop order).
+    o.status === 'delivered' && o.payment_status === 'paid' ? el('a', { className: 'button primary wide', href: `${o.track}#review`, textContent: t('kiosk.review.group_rate') })
+      : el('a', { className: 'button wide', href: o.track, textContent: t('kiosk.group.open') }))));
   $('updated').textContent = error || t('kiosk.track.updated', { time: fmt.time(new Date().toISOString()) });
 }
 

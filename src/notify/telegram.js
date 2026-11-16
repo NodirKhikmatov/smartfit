@@ -45,8 +45,8 @@ export function message(o, statusUrl = null) {
     cancelled: `${head} bekor qilindi.${o.payment_status === 'paid' ? " To'langan pul qaytariladi." : ''}`,
   }[stageOf(o)];
   if (!statusUrl) return text;
-  // Task 23: the "how did it fit?" buttons are on the status page.
-  return stageOf(o) === 'delivered' ? `${text}\nKiyimlar o'lchamiga mos keldimi? Shu yerda belgilang:\n${statusUrl}` : `${text}\n${statusUrl}`;
+  // Task 23 / 46: the rating, fit and review form is on the status page (sent once: the delivered stage goes out once).
+  return stageOf(o) === 'delivered' ? `${text}\nKiyimlarni baholang (1–5) va o'lchami mos keldimi, shu yerda belgilang:\n${statusUrl}` : `${text}\n${statusUrl}`;
 }
 const statusUrl = (o, base = process.env.PUBLIC_URL) => (base && o.notify_token ? `${base.replace(/\/+$/, '')}/order/${o.notify_token}` : null);
 

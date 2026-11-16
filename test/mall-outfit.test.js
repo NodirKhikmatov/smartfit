@@ -352,6 +352,7 @@ test('migration 032 down and up', async () => {
   const m = testDb();
   try {
     await m.migrate.latest();
+    await m.migrate.down(); // 036
     await m.migrate.down(); // 035
     await m.migrate.down(); // 034
     await m.migrate.down(); // 033

@@ -180,7 +180,7 @@ export function stockFor(item, size, storeIdx, sizeCount) {
 const imageName = (storeIdx, sku) => `demo-s${storeIdx + 1}-${sku.toLowerCase()}.svg`;
 
 // Children before parents (SQLite deletes row by row, with foreign keys on).
-const WIPE = ['mall_spots', 'mall_floors', 'offer_stats', 'offers', 'fitting_requests', 'payment_transactions', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'categories', 'admins', 'stores', 'organizations', 'malls'];
+const WIPE = ['mall_spots', 'mall_floors', 'offer_stats', 'offers', 'fitting_requests', 'payment_transactions', 'product_reviews', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'categories', 'admins', 'stores', 'organizations', 'malls'];
 
 // uploadDir: where /uploads is served from. Without it (tests) image_url is still set, but no file is copied.
 export async function seed(db, { uploadDir } = {}) {
@@ -257,6 +257,37 @@ export async function seed(db, { uploadDir } = {}) {
   });
 }
 
+// Task 46: a few handed-over demo orders with reviews, so the demo item pages show a rating, a fit summary and a shop
+// answer. Only `npm run seed` adds them (not seed(), which the tests use), so every seeded count the tests rely on
+// stays the same. The orders are 40+ days old: they stay out of the 7/30-day dashboards.
+export const DEMO_REVIEWS = {
+  top: [[5, 'right', 'Mato yoqimli, rangi rasmdagidek.'], [4, 'right', null], [5, 'small', "Biroz tor, lekin chiroyli o'tiradi."], [4, 'right', 'Yaxshi']],
+  bottom: [[3, 'small', 'Belidan tor keldi.'], [4, 'small', null], [2, 'small', 'Bir razmer kichik, almashtirdim.']],
+};
+export async function seedDemoReviews(db) {
+  const { insertOrder, storeOf } = await import('../cart/cart.js');
+  const { randomBytes } = await import('node:crypto');
+  const s1 = await db('stores').orderBy('id').first('id');
+  const store = await storeOf(db, s1.id);
+  const pick = (category) => db('products').where({ store_id: s1.id, category, audience: 'adult' }).orderBy('id').first('id', 'price', 'discount_price', 'sizes', 'category');
+  const [top, bottom] = [await pick('top'), await pick('bottom')];
+  for (let n = 0; n < DEMO_REVIEWS.top.length; n++) {
+    const at = new Date(Date.now() - (50 - n * 3) * 86_400_000).toISOString();
+    const lines = [[top, 'M', DEMO_REVIEWS.top[n]], ...(DEMO_REVIEWS.bottom[n] ? [[bottom, 'M', DEMO_REVIEWS.bottom[n]]] : [])];
+    await db.transaction(async (trx) => {
+      const id = await insertOrder(trx, store, { customer_name: 'Demo xaridor', phone: '+998900000000', fulfillment: 'pickup', address: null, lat: null, lon: null },
+        lines.map(([p, size]) => ({ product_id: p.id, size, quantity: 1, unit_price: p.discount_price ?? p.price })), { notifyToken: randomBytes(16).toString('hex') });
+      await trx('orders').where({ id }).update({ status: 'delivered', payment_status: 'paid', paid_at: at, created_at: at, notified: 'delivered' });
+      const items = await trx('order_items').where({ order_id: id }).orderBy('id');
+      for (const [i, [p, , [rating, fit, text]]] of lines.entries()) {
+        await trx('order_items').where({ id: items[i].id }).update({ fit, fit_at: at });
+        await trx('product_reviews').insert({ order_item_id: items[i].id, order_id: id, store_id: s1.id, product_id: p.id, rating, fit, text, created_at: at,
+          ...(p === bottom && n === 0 && { reply: "Rahmat! Bu model kichikroq bichilgan, bir razmer kattasini tavsiya qilamiz.", reply_at: at }) });
+      }
+    });
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await import('../config.js');
   const { createDb } = await import('./index.js');
@@ -264,6 +295,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     await db.migrate.latest();
     await seed(db, { uploadDir: process.env.UPLOAD_DIR || 'uploads' });
+    await seedDemoReviews(db);
     const [{ n }] = await db('products').count({ n: '*' });
     console.log(`Seed: ${STORES.length} do'kon, ${n} kiyim, rasmlar bilan`);
   } finally {

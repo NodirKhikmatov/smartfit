@@ -24,6 +24,7 @@ import { offerRoutes } from './offers.js';
 import { fitOf } from '../size/size.js';
 import { demandItems, funnelStats, methodStats, occasionStats } from '../demand.js';
 import { mayDo, FEATURES } from '../plans.js';
+import { reviewRoutes, report } from '../reviews.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -849,6 +850,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
   mallRoutes(r, db, { uploadDir }); // task 37
   offerRoutes(r, db, { uploadDir }); // task 43
   pointsRoutes(r, db, { resolveStore }); // task 34
+  reviewRoutes(r, db); // task 46
 
   // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.
   const inScope = (req, q, col = 'store_id') => {
@@ -975,6 +977,8 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
       kiosks: await kioskStatus(inScope(req, db('kiosks'))),
       returns: { units: returned, sold: Number(soldUnits ?? 0), refund: reasons.reduce((a, x) => a + Number(x.refund), 0),
         reasons: reasons.map((x) => ({ reason: x.reason, units: Number(x.units) })) },
+      // Task 46: next to returns, the lowest-rated products (all visible reviews, not windowed: they come in slowly).
+      reviews: await report(db, inScope(req, db('product_reviews as r'), 'r.store_id'), 5),
     });
   });
 

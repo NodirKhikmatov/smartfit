@@ -183,6 +183,9 @@ export async function deleteProfiles(db, ids) {
     await trx('orders').whereIn('profile_id', ids).update({ profile_id: null });
     await trx('carts').whereIn('profile_id', ids).update({ profile_id: null });
     for (const p of await trx('customer_profiles').whereIn('id', ids)) {
+      // Task 46 (decided): their reviews go too (the text is theirs), though a review holds no name or phone.
+      await trx('product_reviews').whereIn('order_id', trx('orders').where({ phone: p.phone })
+        .whereIn('store_id', trx('stores').where({ organization_id: p.organization_id }).select('id')).select('id')).del();
       await trx('orders').where({ phone: p.phone }).whereIn('status', ['delivered', 'cancelled'])
         .whereIn('store_id', trx('stores').where({ organization_id: p.organization_id }).select('id'))
         .update({ customer_name: '—', address: null, lat: null, lon: null, telegram_chat_id: null });

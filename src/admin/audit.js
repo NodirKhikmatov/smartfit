@@ -10,8 +10,9 @@ export const AUDIT_ACTIONS = [
   'mall.create', 'mall.update', 'mall.delete', 'mall.logo', 'mall.store', 'org.points', 'points.adjust',
   'offer.create', 'offer.update', 'offer.image', 'offer.submit', 'offer.delete', 'offer.approve', 'offer.reject', 'mall.slides', 'mall.map',
   'org.plan', 'org.checklist', // task 45
+  'review.hide', 'review.show', 'review.reply', // task 46
 ];
-export const AUDIT_ENTITIES = ['product', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'org', 'demo', 'promo', 'category', 'mall', 'points', 'offer'];
+export const AUDIT_ENTITIES = ['product', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'org', 'demo', 'promo', 'category', 'mall', 'points', 'offer', 'review'];
 
 const json = (v) => (v == null ? null : JSON.stringify(v));
 

@@ -1,6 +1,6 @@
 // Smart Fit admin: sidebar shell with hash routes (#/dashboard, #/orders, #/cashier, #/products, #/stats, #/qr, #/settings).
 // Filters, sort and page live in the hash, so a refresh or a shared link opens the same view.
-import { icon, toast, confirmDialog, showAfter } from '/shared/ui.js';
+import { icon, toast, confirmDialog, showAfter, stars } from '/shared/ui.js';
 import { t, fmt, initLang, getLang, langSwitch, productName } from '/shared/i18n.js';
 import { parseHash, buildHash, offsetOf, pageInfo, delta, share, compact, stockLevel } from './util.js';
 import { lineChart, funnelChart } from './charts.js';
@@ -281,6 +281,7 @@ const PAGES = {
   offers: { title: 'adm.route.offers', load: loadOffers }, // task 43
   stats: { title: 'adm.route.stats', load: loadStats },
   demand: { title: 'adm.route.demand', load: loadDemand },
+  reviews: { title: 'adm.route.reviews', load: loadReviews }, // task 46
   qr: { title: 'adm.route.qr', load: loadQr },
   settings: { title: 'adm.route.settings', load: loadSettings },
   orgs: { title: 'adm.route.orgs', load: loadOrgs },
@@ -435,6 +436,12 @@ async function loadDashboard(quiet) {
     el('span', { className: 'rank-name' }, el('strong', { textContent: t(REASON[x.reason]) })),
     el('span', { className: 'rank-num num' }, el('strong', { textContent: t('adm.dash.units', { n: x.units }) })))) :
     [el('li', { className: 'li-empty' }, emptyState({ ic: 'check', title: t('adm.dash.returns_empty'), text: t('adm.dash.returns_empty_text') }))]));
+  // Task 46: lowest-rated products next to returns.
+  $('dashReviews').replaceChildren(...(d.reviews.length ? d.reviews.map((x) => el('li', {},
+    thumb(x),
+    el('span', { className: 'rank-name' }, el('strong', { textContent: productName(x) }), el('span', { className: 'muted', textContent: fitText(x) })),
+    el('span', { className: 'rank-num num' }, el('strong', { textContent: `★ ${dec(x.avg)}` }), el('span', { className: 'muted', textContent: t('kiosk.review.count', { n: x.count }) })))) :
+    [el('li', { className: 'li-empty' }, emptyState({ ic: 'star', title: t('adm.reviews.none'), text: t('adm.reviews.none_text') }))]));
   $('dashKiosks').replaceChildren(...(d.kiosks.length ? d.kiosks.map((k) => el('li', {},
     el('div', { className: 'grow' }, el('strong', { textContent: t('adm.dash.kiosk_name', { id: k.id }) }),
       el('div', { className: 'sizes', textContent: [!scope && many() && stores.find((s) => s.id === k.store_id)?.name, t('adm.dash.seen', { at: fmt.dateTime(k.last_seen_at) })].filter(Boolean).join(' · ') })),
@@ -2071,7 +2078,7 @@ function auditLines(l) {
 }
 const auditSubject = (l) => (l.entity === 'order' ? t('adm.order.title', { id: l.entity_label }) : l.entity === 'fitting' ? t('adm.fit.cabin', { cabin: l.entity_label }) : l.entity_label || '');
 const af = $('auditFilters');
-for (const e of ['product', 'category', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'points']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
+for (const e of ['product', 'category', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'points', 'review']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
 af.entity.onchange = af.admin.onchange = af.from.onchange = af.to.onchange = () =>
   setParams({ tab: 'audit', entity: af.entity.value, admin: af.admin.value, from: af.from.value, to: af.to.value });
 af.onsubmit = (e) => e.preventDefault();
@@ -2629,6 +2636,92 @@ async function approveOffer(o) {
   } catch (err) { toast(err.message, { tone: 'danger' }); }
   loadMall(true);
 }
+// ---------- Task 46: reviews. The report (lowest average first, fit answers) and the list; the owner hides with a
+// reason (managers can't, the server says so too) and anyone here answers once. Review text is shown as text only.
+const FIT_SUM = { small: 'kiosk.review.fit_small', big: 'kiosk.review.fit_big', right: 'kiosk.review.fit_right', mixed: 'kiosk.review.fit_mixed' };
+const FIT_KEY = { small: 'kiosk.track.fit_small', right: 'kiosk.track.fit_right', big: 'kiosk.track.fit_big' };
+const fitText = (x) => (x.fit_summary ? t(FIT_SUM[x.fit_summary]) : t('adm.reviews.fit_few'));
+let revEditing = null;
+async function loadReviews() {
+  const seq = (loads.reviews = (loads.reviews || 0) + 1);
+  const p = route.params;
+  const show = ['unanswered', 'low', 'hidden'].includes(p.show) ? p.show : 'all';
+  seg($('revShow'), [['all', t('common.all')], ['unanswered', t('adm.reviews.unanswered')], ['low', t('adm.reviews.low')], ['hidden', t('adm.reviews.hidden')]], show,
+    (v) => setParams({ ...p, show: v === 'all' ? '' : v, page: '' }));
+  stateBox($('reviewsError'));
+  let r;
+  try {
+    r = await call('/reviews?' + qs(scoped({ show, limit: LIMIT, offset: offsetOf(p.page, LIMIT) })));
+  } catch (err) {
+    if (seq === loads.reviews) stateBox($('reviewsError'), err, () => loadReviews());
+    return;
+  }
+  if (seq !== loads.reviews) return;
+  if (!r.products.length) emptyRow($('revReport'), 7, { ic: 'star', title: t('adm.reviews.none'), text: t('adm.reviews.none_text') });
+  else {
+    $('revReport').replaceChildren(...r.products.map((x) => el('tr', {},
+      el('td', {}, el('span', { className: 'prod' }, thumb(x), el('span', {}, el('strong', { textContent: productName(x) }), showStore() ? el('span', { className: 'sizes', textContent: storeName(x.store_id) }) : null))),
+      el('td', { className: 'num' }, el('strong', { textContent: dec(x.avg) })),
+      el('td', { className: 'num', textContent: String(x.count) }),
+      ...['small', 'right', 'big'].map((k) => el('td', { className: 'num hide-sm', textContent: String(x.fit[k]) })),
+      el('td', { textContent: fitText(x) }))));
+  }
+  const owner = ['owner', 'super'].includes(me.role);
+  $('revRows').replaceChildren(...(r.items.length ? r.items.map((v) => el('li', { className: `rev${v.hidden_at ? ' is-hidden' : ''}` },
+    thumb(v),
+    el('div', { className: 'grow' },
+      el('div', { className: 'review-head' }, el('strong', { textContent: productName(v) }), stars(v.rating),
+        v.returned ? el('span', { className: 'badge', textContent: t('kiosk.review.returned') }) : null,
+        v.hidden_at ? el('span', { className: 'badge warn', textContent: t('adm.reviews.hidden_badge') }) : null),
+      el('div', { className: 'sizes', textContent: [t('adm.reviews.size', { size: v.size }), v.fit && t('kiosk.review.fit_said', { fit: t(FIT_KEY[v.fit]) }),
+        `№ ${v.order_number}`, fmt.dateTime(v.created_at), showStore() && storeName(v.store_id)].filter(Boolean).join(' · ') }),
+      v.text ? el('p', { className: 'review-text', textContent: v.text }) : null,
+      v.hidden_at ? el('p', { className: 'sizes', textContent: t('adm.offers.reason', { reason: v.hidden_reason }) }) : null,
+      v.reply ? el('div', { className: 'review-reply' }, el('strong', { textContent: t('kiosk.review.reply') }), el('p', { className: 'review-text', textContent: v.reply })) : null),
+    el('div', { className: 'row-actions' },
+      !v.reply && !v.hidden_at ? iconBtn('edit', t('adm.reviews.reply_named', { name: productName(v) }), () => openRev('reply', v)) : null,
+      owner && !v.hidden_at ? iconBtn('close', t('adm.reviews.hide_named', { name: productName(v) }), () => openRev('hide', v)) : null,
+      owner && v.hidden_at ? iconBtn('refresh', t('adm.reviews.show_named', { name: productName(v) }), () => showReview(v)) : null))) :
+    [el('li', { className: 'li-empty' }, emptyState({ ic: 'star', title: t(show === 'all' ? 'adm.reviews.none' : 'adm.reviews.none_filter'), text: show === 'all' ? t('adm.reviews.none_text') : '' }))]));
+  pager($('revPager'), r, (page) => { setParams({ ...p, page: page > 1 ? page : '' }); scrollTo(0, 0); });
+}
+const revf = $('revForm');
+function openRev(mode, v) {
+  revEditing = { mode, v };
+  revf.reset();
+  $('revDlgError').textContent = '';
+  $('revDlgTitle').textContent = t(mode === 'hide' ? 'adm.reviews.hide_named' : 'adm.reviews.reply_named', { name: productName(v) });
+  $('revDlgText').textContent = v.text || '';
+  $('revDlgText').hidden = !v.text;
+  $('revDlgLabel').textContent = t(mode === 'hide' ? 'field.hide_reason' : 'field.reply');
+  $('revDlgHint').textContent = t(mode === 'hide' ? 'adm.reviews.hide_hint' : 'adm.reviews.reply_hint');
+  revf.text.maxLength = mode === 'hide' ? 200 : 500;
+  revf.text.minLength = mode === 'hide' ? 3 : 2;
+  $('revDlgGo').textContent = t(mode === 'hide' ? 'adm.reviews.hide' : 'adm.reviews.reply');
+  $('revDlgGo').className = mode === 'hide' ? 'danger' : 'primary';
+  $('revDlg').showModal();
+}
+$('revDlgCancel').onclick = () => $('revDlg').close();
+revf.onsubmit = async (e) => {
+  e.preventDefault();
+  $('revDlgError').textContent = '';
+  if (!revf.reportValidity()) return;
+  const { mode, v } = revEditing;
+  try {
+    await call(`/reviews/${v.id}/${mode}`, { method: 'POST', body: mode === 'hide' ? { reason: revf.text.value.trim() } : { text: revf.text.value.trim() } });
+    $('revDlg').close();
+    toast(t(mode === 'hide' ? 'adm.reviews.hidden_done' : 'adm.reviews.reply_done'), { tone: 'ok' });
+    loadReviews();
+  } catch (err) { $('revDlgError').textContent = err.message; }
+};
+async function showReview(v) {
+  try {
+    await call(`/reviews/${v.id}/show`, { method: 'POST' });
+    toast(t('adm.reviews.shown_done'), { tone: 'ok' });
+  } catch (err) { toast(err.message, { tone: 'danger' }); }
+  loadReviews();
+}
+
 const rejf = $('rejectForm');
 function openReject(o) {
   rejecting = o;
