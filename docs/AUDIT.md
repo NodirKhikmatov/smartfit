@@ -181,3 +181,17 @@ After the full browser walk the user asked to build the items still listed as mi
 | Children's sizes | Adult sizes only | **Task 40**: sizes by height, an audience on products, a child flow without a photo |
 | AI image try-on | — | **Task 41**: behind a provider key, off by default, explicit consent, nothing stored |
 | Uzum / Alif Nasiya API | Instalments at the store's terminal (task 35) | **Defer**: needs a merchant agreement and non-public documentation |
+
+## Phase 7 — the mall as a product, and a shop that can run itself (2026-11-16)
+
+Planned from the gaps left after phases 5 and 6, not from new market research.
+
+| Need | Today | Verdict |
+|---|---|---|
+| An outfit that mixes several shops | Outfits per shop; the mall has search only | **Task 42**: the engine over the mall's stock, into the mall cart, with a per-shop cap |
+| The mall has nothing to announce or to sell to its shops | A static mall screen | **Task 43**: shop offers approved by the mall admin, shown on the mall screen and the kiosk idle screen |
+| "Where is this shop?" | Floor and unit as text | **Task 44**: a plan picture per floor with pins, open / closed, filters |
+| Every shop is set up by hand; no plans | Super creates organisations; no limits | **Task 45**: plans, a trial, limits, a read-only state, a first-run checklist; payment marked by super |
+| No voice of the customer | Returns reasons only | **Task 46**: ratings, fit answers and short reviews after hand-over |
+| Stock numbers drift from the shelf | Edited by hand or CSV / API | **Task 47**: receiving and a stocktake in the staff app, with a movement history |
+| Online subscription payment; a routing engine for the map; paid placement in outfits | — | **Defer**: a payment contract; not needed for a pin; it would break the recommender's trust |

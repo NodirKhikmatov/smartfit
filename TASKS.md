@@ -437,3 +437,66 @@ A generated picture of the customer wearing the chosen item. It needs an image m
 Done when:
 - Tests with a fake provider: off without a key; consent required; nothing written to disk, DB or logs (the task 6 check extended); the limits; timeout and provider error; the child flow has no button; org scoping of the setting and the counter.
 - Browser check with the fake provider: phone at 375 and kiosk, uz/ru. A live key check is manual: add it to the README Launch checklist.
+
+# Phase 7 — the mall as a product, and a shop that can run itself (see `docs/AUDIT.md` › Phase 7)
+
+The user asked (2026-11-16) for another phase. These come from what the product still lacks for a mall and for a shop owner who signs up alone, not from new market research. The Phase 4 rules above apply. They run after tasks 39–41.
+
+## [ ] 42. An outfit from the whole mall
+The mall cart (task 38) makes this possible: on the mall screen "Butun markazdan obraz" builds outfits from the in-stock items of every visible shop of the mall.
+- The same questionnaire and size step, once. The engine runs over the mall's products; each item shows its shop, floor and unit. The rule stays: only stock > 0, in the customer's size.
+- Fairness: no shop fills a whole outfit list by default; at most N items per shop across the three outfits unless too few shops have stock (decide and record N). No shop pays for placement.
+- "Savatga qo'shish" puts the outfit into the mall cart, grouped by shop. A bundle discount applies only to the items of a shop that offers one, by that shop's rule.
+- The Claude stylist gets the shop name per candidate, and its answer is still checked against the candidate list.
+- The funnel logs the recommendation per shop so each shop's own statistics stay right, and the mall admin gets one more count.
+Done when:
+- Tests: only the mall's visible shops; stock and size rules; the per-shop cap and its fallback; budget across shops; the outfit reaches the mall cart per shop; a hidden shop or another mall's shop never appears; the stylist's ids outside the list are dropped; shop statistics isolation.
+- Browser check: phone at 375 and kiosk at 1080×1920, uz/ru: mall screen → questionnaire → outfits from two shops → mall cart.
+
+## [ ] 43. Mall promotions and the kiosk idle screen
+- A shop owner writes an offer: title and text (uz/ru), a picture, start and end dates, optionally a promo code or a product. The mall admin approves or rejects it (the one place where the mall admin sees shop content, and only what the shop submitted).
+- The mall screen shows "Aksiyalar" (current, approved offers; the shop, floor and unit; a tap opens the shop or the product). A shop's own start screen shows its offers without approval.
+- The mall kiosk's idle screen rotates approved offers instead of a static picture, and any touch returns to the start screen. The mall admin sets the order and how long each stays.
+- Counts per offer: shown and tapped, for the shop and the mall admin.
+Done when:
+- Tests: only approved offers inside their dates show on the mall; a shop sees and edits only its own; the mall admin's scope; a rejected or expired offer is gone; the picture upload limits (type, size); counts; org and mall isolation.
+- Browser check: the shop form, the mall admin's approval list, the mall screen at 375 and the kiosk idle rotation at 1080×1920, uz/ru.
+
+## [ ] 44. Mall map: floors and "how do I get there"
+- The mall admin uploads one plan picture per floor and puts a pin on it for each shop (tap on the picture; stored as percentages). Also a pin for each mall kiosk: "Siz shu yerdasiz".
+- The mall screen gets a "Xarita" view: floor tabs, pins with shop names, a tap opens the shop card. A shop card and a mall order's status page (task 38) show the shop on its floor.
+- Opening hours per shop (they exist per store) show as "ochiq / yopiq" in the directory, with a filter by floor and by category.
+- No routing engine: a pin and the floor are enough. Without a plan picture the directory works as today.
+Done when:
+- Tests: plan upload limits; pins only by this mall's admin and only for its shops; a hidden shop has no pin; open / closed at the edges of the hours and across midnight; the filters; mall isolation.
+- Browser check: the admin pin editor at 1280, the map on the phone at 375 and the kiosk, uz/ru.
+
+## [ ] 45. Plans, a trial and a first-run checklist for a new shop
+Makes the product run as a SaaS without the team setting up each shop by hand. No payment integration: super marks a plan as paid until a date (an invoice is sent outside the app), which keeps the legal part out of code. Add "online subscription payment" to the README Launch checklist.
+- Plans in code (for example Start, Pro, Markaz) with limits: stores, products, kiosks, team members, and which features are on (AI stylist, instalments, points, try-on). A new organisation starts a 14-day trial of Pro.
+- Limits are enforced on the server with a clear message and shown in Sozlamalar → "Tarif" with the usage. When a trial or a paid period ends there are 7 days of grace, then the admin is read-only and the kiosk and phone show "vaqtincha ishlamayapti"; nothing is deleted.
+- Super: the plan, the paid-until date and a note per organisation, with an audit row; a list of organisations ending soon.
+- A first-run checklist on the shop's dashboard: store details, categories, first products or a CSV, a kiosk PIN, print the QR, invite a colleague. Each line ticks itself from real data and links to its page.
+- The landing page's demo request can create the organisation and its owner invite in one step for super.
+Done when:
+- Tests: each limit at its edge; trial → grace → read-only → paid again; a read-only organisation can still export its data; feature flags hide and block the feature; only super changes a plan; the checklist's ticks; the existing demo organisations get a plan in the migration so nothing locks; migration up and down.
+- Browser check: the "Tarif" page, the limit message, the read-only state, the checklist at 1280 and 375, super's list.
+
+## [ ] 46. Ratings and reviews after a purchase
+- After an order is handed over, its status page (and the Telegram message, where the bot is on) asks for a 1–5 rating per item, a fit answer (kichik / mos / katta) and an optional short text. One review per order line, only through the order's token.
+- The item page shows the average, the count and the fit summary ("ko'pchilikka mos keldi"); the catalog can sort by rating. The fit answers feed the size hint for that product.
+- The shop owner hides a review with a reason (audited) and can answer it once. No customer names are shown, only "Xaridor".
+- Admin: lowest-rated products and the fit summary per product, next to returns.
+Done when:
+- Tests: only a handed-over line can be reviewed, once; a returned line's review is marked; averages; hiding and the answer; text limits and no HTML; rate limits; org isolation; the mall search shows the rating but a shop never sees another shop's reviews in admin.
+- Browser check: the status page form and the item page on the phone at 375, the admin list, uz/ru.
+
+## [ ] 47. Stocktake and receiving in the staff app
+The core rule depends on the stock numbers being true.
+- "Qabul qilish": staff scan a garment's QR label or barcode with the phone camera (or type the SKU), choose the size and the quantity, and the stock goes up. A session groups the scans, with a note (supplier, invoice).
+- "Inventarizatsiya": a count session for a category or a shelf. Staff scan or type what is really there; at the end the app shows the differences and a manager confirms them, which writes the corrections. Reserved units are handled so an open cart isn't broken.
+- Every change is a stock movement row (who, when, why, before and after), and the product page shows its history. A back-in-stock alert (task 31) fires when receiving brings a size back.
+- Works on a weak connection: scans queue on the phone and are sent when the network returns, each applied once.
+Done when:
+- Tests: receiving adds stock and writes a movement; a count's differences and the confirm step; staff can count but only a manager confirms; a replayed scan applies once; reserved units; another store's product is rejected; the alert fires; store isolation.
+- Browser check: both flows in the staff app at 375 with typed SKUs (a real camera scan is manual), the history in admin.
