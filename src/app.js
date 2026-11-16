@@ -22,6 +22,7 @@ import { createCatalogRouter } from './catalog.js';
 import { VENDOR, MODEL } from './vendor.js';
 import { createProfileRouter } from './profile.js';
 import { createScanRoute } from './labels.js';
+import { createFashn, createTryonRouter } from './tryon.js';
 
 // X1: same-origin only, plus OpenStreetMap tiles for the delivery map. 'wasm-unsafe-eval' lets MediaPipe compile its wasm
 // (it can't run JS from strings). No 'unsafe-inline': styles are files or CSSOM, scripts are modules.
@@ -40,7 +41,7 @@ const SECURITY_HEADERS = {
 const IMMUTABLE = { maxAge: '365d', immutable: true, index: false }; // /vendor paths carry the version
 
 // uploadDir holds product images only. Customer photos are never written anywhere.
-export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads', weather = createWeather(), stylist = createStylist(), stylistTimeoutMs, payments = paymentConfig(), telegram = telegramConfig(), trustProxy = process.env.TRUST_PROXY, logRequests = false, limits = {}, now } = {}) {
+export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads', weather = createWeather(), stylist = createStylist(), stylistTimeoutMs, tryon = createFashn(), tryonTimeoutMs, payments = paymentConfig(), telegram = telegramConfig(), trustProxy = process.env.TRUST_PROXY, logRequests = false, limits = {}, now } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use((req, res, next) => {
@@ -63,6 +64,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   app.use('/api/pay', createPaymentRouter(db, payments)); // Click/Payme callbacks parse their own bodies
   // /api/recommend may carry one small customer photo for the stylist (capped again in stylist.js); everything else 100 kb.
   app.use('/api/recommend', express.json({ limit: '400kb' }));
+  app.use('/api/tryon', express.json({ limit: '1600kb' })); // task 41: one customer photo for the try-on (capped again in tryon.js)
   app.use(express.json({ limit: '100kb' }));
 
   const api = express.Router();
@@ -71,10 +73,12 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
     res.json({ ok: true });
   });
   api.post('/admin/login', bucket('login')); // on top of the wrong-password lockout
-  api.use('/admin', createAdminRouter(db, { uploadDir }));
+  api.use('/admin', createAdminRouter(db, { uploadDir, tryon: !!tryon }));
   api.use('/sync', createSyncRouter(db)); // POS / ERP stock push, per-store API key
   api.use('/recommend', bucket('recommend'), createRecommendRouter(db, { weather, stylist, stylistTimeoutMs }));
-  api.use('/stores', createStoreRouter(db, { weather, profiles: !!telegram }));
+  api.use('/stores', createStoreRouter(db, { weather, profiles: !!telegram, tryon }));
+  // Task 41: the AI try-on exists only with the provider's key (like Click / Payme); without one the route is 404.
+  if (tryon) api.use('/tryon', bucket('tryon'), createTryonRouter(db, { provider: tryon, uploadDir, timeoutMs: tryonTimeoutMs, now }));
   api.use('/size', bucket('size'), createSizeRouter());
   const methods = paymentMethods(payments), link = telegramLink(telegram);
   api.use('/cart', bucket('cart'), createCartRouter(db, { methods, link, maxOpenCarts: lim.openCarts, promoLimit: bucket('promo') }));

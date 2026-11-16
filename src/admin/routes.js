@@ -238,7 +238,7 @@ const stockTotals = (db) => db('product_stock as ps').join('products as pp', 'pp
   .sum({ thin: db.raw('case when ps.quantity - ps.reserved <= st.low_stock_threshold then 1 else 0 end') })
   .groupBy('ps.product_id');
 
-export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
+export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false } = {}) {
   const imageDir = path.resolve(uploadDir, 'products');
   const secret = tokenSecret();
   // shortcut: per-process, per-IP lockout map; move to a shared store if we run several instances.
@@ -805,7 +805,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     });
   });
 
-  settingsRoutes(r, db, { secret, lock, resolveStore });
+  settingsRoutes(r, db, { secret, lock, resolveStore, tryon });
   orgRoutes(r, db);
   promoRoutes(r, db); // task 26
   categoryRoutes(r, db, { uploadDir }); // task 36

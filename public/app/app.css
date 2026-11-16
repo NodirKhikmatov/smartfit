@@ -414,3 +414,16 @@ html:not(.in-mall) .mall-only, html.in-mall .mall-hide { display: none !importan
 .mc-shop .mall-head > div { flex: 1 1 10rem; min-width: 0; } /* on a phone the edit link wraps under the name */
 .mc-shop .shop-logo { width: 3rem; height: 3rem; flex: none; display: grid; place-items: center; object-fit: contain; border-radius: var(--r-md); background: var(--sunken); color: var(--accent); }
 .mc-shop .field select { width: 100%; }
+
+/* Task 41: AI try-on dialog. The picture is never wider than the dialog or taller than the screen allows. */
+.tryon-btn { margin-top: var(--s-2); }
+dialog.tryon { max-width: 34rem; }
+.tryon-body > p { margin-bottom: var(--s-3); }
+html .frame.tryon-frame { width: min(100%, calc(44dvh * 3 / 4)); } /* beats the kiosk's full-screen .frame */
+.tryon-wait { display: flex; align-items: center; gap: var(--s-3); padding-block: var(--s-6); justify-content: center; }
+.spinner { width: 1.5rem; height: 1.5rem; flex: none; border-radius: 50%; border: 3px solid var(--accent-soft); border-top-color: var(--accent); animation: tryon-spin 900ms linear infinite; }
+@keyframes tryon-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+.tryon-pic { margin: 0; }
+.tryon-pic img { display: block; width: 100%; max-height: 52dvh; object-fit: contain; border-radius: var(--r-md); background: var(--sunken); }
+.tryon-pic figcaption { margin-top: var(--s-2); font-size: var(--text-sm); color: var(--ink-2); }

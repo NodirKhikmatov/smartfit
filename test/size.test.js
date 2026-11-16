@@ -212,7 +212,7 @@ test('no image or base64 data reaches disk, the DB or the logs', async () => {
   assert.deepEqual(readdirSync(uploadDir), [], 'nothing written to the upload dir');
 
   // The browser encodes pixels in one place only: the small JPEG for the stylist (task 7). No uploads or other encoders.
-  for (const f of ['app.js', 'pose.js', 'flow.js', 'keypad.js']) {
+  for (const f of ['app.js', 'pose.js', 'flow.js', 'keypad.js', 'tryon.js']) { // task 41: the try-on reuses app.js's encoder
     // Task 8: the phone keeps only its cart token, under one key. Task 16: flow.js keeps the whitelisted route
     // (routeData, tested in test/flow.test.js) under one key.
     const src = readFileSync(new URL(`../public/app/${f}`, import.meta.url), 'utf8')

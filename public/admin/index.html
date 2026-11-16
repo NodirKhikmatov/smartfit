@@ -485,6 +485,15 @@
                   <p class="hint" id="instHint" data-i18n="adm.set.instalment_hint"></p>
                   <div class="inst-terms" id="instTerms"></div>
                 </div>
+                <div class="span-all inst-set" role="group" aria-labelledby="tryonTitle">
+                  <h3 id="tryonTitle" data-i18n="adm.set.tryon_title"></h3>
+                  <p class="notice warn" id="tryonNoKey" hidden data-i18n="adm.set.tryon_nokey"></p>
+                  <label class="check"><input name="tryon_on" type="checkbox" aria-describedby="tryonHint"> <span data-i18n="adm.set.tryon_on"></span></label>
+                  <p class="hint" id="tryonHint" data-i18n="adm.set.tryon_hint"></p>
+                  <label class="field"><span data-i18n="field.tryon_limit"></span> <input name="tryon_daily_limit" type="number" min="1" max="1000" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.tryon_limit_hint"></span></label>
+                  <h4 data-i18n="adm.set.tryon_usage"></h4>
+                  <ul class="tryon-usage" id="tryonUsage"></ul>
+                </div>
                 <label class="field"><span data-i18n="field.kiosk_pin"></span> <input name="kiosk_pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" autocomplete="new-password" aria-describedby="pinState"><span class="hint"><strong id="pinState"></strong> <span data-i18n="adm.set.kiosk_pin_hint"></span></span></label>
               </div>
             </fieldset>

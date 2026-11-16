@@ -2,8 +2,9 @@ import { watchIdle } from './idle.js';
 import { loadPose, measure, framing, framingHint } from './pose.js';
 import { keypad } from './keypad.js';
 import { kioskShell, attract, kioskDevice, randomId } from './kiosk.js';
-import { CLOTHES, SHOES, KIDS, KIDS_SHOES, ageHint, JEANS, WANT, nextError, fieldError, toRequest, sizeNeeds, sizesReady, cleanWant, setCategories, categoryRoles, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
+import { CLOTHES, SHOES, KIDS, KIDS_SHOES, ageHint, JEANS, WANT, nextError, fieldError, toRequest, sizeNeeds, sizesReady, cleanWant, setCategories, categoryRoles, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter, tryonItem } from './flow.js';
 import { mallScreen } from './mall.js';
+import { createTryon } from './tryon.js';
 import { icon, confirmDialog, showAfter, skeletonCard, toast } from '/shared/ui.js';
 import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName, COLORS, STYLES } from '/shared/i18n.js';
 
@@ -33,6 +34,7 @@ const catSizes = (c) => (c.size_kind === 'custom' ? String(c.sizes ?? '').split(
 const forAudience = (a) => shownCats().filter((c) => (c.audience ?? 'adult') === a);
 const formAudience = () => (form.audience.value === 'child' ? 'child' : 'adult');
 const form = $('form');
+const tryon = createTryon({ storeId, kiosk, snapshot }); // task 41: "O'zimda ko'rish" (only when the shop has it on)
 
 // Server cart (task 8): each item holds its stock for 15 min. The phone keeps the token across reloads; the kiosk never stores it.
 // Task 38: in a mall it is the mall cart's token instead, also on a mall kiosk (the page reloads between the mall screen
@@ -171,6 +173,7 @@ const NO_STEPS = ['start', 'done', 'catalog', 'item']; // the catalogue is outsi
 function render(name, data = {}) {
   if (mallHome) return; // task 38: the mall screen routes itself by its #cart hash (mall.js); no shop screen here
   track(name);
+  tryon.clear(); // a try-on photo or picture never outlives its screen
   if (name !== 'camera') stopCamera();
   if (name !== 'cart') clearInterval(holdTimer);
   current = name;
@@ -240,6 +243,7 @@ async function api(path, body, method = body ? 'POST' : 'GET') {
 }
 
 async function loadStore() {
+  tryon.setProvider(null); // until this store says it has try-on on
   $('startError').textContent = '';
   $('catalogBtn').hidden = $('profileLogin').hidden = true;
   $('storePicker').hidden = true;
@@ -256,6 +260,7 @@ async function loadStore() {
     return;
   }
   $('storeName').textContent = store.name;
+  tryon.setProvider(store.tryon); // task 41: the provider's name, absent when try-on is off here (no key, switched off, today's limit)
   setCategories(store.categories.map((c) => [c.id, c.role]));
   renderWantChips(formWant());
   restoredWant = null;
@@ -476,13 +481,14 @@ async function analyse(source, w, h) {
 }
 
 // The stylist (task 7) gets one small JPEG: in memory only, sent with /api/recommend, dropped on reset.
-function snapshot(source, w, h) {
-  const k = Math.min(1, 512 / Math.max(w, h));
+// Task 41: the try-on asks for a bigger one (tryon.js), sent once and dropped.
+function snapshot(source, w, h, max = 512, quality = 0.7) {
+  const k = Math.min(1, max / Math.max(w, h));
   const c = document.createElement('canvas');
   c.width = Math.round(w * k);
   c.height = Math.round(h * k);
   c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
-  const jpeg = c.toDataURL('image/jpeg', 0.7);
+  const jpeg = c.toDataURL('image/jpeg', quality);
   c.width = c.height = 0;
   return jpeg;
 }
@@ -978,6 +984,7 @@ function fittingBox(items, card, from = { rec: request?.rec }) {
 function outfitCard(o, n) {
   const c = card(o.title ? t('kiosk.outfit.n_title', { n, title: o.title }) : t('kiosk.outfit.n', { n }), o.items, o.total, o.reason, (p, li, b) => swapBox(o, n, p, li, b));
   c.dataset.outfit = n;
+  if (!lastResult?.audience) c.querySelector('.outfit-foot').append(tryon.button(tryonItem(o.items))); // task 41: never for a child
   // R5: the cheaper variant is one compact "swap X for Y, save N" row, not a second outfit.
   if (o.alternative) {
     const swap = o.alternative.items.find((p) => !o.items.some((x) => x.id === p.id));
@@ -1169,6 +1176,7 @@ function renderItem(p, pairs) {
         ...(p.details.length ? [el('dl', { className: 'details' }, ...p.details.flatMap((d) => [el('dt', { textContent: d.name }), el('dd', { textContent: d.value })]))] : []),
         fitHint(p), pick, other,
         addButton([{ ...p, size: null }], page, 'primary wide', 'kiosk.add.btn', null),
+        tryon.button(p), // task 41: '' for a child's item, an item without a photo, or when the shop has it off
         ...(scanToken ? [fittingBox([{ ...p, size: null }], page, { scan: scanToken })] : []))), // task 32: in the shop, from a label
     ...(pairs.length ? [el('section', { className: 'pairs' }, el('h2', { textContent: t('kiosk.item.pairs') }), el('div', { className: 'catalog-grid' }, ...pairs.map(tile)))] : []),
   );
@@ -1755,6 +1763,7 @@ $('home').onclick = async () => {
 };
 
 function reset() {
+  tryon.clear(); // the photo and the picture go before anything else
   if (mallHome) { // the mall screen: clear the search, back to Uzbek (no reload: the idle timer fires on an untouched screen too)
     setLang('uz');
     switcher.sync();

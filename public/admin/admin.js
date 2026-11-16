@@ -1469,7 +1469,7 @@ paf.onsubmit = async (e) => {
 };
 
 // Store profile. A super-admin picks the store here (defaults to the sidebar's); everyone else has one.
-const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id', 'bundle_percent'];
+const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id', 'bundle_percent', 'tryon_daily_limit'];
 const sf = $('storeForm');
 // Task 35: one row per possible term (the server's TERM_MONTHS): offered or not, and its markup percent.
 const TERM_MONTHS = [3, 6, 9, 12, 18, 24];
@@ -1501,6 +1501,8 @@ async function loadStore() {
     stateBox($('storeLoadError'));
     for (const k of STORE_FIELDS) sf[k].value = s[k] ?? '';
     sf.instalment_on.checked = s.instalment_on;
+    sf.tryon_on.checked = s.tryon_on;
+    loadTryon(s.id, seq);
     for (const n of TERM_MONTHS) {
       const term = s.instalment_terms.find((x) => x.months === n);
       sf[`inst_${n}`].checked = Boolean(term);
@@ -1516,6 +1518,20 @@ async function loadStore() {
     if (seq === loads.store) stateBox($('storeLoadError'), err, () => loadStore());
   }
 }
+// Task 41: AI try-on pictures per day (the shop pays per picture); a note when the provider's key is not in .env.
+async function loadTryon(id, seq) {
+  let r;
+  try {
+    r = await call(`/stores/${id}/tryon`);
+  } catch {
+    r = null;
+  }
+  if (seq !== loads.store) return;
+  $('tryonNoKey').hidden = !r || r.available;
+  const used = r?.days.filter((d) => d.count > 0) ?? [];
+  $('tryonUsage').replaceChildren(...(used.length ? used.map((d) => el('li', {}, el('span', { textContent: fmt.date(`${d.day}T12:00:00+05:00`) }), el('strong', { textContent: t('adm.set.tryon_count', { n: d.count }) })))
+    : [el('li', { className: 'muted', textContent: r ? t('adm.set.tryon_none') : t('common.error') })]));
+}
 $('storePick').onchange = () => loadStore();
 sf.onsubmit = async (e) => {
   e.preventDefault();
@@ -1530,6 +1546,7 @@ sf.onsubmit = async (e) => {
     bundle_percent: Number(v('bundle_percent')),
     instalment_on: sf.instalment_on.checked,
     instalment_terms: TERM_MONTHS.filter((n) => sf[`inst_${n}`].checked).map((n) => ({ months: n, percent: Number(v(`inst_pct_${n}`)) })),
+    tryon_on: sf.tryon_on.checked, tryon_daily_limit: Number(v('tryon_daily_limit')),
     ...(v('kiosk_pin') && { kiosk_pin: v('kiosk_pin') }),
   };
   try {
@@ -1775,7 +1792,7 @@ const AUDIT_FIELDS = {
   delivery_fee: 'field.delivery_fee', free_delivery_threshold: 'field.free_threshold', telegram_chat_id: 'field.telegram_chat', report_chat_id: 'field.report_chat',
   sku: 'field.sku', barcode: 'field.barcode', low_stock_threshold: 'field.low_stock', prefix: 'adm.sync.key',
   email: 'field.email', role: 'field.role', disabled: 'adm.team.status',
-  bundle_percent: 'field.bundle_percent', instalment_on: 'adm.set.instalment_on', instalment_terms: 'field.instalment_terms', store_id: 'common.store', kind: 'field.promo_kind', value: 'field.promo_value', min_order: 'field.promo_min',
+  bundle_percent: 'field.bundle_percent', instalment_on: 'adm.set.instalment_on', tryon_on: 'adm.set.tryon_on', tryon_daily_limit: 'field.tryon_limit', instalment_terms: 'field.instalment_terms', store_id: 'common.store', kind: 'field.promo_kind', value: 'field.promo_value', min_order: 'field.promo_min',
   description: 'field.description', description_ru: 'field.description_ru', details: 'field.details', size_kind: 'field.size_kind', sizes: 'field.cat_sizes', audience: 'field.audience',
   hidden: 'adm.cats.hide', sort: 'adm.cats.order',
   starts_on: 'adm.promo.starts', ends_on: 'adm.promo.ends', max_uses: 'field.promo_max_uses', max_per_phone: 'field.promo_per_phone', active: 'field.promo_active',

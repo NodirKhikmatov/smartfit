@@ -50,9 +50,9 @@ export const SUBMIT_OUTFITS = {
 };
 
 // The optional customer photo: a JPEG data URL, held in memory for this one request only.
-export function parsePhoto(v) {
+export function parsePhoto(v, max = PHOTO_MAX) {
   if (v === undefined || v === null || v === '') return null;
-  const m = typeof v === 'string' && v.length <= PHOTO_MAX && /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(v);
+  const m = typeof v === 'string' && v.length <= max && /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(v);
   if (!m || !Buffer.from(m[1].slice(0, 8), 'base64').subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) throw fail(400, 'err.invalid', { field: 'field.photo' });
   return m[1];
 }

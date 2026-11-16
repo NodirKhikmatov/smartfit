@@ -189,3 +189,11 @@ export function createRouter(win, { render, allowed }) {
   };
   return router;
 }
+
+// Task 41: an item the AI try-on can use: an adult's outerwear, top or bottom with an uploaded raster photo (the
+// provider needs a photo of the garment; the demo SVG drawings don't qualify). The server checks the same function.
+export const TRYON_ROLES = { outerwear: 'tops', top: 'tops', bottom: 'bottoms' }; // our role → the provider's category
+export const tryonGarment = (p) => (p?.audience ?? 'adult') === 'adult' && Object.hasOwn(TRYON_ROLES, p?.category ?? '')
+  && /^\/uploads\/products\/[\w-]+\.(jpg|png|webp)$/.test(p?.image_url ?? '');
+// On an outfit: the most visible garment that has a usable photo.
+export const tryonItem = (items) => ['outerwear', 'top', 'bottom'].map((c) => items.find((p) => p.category === c && tryonGarment(p))).find(Boolean) ?? null;

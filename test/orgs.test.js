@@ -172,6 +172,11 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
     },
     'GET /stores/:id': async () => refused(await admin('GET', `/stores/${b1}`, undefined, ownerA)),
     'PATCH /stores/:id': async () => refused(await admin('PATCH', `/stores/${b1}`, { delivery_fee: 1 }, ownerA)),
+    'GET /stores/:id/tryon': async () => refused(await admin('GET', `/stores/${b1}/tryon`, undefined, ownerA)), // task 41: org B's try-on count
+    'PATCH /stores/:id (try-on)': async () => {
+      refused(await admin('PATCH', `/stores/${b1}`, { tryon_on: true }, ownerA));
+      assert.equal(Boolean((await db('stores').where({ id: b1 }).first()).tryon_on), false);
+    },
     'POST /stores': async () => {
       const r = await admin('POST', '/stores', { ...STORE, name: 'A uchinchi', organization_id: orgB }, ownerA);
       assert.equal(r.status, 201);
@@ -385,7 +390,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 30; i > 12; i--) await m.migrate.down(); // 030 … 013
+    for (let i = 31; i > 12; i--) await m.migrate.down(); // 031 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

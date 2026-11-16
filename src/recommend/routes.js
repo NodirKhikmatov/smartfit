@@ -8,6 +8,7 @@ import { isFit, METHODS } from '../size/size.js';
 import { parseJson } from '../cart/promo.js';
 import { parsePhoto, applyStylist, applyRanking, withDeadline, TIMEOUT_MS } from './stylist.js';
 import { COLORS, STYLES } from '../../public/shared/i18n.js';
+import { tryonOpen } from '../tryon.js';
 
 const pick = (v, allowed, label, required) => {
   if (v === undefined || v === null || v === '') {
@@ -274,14 +275,14 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
 // Public store list for the customer app's store picker (audit U10): names only.
 // GET /:id also gives the attract screen up to 4 photos of items in stock now that suit today's weather.
 const LOOK = ['outerwear', 'top', 'bottom', 'shoes'];
-export function createStoreRouter(db, { weather, profiles = false }) {
+export function createStoreRouter(db, { weather, profiles = false, tryon = null }) {
   const r = express.Router();
   r.get('/', async (req, res) => {
     res.json(await db('stores').orderBy('id').select('id', 'name', 'city'));
   });
   r.get('/:id', async (req, res) => {
     const id = Number(req.params.id);
-    const store = Number.isInteger(id) && id > 0 ? await db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon', 'organization_id') : undefined;
+    const store = Number.isInteger(id) && id > 0 ? await db('stores').where({ id }).first('id', 'name', 'city', 'lat', 'lon', 'organization_id', 'tryon_on', 'tryon_daily_limit') : undefined;
     if (!store) throw fail(404, 'err.store_not_found');
     const w = await weather(store);
     const rows = await visible(db('products as p'))
@@ -293,7 +294,8 @@ export function createStoreRouter(db, { weather, profiles = false }) {
     // profile: show the task 27 buttons (needs the Telegram bot and an organisation to scope the profile to).
     // categories (task 36): the shop's shown categories for the catalogue filter and the "Nima kerak?" chips.
     res.json({ id: store.id, name: store.name, city: store.city, weather: w, looks, profile: profiles && store.organization_id != null,
-      categories: await shownCategories(db, id) });
+      categories: await shownCategories(db, id),
+      ...((await tryonOpen(db, tryon, store)) && { tryon: tryon.name }) }); // task 41: the provider's name, for the consent text
   });
   return r;
 }

@@ -9,6 +9,7 @@ import { publicBase } from '../qr.js';
 import { stamp } from '../cart/cart.js';
 import { parseJson } from '../cart/promo.js';
 import { validTerms } from '../cart/instalment.js';
+import { tryonUsage } from '../tryon.js';
 
 export const ROLES = ['super', 'owner', 'manager', 'staff', 'mall'];
 const STORE_ROLES = ['manager', 'staff']; // bound to one store; an owner invites and manages these
@@ -77,9 +78,9 @@ export async function createInvite(req, q, { email, role, storeId, orgId, mallId
 
 // Store profile as the settings form edits it.
 const STORE_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'opens_at', 'closes_at', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id', 'bundle_percent',
-  'instalment_on', 'instalment_terms'];
+  'instalment_on', 'instalment_terms', 'tryon_on', 'tryon_daily_limit'];
 // Task 35: the terms are JSON in the DB and an array everywhere else.
-const fromRow = (s) => s && { ...s, instalment_on: Boolean(s.instalment_on), instalment_terms: parseJson(s.instalment_terms, []) };
+const fromRow = (s) => s && { ...s, instalment_on: Boolean(s.instalment_on), instalment_terms: parseJson(s.instalment_terms, []), tryon_on: Boolean(s.tryon_on) };
 const toRow = (s) => ({ ...s, instalment_terms: JSON.stringify(s.instalment_terms) });
 function validStore(b) {
   const num = (v, min, max, field) => {
@@ -114,13 +115,16 @@ function validStore(b) {
     bundle_percent: int(b.bundle_percent ?? 0, 0, 90, 'field.bundle_percent'), // task 26: "whole outfit" discount, 0 = off
     instalment_on: b.instalment_on ?? false, // task 35: "Muddatli to'lov (kassada)"
     instalment_terms: validTerms(b.instalment_terms),
+    tryon_on: b.tryon_on ?? false, // task 41: AI try-on (works only with the provider's key in .env)
+    tryon_daily_limit: int(b.tryon_daily_limit ?? 30, 1, 1000, 'field.tryon_limit'), // paid pictures per day
   };
+  if (typeof s.tryon_on !== 'boolean') throw fail(400, 'err.invalid', { field: 'field.tryon_on' });
   if (typeof s.instalment_on !== 'boolean' || (s.instalment_on && !s.instalment_terms.length)) throw fail(400, 'err.invalid', { field: 'field.instalment_terms' });
   if ((s.opens_at === null) !== (s.closes_at === null)) throw fail(400, 'err.invalid', { field: 'field.hours' });
   return s;
 }
 
-export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
+export function settingsRoutes(r, db, { secret, lock, resolveStore, tryon = false }) {
   async function findStore(req) {
     const id = Number(req.params.id);
     if (!canSee(req.admin, id)) throw fail(404, 'err.store_not_found');
@@ -134,6 +138,12 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore }) {
   r.get('/stores/:id', async (req, res) => {
     const s = await findStore(req);
     res.json({ ...s, kiosk_pin_set: await pinSet(s.id), can_edit: canEditStore(req.admin, s.id) });
+  });
+
+  // Task 41: the try-on count per day (what the store pays for) and whether the provider's key is set at all.
+  r.get('/stores/:id/tryon', async (req, res) => {
+    const s = await findStore(req);
+    res.json({ available: tryon, days: await tryonUsage(db, s.id) });
   });
 
   // Partial edit: only known profile fields count (order_seq etc. can't be reached), merged and validated as a whole.

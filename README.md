@@ -103,13 +103,14 @@ docker stop smartfit-testpg
 | `PAYME_MERCHANT_ID`, `PAYME_KEY` | empty | Payme Merchant API. Off (and hidden in the app) until both are set. Use the TEST_KEY while testing. |
 | `PAYME_CHECKOUT_URL` | `https://test.paycom.uz` | Set `https://checkout.paycom.uz` for live payments. |
 | `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY` | empty | Click SHOP API. Off until all three are set. |
+| `FASHN_API_KEY` | empty | AI try-on "O'zimda ko'rish" (see below). Empty → the feature is off and the app looks as before. |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` | empty | Order status messages to customers, and the customer profile (task 27: "Profilimni saqlash", kiosk "Profil bilan kirish", bot commands `/profile` and `/delete`). Both needed; empty → no messages and no profile buttons. The profile page link in the bot chat needs `PUBLIC_URL`. |
 | `TELEGRAM_OWNER_CHAT_ID` | empty | Your own Telegram chat id (the product owner): every landing-page demo request is sent there once. Empty → requests wait in `/admin` → Tashkilotlar and are sent once it is set. Needs the bot above. |
 | `POSTGRES_PASSWORD` | — | docker compose only: the database password (compose builds `DATABASE_URL` from it, so letters and digits only, e.g. `openssl rand -hex 24`). Required by compose. |
 | `DOMAIN` | `localhost` | docker compose only: the HTTPS domain Caddy serves and gets a certificate for. |
 | `NODE_ENV` | empty | `production` requires `ADMIN_TOKEN_SECRET` and blocks `npm run seed`. compose sets it. |
 | `TRUST_PROXY` | empty | Number of reverse proxies in front of the app. compose sets `1` (Caddy), so client IPs (login lock, rate limits, open-cart cap) and `https` (QR links) are right. Leave empty when the app is reached directly. |
-| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN`, `RATE_DEMO_PER_MIN`, `RATE_FUNNEL_PER_MIN`, `RATE_CATALOG_PER_MIN`, `RATE_PROMO_PER_MIN`, `RATE_PROFILE_PER_MIN`, `RATE_PROFILE_POLL_PER_MIN`, `RATE_SCAN_PER_MIN`, `RATE_MALL_PER_MIN` | 60, 30, 300, 20, 30, 5, 3, 120, 300, 20, 20, 300, 120, 300 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat, the kiosk exit PIN, the landing page's demo form, the customer funnel events (`/api/funnel`), the catalogue (`/api/catalog/*`), promo code tries (`POST /api/cart/:token/promo`), new profile links / kiosk login QRs and the profile page (`/api/profile/*`), the screens waiting for the bot (`GET /api/profile/token/*`), garment QR label scans (`GET /q/*`; over the limit the phone is still redirected, the scan just isn't logged), and the mall screen's directory and search (`/api/malls/*`). Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
+| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN`, `RATE_DEMO_PER_MIN`, `RATE_FUNNEL_PER_MIN`, `RATE_CATALOG_PER_MIN`, `RATE_PROMO_PER_MIN`, `RATE_PROFILE_PER_MIN`, `RATE_PROFILE_POLL_PER_MIN`, `RATE_SCAN_PER_MIN`, `RATE_MALL_PER_MIN`, `RATE_TRYON_PER_MIN` | 60, 30, 300, 20, 30, 5, 3, 120, 300, 20, 20, 300, 120, 300, 4 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat, the kiosk exit PIN, the landing page's demo form, the customer funnel events (`/api/funnel`), the catalogue (`/api/catalog/*`), promo code tries (`POST /api/cart/:token/promo`), new profile links / kiosk login QRs and the profile page (`/api/profile/*`), the screens waiting for the bot (`GET /api/profile/token/*`), garment QR label scans (`GET /q/*`; over the limit the phone is still redirected, the scan just isn't logged), the mall screen's directory and search (`/api/malls/*`), and AI try-on pictures (`POST /api/tryon`, each one paid). Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
 | `MAX_OPEN_CARTS_PER_IP` | 30 | Live carts (each holds stock for 15 min) one client IP may have at once; the next new cart → `429 too_many_carts`. Unpaid other-store reservations (task 25, held 3 h) count against the same cap (`429 too_many_reserves`). `0` = off. |
 | `ERROR_WEBHOOK_URL` | empty | Optional error monitoring: every error log line is POSTed as JSON `{text, content, level, time}` (works with Slack, Discord and Mattermost incoming webhooks), at most 10 a minute. |
 
@@ -239,6 +240,46 @@ Cashier payment always works. A provider appears in the phone app only when all 
 - The amount is always the server's order total; an order becomes paid only through a verified callback.
   An unpaid order is cancelled after 15 minutes and its stock comes back. Refunds are made in the provider cabinet
   (or cash at the cashier) after cancelling a paid order in admin.
+
+## AI try-on ("O'zimda ko'rish", task 41)
+
+On an item page and on an outfit card the customer can see the garment on their own photo. The picture is made by
+**FASHN** (Virtual Try-On v1.6, `https://api.fashn.ai/v1`), so this is the one place a customer photo leaves for a
+company other than Anthropic.
+
+- **Switch it on:** put the key from https://app.fashn.ai/api into `FASHN_API_KEY` (buy on-demand credits first), then
+  each shop owner ticks "Mijozlarga «O'zimda ko'rish» tugmasini ko'rsatish" in Sozlamalar › Do'kon and sets the daily
+  limit (default 30). The same box lists the pictures per day for the last 14 days. Without the key the box says so and
+  the app is unchanged.
+- **Which items:** adults' outerwear, tops and bottoms with an **uploaded raster photo** (JPG, PNG or WebP) and stock > 0.
+  The demo seed's SVG drawings don't qualify, so the button only appears once a shop uploads real product photos.
+  On an outfit it tries the outer layer first (outerwear, then top, then bottom). Never on shoes, accessories, a shop's
+  role-less categories or anything in the children's path (task 40).
+- **Privacy:** the customer agrees every time, in a dialog that names FASHN and says the picture is approximate. The
+  photo (a ≤ 1280 px JPEG made in the browser) goes to our server and on to FASHN in memory only; the picture comes back
+  as bytes, is shown as a `blob:` image and is never stored. Neither is written to disk, the database or any log (only a
+  short reason like `fashn PoseError` is logged on a failure). The database keeps one number per shop per day.
+  "Boshiga", any screen change and the kiosk idle reset drop the photo and the picture.
+- **Cost guards (server side):** the shop's daily limit (a conditional count, so parallel requests can't pass it),
+  `RATE_TRYON_PER_MIN` per IP (default 4), at most 4 pictures in flight per server (FASHN's default account
+  concurrency is 6), a 1.5 MB photo cap and a 45 s deadline. Every request sent to FASHN counts, so the counter is an
+  upper bound of the bill (failed predictions are free).
+
+**Provider choice (researched 2026-11-16):**
+
+| | FASHN (chosen) | Google Vertex AI Virtual Try-On | Kling Kolors try-on |
+|---|---|---|---|
+| API | Public docs, `POST /v1/run` + `GET /v1/status/<id>`, Bearer key | Vertex AI `virtual-try-on-001`, needs a Google Cloud project and service-account OAuth | Kling's own API doc says the feature retired on 2026-09-15; still sold through resellers such as fal.ai |
+| Price per picture | $0.075 (1 credit; minimum top-up $7.50 = 100 credits; failed runs free) | ~$0.06 by third-party price trackers; Google's page only points to the Imagen section | $0.07 on fal.ai |
+| Speed | ~8 s ("balanced" mode) | not checked | not checked |
+| Uploaded photos | Base64 inputs: the processing copy is deleted when the request finishes (1-day cleanup backstop). Base64 outputs: 60 min. Not used for training unless you opt in. A request record (time, model, parameters, placeholders for base64 inputs, status) is kept with no deletion endpoint. | Not reviewed in depth; trackers list a deprecation date of 2027-03-15 | Two companies (reseller + model) see the photo |
+
+FASHN won on a documented API we could code exactly with a few lines of `fetch`, the clearest retention terms for
+base64 uploads, no training on customer photos, and free failed runs. Sources: [FASHN data retention](https://docs.fashn.ai/api-overview/data-retention-privacy),
+[Try-On v1.6](https://docs.fashn.ai/api-reference/tryon-v1-6), [API fundamentals](https://docs.fashn.ai/api-overview/api-fundamentals),
+[API pricing](https://help.fashn.ai/plans-and-pricing/api-pricing), [Vertex AI Virtual Try-On](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/imagen/virtual-try-on-001),
+[Kling virtual try-on](https://kling.ai/document-api/api/image/virtual-try-on.md), [fal.ai Kolors try-on](https://fal.ai/models/fal-ai/kling/v1-5/kolors-virtual-try-on/api).
+Another provider replaces `createFashn` in `src/tryon.js` (one function: photo + garment in, picture out).
 
 ## Telegram notifications
 
@@ -372,6 +413,13 @@ the 2-week pilot.
 **Claude stylist**
 - [ ] Live `ANTHROPIC_API_KEY`: run real requests, check the answer comes within the 8 s limit and the Uzbek titles and
       reasons read well. Turn the internet / key off once and check the rule-based fallback.
+
+**AI try-on (task 41, only if a shop wants it)**
+- [ ] Live `FASHN_API_KEY` with credits; switch one shop on; on a real phone and the kiosk: item with a real product photo →
+      "O'zimda ko'rish" → consent → photo → the picture arrives within ~15 s and reads as the right garment; the counter
+      in Sozlamalar shows it. Check the status path `/v1/status/<id>` and the base64 output shape against the live API
+      (the docs don't show a full example of either).
+- [ ] Read FASHN's current Terms and Data Retention page once more and keep the consent text in step with them.
 
 **Payments (only if delivery/online payment is in the pilot; the spec says start with pickup + cashier)**
 - [ ] Payme sandbox (test.paycom.uz, TEST_KEY) and Click test service: payment, cancel, callback, 15-min expiry.
