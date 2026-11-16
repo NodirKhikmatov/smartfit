@@ -23,6 +23,42 @@ const MALL_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'logo_url'];
 export const MALL_SHOPS_MAX = 500; // shops (organisations) one mall may invite: a typo loop can't fill the table
 const SEARCH_MAX = 60; // shortcut: one page of search results; add paging when malls get that big
 const iso = (ms) => new Date(ms).toISOString();
+// Task 44: the plan picture. Same type and byte checks as logos; no image library (no new dependency), so a plan is
+// not scaled: one larger than this on a side is refused, which keeps a kiosk's decoding fast.
+export const PLAN_PX_MAX = 4096;
+export const SPOTS_MAX = 50; // mall kiosks with a "Siz shu yerdasiz" pin, per mall
+// → { w, h } read from the header of a JPEG, PNG or WebP (imageExt has already checked the type), or null.
+export function imageSize(b, ext) {
+  try {
+    if (ext === 'png') return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
+    if (ext === 'webp') {
+      const kind = b.toString('latin1', 12, 16);
+      if (kind === 'VP8 ') return { w: b.readUInt16LE(26) & 0x3fff, h: b.readUInt16LE(28) & 0x3fff };
+      if (kind === 'VP8L') return { w: 1 + (((b[22] & 0x3f) << 8) | b[21]), h: 1 + (((b[24] & 0x0f) << 10) | (b[23] << 2) | ((b[22] & 0xc0) >> 6)) };
+      if (kind === 'VP8X') return { w: 1 + b.readUIntLE(24, 3), h: 1 + b.readUIntLE(27, 3) };
+      return null;
+    }
+    // JPEG: walk the segments to the first frame header (SOF0–SOF15 except DHT C4, JPG C8, DAC CC).
+    for (let i = 2; i + 9 < b.length;) {
+      if (b[i] !== 0xff) return null;
+      const m = b[i + 1];
+      if (m >= 0xc0 && m <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(m)) return { w: b.readUInt16BE(i + 7), h: b.readUInt16BE(i + 5) };
+      i += 2 + b.readUInt16BE(i + 2);
+    }
+  } catch { /* a cut-off header */ }
+  return null;
+}
+// A pin: percentages of the plan (0–100) → integer hundredths (two decimals hold at any screen size), and back.
+const pinOf = (v) => {
+  const n = (x) => {
+    if (typeof x !== 'number' || !Number.isFinite(x) || x < 0 || x > 100) throw fail(400, 'err.invalid', { field: 'field.pin' });
+    return Math.round(x * 100);
+  };
+  if (!v || typeof v !== 'object') throw fail(400, 'err.invalid', { field: 'field.pin' });
+  return { x: n(v.x), y: n(v.y) };
+};
+const pinOut = (x, y) => (x == null || y == null ? null : { x: x / 100, y: y / 100 });
+const floorSort = (a, b) => a.name.localeCompare(b.name, 'en', { numeric: true });
 // A path id that fits an integer column (a longer one would be a database error on Postgres, not a 404).
 const idOf = (v) => (/^\d{1,9}$/.test(String(v)) ? Number(v) : 0);
 
@@ -114,8 +150,9 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
         if (rows.length !== now.length) throw fail(400, 'err.invalid', { field: 'field.stores' });
         const taken = rows.find((s) => s.mall_id && s.mall_id !== id);
         if (taken) throw fail(409, 'err.store_in_mall', { name: taken.name });
-        await trx('stores').where({ mall_id: id }).whereNotIn('id', now).update({ mall_id: null, mall_floor: null, mall_unit: null, mall_hidden: false, updated_at: trx.fn.now() });
+        await trx('stores').where({ mall_id: id }).whereNotIn('id', now).update({ mall_id: null, mall_floor: null, mall_unit: null, mall_hidden: false, map_x: null, map_y: null, updated_at: trx.fn.now() });
         await trx('stores').whereIn('id', now).update({ mall_id: id, updated_at: trx.fn.now() });
+        await syncFloors(trx, id);
       }
       const d = diff({ ...before, stores: was }, { ...next, stores: now });
       if (!d) return;
@@ -129,6 +166,7 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
   r.delete('/malls/:id', async (req, res) => {
     superOnly(req.admin);
     const m = await findMall(req.params.id);
+    let plans = [];
     await db.transaction(async (trx) => {
       if (await trx('stores').where({ mall_id: m.id }).first('id')) throw fail(409, 'err.mall_in_use');
       const admins = await trx('admins').where({ role: 'mall', mall_id: m.id }).select('email');
@@ -136,10 +174,12 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
       await trx('admins').where({ role: 'mall', mall_id: m.id }).del(); // audit rows keep the email (admin_id is set null)
       await trx('organizations').where({ mall_id: m.id }).update({ mall_id: null });
       await trx('mall_recs').where({ mall_id: m.id }).del(); // task 42: its outfit screens count (no foreign key)
+      plans = (await trx('mall_floors').where({ mall_id: m.id }).whereNotNull('plan_url').select('plan_url')).map((f) => f.plan_url);
+      await trx('mall_floors').where({ mall_id: m.id }).del(); // task 44: its plans; the kiosk spots go with them (cascade)
       await trx('malls').where({ id: m.id }).del();
       await audit(trx, req.admin, { action: 'mall.delete', entityId: m.id, label: m.name, before: { ...m, admins: admins.map((a) => a.email) } });
     });
-    await removeImage(m.logo_url);
+    for (const url of [m.logo_url, ...plans]) await removeImage(url);
     res.status(204).end();
   });
 
@@ -229,11 +269,13 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
   // A shop's directory entry: { floor?, unit?, hidden? }. Only a store of this mall (else 404, like any other store).
   async function mallStore(req) {
     const id = idOf(req.params.id);
-    const s = id ? await db('stores').where({ id, mall_id: req.admin.mall_id }).first('id', 'name', 'mall_floor', 'mall_unit', 'mall_hidden', 'logo_url') : undefined;
+    const s = id ? await db('stores').where({ id, mall_id: req.admin.mall_id }).first('id', 'name', 'mall_floor', 'mall_unit', 'mall_hidden', 'logo_url', 'map_x', 'map_y') : undefined;
     if (!s) throw fail(404, 'err.store_not_found');
     return s;
   }
-  const entryOf = (s) => ({ floor: s.mall_floor ?? null, unit: s.mall_unit ?? null, hidden: Boolean(s.mall_hidden) });
+  const entryOf = (s) => ({ floor: s.mall_floor ?? null, unit: s.mall_unit ?? null, hidden: Boolean(s.mall_hidden), pin: pinOut(s.map_x, s.map_y) });
+  // Task 44: a pin needs a plan picture on the shop's floor.
+  const planOf = async (q, mallId, floor) => (floor ? q('mall_floors').where({ mall_id: mallId, name: floor }).whereNotNull('plan_url').first('id') : undefined);
 
   r.patch('/mall/stores/:id', async (req, res) => {
     mallOnly(req.admin);
@@ -246,10 +288,19 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
       hidden: b.hidden === undefined ? before.hidden : b.hidden,
     };
     if (typeof next.hidden !== 'boolean') throw fail(400, 'err.invalid', { field: 'field.status' });
+    // Task 44: { pin: { x, y } | null }. A pin is a point on its floor's plan, so a new floor drops the old one.
+    let pin = next.floor === before.floor && s.map_x != null ? { x: s.map_x, y: s.map_y } : null;
+    if (b.pin === null) pin = null;
+    else if (b.pin !== undefined) {
+      pin = pinOf(b.pin);
+      if (!(await planOf(db, req.admin.mall_id, next.floor))) throw fail(409, 'err.map_no_plan');
+    }
+    next.pin = pin && pinOut(pin.x, pin.y);
     const d = diff(before, next);
     if (d) {
       await db.transaction(async (trx) => {
-        await trx('stores').where({ id: s.id }).update({ mall_floor: next.floor, mall_unit: next.unit, mall_hidden: next.hidden, updated_at: trx.fn.now() });
+        await trx('stores').where({ id: s.id }).update({ mall_floor: next.floor, mall_unit: next.unit, mall_hidden: next.hidden, map_x: pin?.x ?? null, map_y: pin?.y ?? null, updated_at: trx.fn.now() });
+        if (next.floor !== before.floor) await syncFloors(trx, req.admin.mall_id);
         await audit(trx, req.admin, { action: 'mall.store', storeId: s.id, entityId: s.id, label: s.name, ...d });
       });
     }
@@ -300,10 +351,127 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
   r.post('/mall/stores/:id/logo', ...upload(storeLogo));
   r.delete('/mall/stores/:id/logo', remove(storeLogo));
 
+  // ---------- Task 44: the map. One plan picture per floor; pins for shops (PATCH /mall/stores/:id { pin }) and for
+  // the mall's kiosks ("Siz shu yerdasiz", their id goes in the kiosk link as &spot=). Floors come from the shops'
+  // floor values (syncFloors), so there is nothing to create by hand.
+
+  r.get('/mall/map', async (req, res) => {
+    mallOnly(req.admin);
+    const id = req.admin.mall_id;
+    const [floors, shops, spots] = await Promise.all([
+      db('mall_floors').where({ mall_id: id }).select('id', 'name', 'plan_url', 'plan_w', 'plan_h'),
+      db('stores').where({ mall_id: id }).orderBy(['name', 'id']).select('id', 'name', 'mall_floor as floor', 'mall_unit as unit', 'mall_hidden as hidden', 'map_x', 'map_y'),
+      db('mall_spots').where({ mall_id: id }).orderBy('id').select('id', 'floor_id', 'label', 'x', 'y'),
+    ]);
+    res.json({
+      floors: floors.sort(floorSort),
+      shops: shops.map(({ map_x, map_y, ...s }) => ({ ...s, hidden: Boolean(s.hidden), pin: pinOut(map_x, map_y) })),
+      spots: spots.map((k) => spotView(req, k)),
+    });
+  });
+  const spotView = (req, { x, y, ...k }) => ({ ...k, pin: pinOut(x, y), kiosk_url: `${publicBase(req)}/kiosk?mall=${req.admin.mall_id}&spot=${k.id}` });
+
+  async function mallFloor(req, id = idOf(req.params.id)) {
+    const f = Number.isInteger(id) && id > 0 ? await db('mall_floors').where({ id, mall_id: req.admin.mall_id }).first() : undefined;
+    if (!f) throw fail(404, 'err.not_found');
+    return f;
+  }
+  async function setPlan(req, f, plan) {
+    await db.transaction(async (trx) => {
+      await trx('mall_floors').where({ id: f.id }).update({ ...plan, updated_at: trx.fn.now() });
+      await audit(trx, req.admin, { action: 'mall.map', entityId: req.admin.mall_id, label: f.name, before: { plan_url: f.plan_url ?? null }, after: { plan_url: plan.plan_url } });
+      if (!plan.plan_url) await syncFloors(trx, req.admin.mall_id); // a floor no shop names any more goes with its plan
+    });
+    await removeImage(f.plan_url);
+  }
+  // Raw body ≤ 2 MB, type from the magic bytes only, ≤ PLAN_PX_MAX px a side, random name under /uploads/malls/.
+  r.post('/mall/floors/:id/plan', express.raw({ type: () => true, limit: '2mb' }), async (req, res) => {
+    mallOnly(req.admin);
+    const f = await mallFloor(req);
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const ext = imageExt(buf);
+    const size = ext && imageSize(buf, ext);
+    if (!size?.w || !size?.h) throw fail(400, 'err.image_type');
+    if (size.w > PLAN_PX_MAX || size.h > PLAN_PX_MAX) throw fail(400, 'err.plan_big', { max: PLAN_PX_MAX });
+    const file = `f${f.id}-${randomBytes(8).toString('hex')}.${ext}`;
+    await mkdir(imageDir, { recursive: true });
+    await writeFile(path.join(imageDir, file), buf);
+    const plan = { plan_url: `/uploads/malls/${file}`, plan_w: size.w, plan_h: size.h };
+    await setPlan(req, f, plan);
+    res.json({ id: f.id, name: f.name, ...plan });
+  });
+  r.delete('/mall/floors/:id/plan', async (req, res) => {
+    mallOnly(req.admin);
+    await setPlan(req, await mallFloor(req), { plan_url: null, plan_w: null, plan_h: null });
+    res.status(204).end();
+  });
+
+  // { floor_id, label, pin: { x, y } } (a PATCH may leave any of them out) → a kiosk spot on a floor with a plan.
+  async function spotOf(req, before) {
+    const b = req.body && typeof req.body === 'object' ? req.body : {};
+    const label = text(b.label === undefined ? before?.label : b.label, 60, 'field.kiosk_label', true);
+    const floorId = b.floor_id === undefined ? before?.floor_id : b.floor_id;
+    const f = Number.isInteger(floorId) && floorId > 0 && floorId <= 2147483647 ? await db('mall_floors').where({ id: floorId, mall_id: req.admin.mall_id }).first('id', 'name', 'plan_url') : undefined;
+    if (!f) throw fail(400, 'err.invalid', { field: 'field.floor' });
+    const pin = b.pin === undefined && before ? { x: before.x, y: before.y } : pinOf(b.pin);
+    if (!f.plan_url) throw fail(409, 'err.map_no_plan');
+    return { floor_id: f.id, label, ...pin };
+  }
+  async function mallSpot(req) {
+    const id = idOf(req.params.id);
+    const k = id ? await db('mall_spots').where({ id, mall_id: req.admin.mall_id }).first('id', 'floor_id', 'label', 'x', 'y') : undefined;
+    if (!k) throw fail(404, 'err.not_found');
+    return k;
+  }
+  const spotAudit = (trx, req, id, before, after) => audit(trx, req.admin, { action: 'mall.map', entityId: req.admin.mall_id, label: `kiosk ${id}: ${(after ?? before).label}`, before, after });
+
+  r.post('/mall/spots', async (req, res) => {
+    mallOnly(req.admin);
+    const k = await spotOf(req);
+    const out = await db.transaction(async (trx) => {
+      if (Number((await trx('mall_spots').where({ mall_id: req.admin.mall_id }).count({ n: '*' }))[0].n) >= SPOTS_MAX) throw fail(409, 'err.spots_max', { max: SPOTS_MAX });
+      const [{ id }] = await trx('mall_spots').insert({ ...k, mall_id: req.admin.mall_id }).returning('id');
+      await spotAudit(trx, req, id, null, k);
+      return { id, ...k };
+    });
+    res.status(201).json(spotView(req, out));
+  });
+  r.patch('/mall/spots/:id', async (req, res) => {
+    mallOnly(req.admin);
+    const { id, ...before } = await mallSpot(req);
+    const next = await spotOf(req, before);
+    const d = diff(before, next);
+    if (d) {
+      await db.transaction(async (trx) => {
+        await trx('mall_spots').where({ id }).update(next);
+        await spotAudit(trx, req, id, d.before, d.after);
+      });
+    }
+    res.json(spotView(req, { id, ...next }));
+  });
+  r.delete('/mall/spots/:id', async (req, res) => {
+    mallOnly(req.admin);
+    const { id, ...before } = await mallSpot(req);
+    await db.transaction(async (trx) => {
+      await trx('mall_spots').where({ id }).del();
+      await spotAudit(trx, req, id, before, null);
+    });
+    res.status(204).end();
+  });
+
   async function removeImage(url) {
     if (!url?.startsWith('/uploads/malls/')) return;
     await unlink(path.join(imageDir, path.basename(url))).catch((err) => err.code === 'ENOENT' || console.error(err));
   }
+}
+
+// Task 44: one floor row per floor name the mall's shops use (a plan and kiosk spots belong to it); a row nothing
+// needs any more (no shop on it, no plan, no kiosk spot) goes.
+async function syncFloors(q, mallId) {
+  const names = (await q('stores').where({ mall_id: mallId }).whereNotNull('mall_floor').distinct('mall_floor')).map((r) => r.mall_floor);
+  if (names.length) await q('mall_floors').insert(names.map((name) => ({ mall_id: mallId, name }))).onConflict(['mall_id', 'name']).ignore();
+  await q('mall_floors').where({ mall_id: mallId }).whereNull('plan_url').whereNotIn('name', names)
+    .whereNotExists(q('mall_spots').whereRaw('mall_spots.floor_id = mall_floors.id')).del();
 }
 
 // ---------- Public: the mall screen (/kiosk?mall=, /m?mall=). Rate-limited in app.js like the catalogue.
@@ -318,13 +486,24 @@ export function createMallRouter(db) {
   };
   const shown = (q, mallId) => q.where('st.mall_id', mallId).where('st.mall_hidden', false);
 
-  // → { id, name, city, address, logo_url, shops: [{ id, name, floor, unit, logo_url, categories: [{ id, name, name_ru, image_url }] }] }
+  // → { id, name, city, address, logo_url, shops: [{ id, name, floor, unit, logo_url, opens_at, closes_at, pin,
+  // categories: [{ id, name, name_ru, image_url }] }], floors: [{ id, name, plan_url, plan_w, plan_h }], spots }.
+  // Task 44: floors = the ones with a plan picture (the map's tabs); a pin only on such a floor; spots = the mall
+  // kiosks' "Siz shu yerdasiz" pins (a kiosk shows its own one; a phone none). Hours are Tashkent time.
   r.get('/:id', async (req, res) => {
     const m = await mallOf(req.params.id);
-    const shops = await shown(db('stores as st'), m.id).orderBy(['st.name', 'st.id']).select('st.id', 'st.name', 'st.mall_floor as floor', 'st.mall_unit as unit', 'st.logo_url', 'st.organization_id');
+    const shops = await shown(db('stores as st'), m.id).orderBy(['st.name', 'st.id'])
+      .select('st.id', 'st.name', 'st.mall_floor as floor', 'st.mall_unit as unit', 'st.logo_url', 'st.organization_id', 'st.opens_at', 'st.closes_at', 'st.map_x', 'st.map_y');
+    const floors = (await db('mall_floors').where({ mall_id: m.id }).whereNotNull('plan_url').select('id', 'name', 'plan_url', 'plan_w', 'plan_h')).sort(floorSort);
+    const spots = floors.length ? await db('mall_spots').whereIn('floor_id', floors.map((f) => f.id)).orderBy('id').select('id', 'floor_id', 'x', 'y') : []; // the label is the admin's
+    const planned = new Set(floors.map((f) => f.name));
     const cats = await shown(db('categories as c').join('stores as st', 'st.organization_id', 'c.organization_id'), m.id).where('c.hidden', false)
       .orderBy(['c.sort', 'c.id']).select('st.id as store_id', 'c.id', 'c.name', 'c.name_ru', 'c.image_url');
-    res.json({ ...m, shops: shops.map(({ organization_id, ...s }) => ({ ...s, categories: cats.filter((c) => c.store_id === s.id).map(({ store_id, ...c }) => c) })) });
+    res.json({
+      ...m, floors, spots: spots.map(({ x, y, ...k }) => ({ ...k, pin: pinOut(x, y) })),
+      shops: shops.map(({ organization_id, map_x, map_y, ...s }) => ({ ...s, pin: planned.has(s.floor) ? pinOut(map_x, map_y) : null,
+        categories: cats.filter((c) => c.store_id === s.id).map(({ store_id, ...c }) => c) })),
+    });
   });
 
   // Task 43: → { seconds, offers }: the mall's current approved offers in the mall admin's order (the "Aksiyalar"

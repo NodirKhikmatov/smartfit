@@ -33,14 +33,16 @@ async function mallView(db, mallToken) {
 // The group as its customer sees it (checkout answer and the public status page): no name, phone or address.
 async function groupView(db, g) {
   const mall = await db('malls').where({ id: g.mall_id }).first('id', 'name', 'city', 'address');
-  const orders = await db('orders as o').join('stores as s', 's.id', 'o.store_id').where('o.group_id', g.id).orderBy('o.id')
-    .select('o.*', 's.name as store_name', 's.mall_floor', 's.mall_unit', 's.logo_url');
+  // Task 44: map = the shop has a pin on a floor plan of this mall and is shown (the "xaritada ko'rish" link).
+  const orders = await db('orders as o').join('stores as s', 's.id', 'o.store_id')
+    .leftJoin('mall_floors as f', (j) => j.on('f.mall_id', 's.mall_id').andOn('f.name', 's.mall_floor')).where('o.group_id', g.id).orderBy('o.id')
+    .select('o.*', 's.name as store_name', 's.mall_floor', 's.mall_unit', 's.logo_url', 's.mall_id as store_mall', 's.mall_hidden', 's.map_x', 'f.plan_url as plan');
   const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').whereIn('i.order_id', orders.map((o) => o.id)).orderBy('i.id')
     .select('i.order_id', 'p.name', 'p.name_ru', 'p.category', 'i.size', 'i.quantity', 'i.unit_price');
   return {
     number: g.number, created_at: stamp(g.created_at), mall,
     orders: orders.map((o) => ({
-      store: shopOf({ ...o, id: o.store_id, name: o.store_name }), number: o.number, status: o.status, payment_status: o.payment_status, fulfillment: o.fulfillment,
+      store: { ...shopOf({ ...o, id: o.store_id, name: o.store_name }), map: o.store_mall === g.mall_id && !o.mall_hidden && o.map_x != null && o.plan != null }, number: o.number, status: o.status, payment_status: o.payment_status, fulfillment: o.fulfillment,
       items: items.filter((i) => i.order_id === o.id).map(({ order_id, ...i }) => i),
       subtotal: o.subtotal, bundle_discount: o.bundle_discount, promo_discount: o.promo_discount, promo_code: o.promo_code, points_discount: o.points_discount,
       delivery_fee: o.delivery_fee, total: o.total, instalment_months: o.instalment_months, instalment_monthly: o.instalment_monthly,

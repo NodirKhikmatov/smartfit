@@ -389,6 +389,15 @@
             </div>
             <div id="mallPending"></div>
           </section>
+          <!-- Task 44: one plan picture per floor; tap it to put a pin for a shop or a mall kiosk (admin.js, no drag-and-drop) -->
+          <section class="card panel span-2" aria-labelledby="mallMapTitle">
+            <div class="panel-head">
+              <div><h2 id="mallMapTitle" data-i18n="adm.map.title"></h2><p class="panel-sub" data-i18n="adm.map.sub"></p></div>
+            </div>
+            <div id="mapError"></div>
+            <div class="seg" role="group" id="mapFloorTabs" data-i18n-aria-label="adm.map.floors"></div>
+            <div id="mapBody"></div>
+          </section>
           <!-- Task 43: what shops submitted; approved ones rotate on the mall kiosk's idle screen in this order -->
           <section class="card panel span-2" aria-labelledby="mallOffersTitle">
             <div class="panel-head">
@@ -827,6 +836,28 @@
     <div class="actions">
       <button type="button" id="entryCancel" data-i18n="common.cancel"></button>
       <button class="primary" id="entrySave" data-i18n="adm.form.save"></button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Task 44: a pin on a floor plan: a shop of this floor or a mall kiosk ("Siz shu yerdasiz"). Tapping the plan fills
+     in the place; the numbers let a keyboard user place or fine-tune it without a pointer. -->
+<dialog id="pinDlg" class="narrow" aria-labelledby="pinTitle">
+  <form id="pinForm" method="dialog" novalidate>
+    <h2 id="pinTitle" data-i18n="adm.map.pin"></h2>
+    <div class="grid">
+      <label class="span-2"><span data-i18n="adm.map.what"></span> <select name="what" required></select></label>
+      <label class="span-2" id="pinLabelBox"><span data-i18n="field.kiosk_label"></span> <input name="label" maxlength="60" autocomplete="off" aria-describedby="pinLabelHint"></label>
+      <p class="hint span-2" id="pinLabelHint" data-i18n="adm.map.label_hint"></p>
+      <label><span data-i18n="adm.map.x"></span> <input name="x" type="number" min="0" max="100" step="0.01" required inputmode="decimal" aria-describedby="pinXyHint"></label>
+      <label><span data-i18n="adm.map.y"></span> <input name="y" type="number" min="0" max="100" step="0.01" required inputmode="decimal" aria-describedby="pinXyHint"></label>
+    </div>
+    <p class="hint" id="pinXyHint" data-i18n="adm.map.xy_hint"></p>
+    <p class="error" id="pinError" role="alert"></p>
+    <div class="actions">
+      <button type="button" class="danger" id="pinRemove"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trash"></use></svg><span data-i18n="adm.map.remove"></span></button>
+      <button type="button" id="pinCancel" data-i18n="common.cancel"></button>
+      <button class="primary" data-i18n="adm.form.save"></button>
     </div>
   </form>
 </dialog>

@@ -242,6 +242,21 @@
     <p class="meta" id="mallStatus" role="status"></p>
     <div class="catalog-grid" id="mallResults"></div>
     <h2 id="mallShopsTitle"></h2>
+    <!-- Task 44: list or map (only with a floor plan), and the directory's floor and category filters (mall.js) -->
+    <div class="mall-tools">
+      <div class="lang-switch" id="mallViews" role="group" data-i18n-aria-label="kiosk.map.views" hidden>
+        <button type="button" class="chip" data-view="list" aria-pressed="true"><span data-i18n="kiosk.map.list"></span></button>
+        <button type="button" class="chip" data-view="map" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#map-pin"></use></svg><span data-i18n="kiosk.map.map"></span></button>
+      </div>
+      <label class="field" id="floorBox" hidden><span data-i18n="kiosk.map.floor"></span><select id="mallFloor"></select></label>
+      <label class="field" id="catBox" hidden><span data-i18n="kiosk.map.category"></span><select id="mallCat"></select></label>
+    </div>
+    <section class="mall-map" id="mallMap" hidden aria-labelledby="mallShopsTitle">
+      <div class="lang-switch floor-tabs" id="mapFloors" role="group" data-i18n-aria-label="kiosk.map.floors"></div>
+      <div class="plan" id="mapPlan"><img id="mapImg" alt=""></div>
+      <p class="meta" id="mapHint"></p>
+      <ul class="store-list" id="mapCard" aria-live="polite"></ul>
+    </section>
     <ul class="store-list" id="mallShops" aria-labelledby="mallShopsTitle"></ul>
   </section>
 

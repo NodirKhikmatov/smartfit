@@ -1,5 +1,5 @@
 // Task 38: the mall order's public status page (/mall-order/<token>): every shop's order with its shop name, floor and
-// unit, number, status and total. Each one links to that shop order's own page (timeline, Telegram, fit question).
+// unit, number, status and total (task 44: and a link to the shop on the mall map). Each one links to that shop order's own page (timeline, Telegram, fit question).
 // Shows no name or phone. Shop and mall names come from the database: always set as text.
 import { icon } from '/shared/ui.js';
 import { t, fmt, initLang, getLang, langSwitch, productName } from '/shared/i18n.js';
@@ -48,7 +48,9 @@ function render() {
   $('body').replaceChildren(...group.orders.map((o) => el('section', { className: 'card mc-shop' },
     el('div', { className: 'mall-head' },
       o.store.logo_url ? el('img', { className: 'shop-logo', src: o.store.logo_url, alt: '' }) : el('span', { className: 'shop-logo' }, icon('store')),
-      el('div', {}, el('h2', { textContent: o.store.name }), where(o.store) ? el('p', { className: 'meta', textContent: where(o.store) }) : null),
+      el('div', {}, el('h2', { textContent: o.store.name }), where(o.store) ? el('p', { className: 'meta', textContent: where(o.store) }) : null,
+        // Task 44: the shop on its floor plan (the mall screen's map view).
+        o.store.map ? el('a', { className: 'map-link', href: `/m?mall=${group.mall.id}&pin=${o.store.id}#map` }, icon('map-pin'), el('span', { textContent: t('kiosk.map.show') })) : null),
       el('strong', { className: 'num', textContent: t('kiosk.track.title', { n: o.number }) })),
     el('div', { className: 'sum' },
       ...o.items.map((i) => el('div', {}, el('span', { textContent: `${productName(i)} · ${i.size === 'ONE' ? t('common.size_one') : i.size}${i.quantity > 1 ? ` × ${i.quantity}` : ''}` }), el('span', { textContent: fmt.som(i.unit_price * i.quantity) }))),

@@ -16,6 +16,8 @@ process.env.ADMIN_TOKEN_SECRET = 'test-secret';
 const db = testDb();
 let server, base, uploadDir, s1, s2, s3, mallA, mallB, superToken, ownerA, managerA, mallTokenA, mallTokenB;
 const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(16)]);
+// Task 44: a PNG header with a real IHDR size (width × height), enough for the plan's size check.
+const planPng = (w, h) => { const b = Buffer.alloc(33); png.copy(b, 0, 0, 8); b.writeUInt32BE(13, 8); b.write('IHDR', 12, 'latin1'); b.writeUInt32BE(w, 16); b.writeUInt32BE(h, 20); return b; };
 
 const call = async (method, p, body, token, { raw, type } = {}) => {
   const res = await fetch(base + p, {
@@ -159,7 +161,13 @@ test('route walk: a mall admin reaches only their own mall; every shop data rout
     title, title_ru: title, starts_at: new Date(Date.now() - 1000).toISOString(), ends_at: new Date(Date.now() + 86400000).toISOString(), image_url: '/uploads/offers/x.png', status: 'submitted' }).returning('id'))[0].id;
   const offerA = await offer(s1, mallA, 'A aksiya'), offerB = await offer(s3, mallB, 'B aksiya');
   ids['/offers/:id'] = offerA;
-  const fill = (p) => p.replace(/^(\/[a-z-]+(?:\/invites)?)\/:id/, (m, head) => `${head}/${ids[`${head}/:id`]}`).replace('/mall/stores/:id', `/mall/stores/${s1}`).replace('/mall/offers/:id', `/mall/offers/${offerA}`);
+  // Task 44: a floor of each mall (mall A's from the seed) and mall A's kiosk spot.
+  const floorA = (await db('mall_floors').where({ mall_id: mallA }).orderBy('id').first()).id;
+  const [{ id: floorB }] = await db('mall_floors').insert({ mall_id: mallB, name: '3', plan_url: '/uploads/malls/b.png', plan_w: 10, plan_h: 10 }).returning('id');
+  const spotA = (await db('mall_spots').where({ mall_id: mallA }).first()).id;
+  const [{ id: spotB }] = await db('mall_spots').insert({ mall_id: mallB, floor_id: floorB, label: 'B kiosk', x: 1, y: 1 }).returning('id');
+  const fill = (p) => p.replace(/^(\/[a-z-]+(?:\/invites)?)\/:id/, (m, head) => `${head}/${ids[`${head}/:id`]}`).replace('/mall/stores/:id', `/mall/stores/${s1}`).replace('/mall/offers/:id', `/mall/offers/${offerA}`)
+    .replace('/mall/floors/:id', `/mall/floors/${floorA}`).replace('/mall/spots/:id', `/mall/spots/${spotA}`);
   const PUBLIC = ['POST /login', 'POST /invite/check', 'POST /invite/accept'];
   const ALLOWED = {
     'GET /me': async () => assert.equal((await admin('GET', '/me', undefined, mallTokenA)).body.mall_id, mallA),
@@ -223,6 +231,35 @@ test('route walk: a mall admin reaches only their own mall; every shop data rout
       assert.equal((await admin('PATCH', '/mall/slides', { order: [offerB] }, mallTokenA)).status, 400, 'not its offer');
       assert.equal((await admin('PATCH', '/mall/slides', { seconds: 12 }, mallTokenA)).body.seconds, 12);
       assert.equal((await db('malls').where({ id: mallB }).first()).slide_seconds, 8);
+    },
+    // Task 44: the map. Mall A's admin reaches only mall A's floors, spots and shops; mall B's are 404 both ways.
+    'GET /mall/map': async () => {
+      const r = (await admin('GET', '/mall/map', undefined, mallTokenA)).body;
+      assert.ok(r.floors.every((f) => f.id !== floorB) && r.spots.every((k) => k.id !== spotB) && r.shops.every((s) => s.id !== s3));
+      assert.deepEqual((await admin('GET', '/mall/map', undefined, mallTokenB)).body.spots.map((k) => k.id), [spotB]);
+    },
+    'POST /mall/floors/:id/plan': async () => {
+      assert.equal((await admin('POST', `/mall/floors/${floorB}/plan`, undefined, mallTokenA, { raw: planPng(100, 50), type: 'image/png' })).status, 404, 'another mall\'s floor');
+      assert.equal((await admin('POST', `/mall/floors/${floorA}/plan`, undefined, mallTokenB, { raw: planPng(100, 50), type: 'image/png' })).status, 404);
+      assert.equal((await admin('POST', `/mall/floors/${floorA}/plan`, undefined, mallTokenA, { raw: planPng(100, 50), type: 'image/png' })).body.plan_w, 100);
+    },
+    'DELETE /mall/floors/:id/plan': async () => {
+      assert.equal((await admin('DELETE', `/mall/floors/${floorB}/plan`, undefined, mallTokenA)).status, 404);
+      assert.equal((await db('mall_floors').where({ id: floorB }).first()).plan_url, '/uploads/malls/b.png');
+    },
+    'POST /mall/spots': async () => {
+      assert.equal((await admin('POST', '/mall/spots', { floor_id: floorB, label: 'X', pin: { x: 1, y: 1 } }, mallTokenA)).status, 400, 'another mall\'s floor');
+      assert.equal((await admin('POST', '/mall/spots', { floor_id: floorA, label: 'Walk', pin: { x: 10, y: 20 } }, mallTokenA)).status, 201);
+    },
+    'PATCH /mall/spots/:id': async () => {
+      assert.equal((await admin('PATCH', `/mall/spots/${spotB}`, { label: 'X' }, mallTokenA)).status, 404);
+      assert.equal((await admin('PATCH', `/mall/spots/${spotA}`, { label: 'X' }, mallTokenB)).status, 404);
+      assert.equal((await admin('PATCH', `/mall/spots/${spotA}`, { floor_id: floorB }, mallTokenB)).status, 404);
+      assert.equal((await db('mall_spots').where({ id: spotB }).first()).label, 'B kiosk');
+    },
+    'DELETE /mall/spots/:id': async () => {
+      assert.equal((await admin('DELETE', `/mall/spots/${spotB}`, undefined, mallTokenA)).status, 404);
+      assert.ok(await db('mall_spots').where({ id: spotB }).first());
     },
     'DELETE /mall/stores/:id/logo': async () => {
       assert.equal((await admin('DELETE', `/mall/stores/${s3}/logo`, undefined, mallTokenA)).status, 404);
@@ -338,10 +375,10 @@ test('directory: only the shown shops of that mall, with floor, unit, logo and s
   await db('categories').where({ id: hiddenCat.id }).update({ hidden: true });
   let r = await call('GET', `/api/malls/${mallA}`);
   assert.equal(r.status, 200);
-  assert.deepEqual(Object.keys(r.body).sort(), ['address', 'city', 'id', 'logo_url', 'name', 'shops']);
+  assert.deepEqual(Object.keys(r.body).sort(), ['address', 'city', 'floors', 'id', 'logo_url', 'name', 'shops', 'spots']); // task 44: floors, spots
   assert.deepEqual(r.body.shops.map((s) => s.id).sort(), [s1, s2].sort());
   const one = r.body.shops.find((s) => s.id === s1);
-  assert.deepEqual(Object.keys(one).sort(), ['categories', 'floor', 'id', 'logo_url', 'name', 'unit']);
+  assert.deepEqual(Object.keys(one).sort(), ['categories', 'closes_at', 'floor', 'id', 'logo_url', 'name', 'opens_at', 'pin', 'unit']); // task 44: hours, pin
   assert.deepEqual([one.floor, one.unit], ['1', '104']);
   assert.equal(one.categories.length, 8, 'hidden categories are not shown'); // task 40: 5 adult + 4 children's, one hidden
   assert.ok(!one.categories.some((c) => c.id === hiddenCat.id));

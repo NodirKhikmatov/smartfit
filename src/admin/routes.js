@@ -194,7 +194,8 @@ export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/staf
 // shop invites, summary numbers). Every product, order, customer, team and settings route is 403 for it.
 export const MALL_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^(GET|PATCH) \/mall$/, /^(POST|DELETE) \/mall\/logo$/, /^GET \/mall\/qr$/,
   /^POST \/mall\/shops$/, /^PATCH \/mall\/stores\/\d+$/, /^(POST|DELETE) \/mall\/stores\/\d+\/logo$/,
-  /^GET \/mall\/offers$/, /^POST \/mall\/offers\/\d+\/(approve|reject)$/, /^PATCH \/mall\/slides$/]; // task 43: what shops submitted to it
+  /^GET \/mall\/offers$/, /^POST \/mall\/offers\/\d+\/(approve|reject)$/, /^PATCH \/mall\/slides$/, // task 43: what shops submitted to it
+  /^GET \/mall\/map$/, /^(POST|DELETE) \/mall\/floors\/\d+\/plan$/, /^POST \/mall\/spots$/, /^(PATCH|DELETE) \/mall\/spots\/\d+$/]; // task 44: the map
 const STATS_TZ = 'Asia/Tashkent'; // every store is in Uzbekistan (UTC+5, no DST)
 export const DAY_MS = 86400000;
 export const dayKey = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: STATS_TZ });

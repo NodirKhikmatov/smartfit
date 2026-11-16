@@ -201,9 +201,17 @@ payment. The mall gets its own admin, who sees the shops and summary numbers onl
    text, picture, link or start, or running it longer, sends it back for approval; ending it sooner does not. A store
    outside any mall publishes without approval, on its own screens only. Shown / tapped counts per offer and day, numbers
    only, for the shop and the mall admin.
+7. **Map** (task 44): the mall admin's **Xarita** panel has a tab per floor (the floors are the shops' floor values) and
+   takes one plan picture per floor (JPEG/PNG/WebP ≤ 2 MB, ≤ 4096 px a side; not scaled). Tap the plan (or "Belgi
+   qo'yish" and type the place in percent) to put a pin for a shop of that floor or for a mall kiosk. A kiosk pin has
+   its own link, `/kiosk?mall=ID&spot=N`: open the kiosk with it once and it shows "Siz shu yerdasiz" (kept on that
+   device; phones never show it). Customers get "Ro'yxat / Xarita" above the directory (only when a floor has a plan),
+   floor tabs, the pins, and the shop's entry on a tap; the directory gets floor and category filters and "Ochiq /
+   Yopiq" from each store's hours (Tashkent time; none when the store has no hours). A mall order's status page links
+   each shop to its pin. No routes or directions: a pin and the floor.
 
 The demo seed has one mall, "Demo Savdo Markazi" (id 1), holding both demo stores and three demo offers (two approved,
-one waiting for the mall admin).
+one waiting for the mall admin), two floor plans with the shops' pins and one kiosk pin (`/kiosk?mall=1&spot=1`).
 
 ## Adding a store and its staff from the command line
 

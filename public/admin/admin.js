@@ -2399,7 +2399,7 @@ async function loadMall(quiet = false) {
   seg($('mallDays'), [['7', t('adm.stats.days', { n: 7 })], ['30', t('adm.stats.days', { n: 30 })]], String(days), (v) => setParams({ ...route.params, days: v === '7' ? '' : v }));
   const stop = quiet ? () => {} : skeletonRows($('mallShopRows'), 6, 3);
   try {
-    const [d, qr, mo] = await Promise.all([call(`/mall?days=${days}`), mallQr ?? call('/mall/qr'), call('/mall/offers')]);
+    const [d, qr, mo, map] = await Promise.all([call(`/mall?days=${days}`), mallQr ?? call('/mall/qr'), call('/mall/offers'), call('/mall/map')]);
     stop();
     if (seq !== loads.mall) return;
     mallData = d;
@@ -2407,6 +2407,7 @@ async function loadMall(quiet = false) {
     stateBox($('mallError'));
     drawMall(d, qr);
     drawMallOffers(mo);
+    drawMallMap(map);
   } catch (err) {
     stop();
     if (seq === loads.mall) { $('mallShopRows').replaceChildren(); stateBox($('mallError'), err, () => loadMall()); }
@@ -2522,6 +2523,130 @@ $('slideForm').onsubmit = async (e) => {
     await call('/mall/slides', { method: 'PATCH', body: { seconds: Number(e.target.seconds.value) } });
     toast(t('adm.form.saved'), { tone: 'ok' });
   } catch (err) { $('slideError').textContent = err.message; }
+};
+
+// ---------- Task 44: the mall map. One plan picture per floor (the floors are the shops' floor values); a tap on the
+// plan opens the pin dialog with that place filled in, for a shop of that floor or a mall kiosk. The pins are buttons
+// placed with CSS custom properties (CSSOM: the CSP has no inline styles). No drag-and-drop: mouse and touch tap, and
+// a keyboard user opens the same dialog with "Belgi qo'yish" and types the place.
+let mapData = null, mapJson = '', mapFloor = null, pinning = null;
+const PLAN_BYTES = 2 * 1024 * 1024, PLAN_PX = 4096; // the server's limits (src/admin/malls.js)
+const pct = (v) => Math.min(100, Math.max(0, Math.round(v * 100) / 100));
+function drawMallMap(d, force = false) {
+  const json = getLang() + JSON.stringify(d);
+  if (!force && json === mapJson) return; // a quiet poll must not drop a chosen file or the focus
+  mapJson = json;
+  mapData = d;
+  const floor = d.floors.find((f) => f.id === mapFloor) ?? d.floors[0];
+  mapFloor = floor?.id ?? null;
+  seg($('mapFloorTabs'), d.floors.map((f) => [f.id, t('adm.mall.floor', { n: f.name })]), mapFloor, (v) => { mapFloor = v; drawMallMap(mapData, true); });
+  if (!floor) return $('mapBody').replaceChildren(el('p', { className: 'muted', textContent: t('adm.map.no_floors') }));
+  const file = el('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp' }), err = el('p', { className: 'error', role: 'alert' });
+  const upload = el('div', { className: 'bar' },
+    el('label', { className: 'grow' }, el('span', { textContent: t('adm.map.plan_hint', { px: PLAN_PX }) }), ' ', file),
+    el('button', { type: 'button', onclick: () => uploadPlan(floor, file, err) }, icon('upload'), t(floor.plan_url ? 'adm.map.plan_replace' : 'adm.map.plan_upload')),
+    floor.plan_url ? el('button', { type: 'button', className: 'danger', onclick: () => removePlan(floor, err) }, icon('trash'), t('adm.map.plan_remove')) : null);
+  if (!floor.plan_url) return $('mapBody').replaceChildren(el('p', { className: 'muted', textContent: t('adm.map.no_plan') }), upload, err);
+  const shops = d.shops.filter((s) => s.floor === floor.name), spots = d.spots.filter((k) => k.floor_id === floor.id);
+  const plan = el('div', { className: 'plan plan-edit', onclick: (e) => {
+    if (e.target.closest('.pin')) return;
+    const r = plan.getBoundingClientRect();
+    openPin(floor, null, { x: ((e.clientX - r.left) / r.width) * 100, y: ((e.clientY - r.top) / r.height) * 100 });
+  } }, el('img', { src: floor.plan_url, alt: t('adm.map.plan_alt', { n: floor.name }) }));
+  plan.style.setProperty('--ratio', `${floor.plan_w} / ${floor.plan_h}`);
+  const pin = (p, label, kind, onclick) => {
+    const b = el('button', { type: 'button', className: `pin${kind}`, ariaLabel: t('adm.map.pin_named', { name: label }), onclick }, el('span', { className: 'pin-dot' }), el('span', { className: 'pin-label', textContent: label }));
+    b.style.setProperty('--x', String(p.x));
+    b.style.setProperty('--y', String(p.y));
+    b.classList.toggle('to-left', p.x > 70); // near an edge the label hangs inwards, so the plan doesn't cut it
+    b.classList.toggle('to-right', p.x < 30);
+    return b;
+  };
+  plan.append(...shops.filter((s) => s.pin).map((s) => pin(s.pin, s.name, s.hidden ? ' off' : '', () => openPin(floor, { shop: s }, s.pin))),
+    ...spots.map((k) => pin(k.pin, k.label, ' here', () => openPin(floor, { spot: k }, k.pin))));
+  const copy = (url) => navigator.clipboard?.writeText(url).then(() => toast(t('adm.qr.copied')), () => toast(t('common.error'), { tone: 'danger' }));
+  $('mapBody').replaceChildren(upload, err, plan,
+    el('div', { className: 'bar' }, el('button', { type: 'button', onclick: () => openPin(floor, null, { x: 50, y: 50 }) }, icon('map-pin'), t('adm.map.add')),
+      el('p', { className: 'hint grow', textContent: t('adm.map.tap_hint') })),
+    el('h3', { className: 'section-title', textContent: t('adm.map.shops') }),
+    shops.length ? el('ul', { className: 'plain-list' }, ...shops.map((s) => el('li', {}, el('strong', { textContent: s.name }), ' — ',
+      el('span', { className: s.pin ? '' : 'muted', textContent: [s.unit && t('adm.mall.unit', { n: s.unit }), t(s.pin ? 'adm.map.pinned' : 'adm.map.unpinned'), s.hidden && t('adm.mall.hidden')].filter(Boolean).join(' · ') }))))
+      : el('p', { className: 'muted', textContent: t('adm.map.no_shops') }),
+    el('h3', { className: 'section-title', textContent: t('adm.map.kiosks') }),
+    spots.length ? el('ul', { className: 'plain-list' }, ...spots.map((k) => el('li', { className: 'spot-row' }, el('strong', { textContent: k.label }),
+      el('span', { className: 'muted qr-url', textContent: k.kiosk_url }), el('button', { type: 'button', onclick: () => copy(k.kiosk_url) }, t('adm.qr.copy')))))
+      : el('p', { className: 'muted', textContent: t('adm.map.no_kiosks') }));
+}
+async function uploadPlan(floor, input, err) {
+  const file = input.files[0];
+  err.textContent = '';
+  if (!file) return void (err.textContent = t('adm.form.image_pick'));
+  if (file.size > PLAN_BYTES) return void (err.textContent = t('adm.form.image_big'));
+  try {
+    await call(`/mall/floors/${floor.id}/plan`, { method: 'POST', raw: file, type: file.type || 'application/octet-stream' });
+    toast(t('adm.form.saved'), { tone: 'ok' });
+    loadMall(true);
+  } catch (e) { err.textContent = e.message; }
+}
+async function removePlan(floor, err) {
+  if (!(await confirmDialog({ title: t('adm.map.plan_remove_title', { n: floor.name }), text: t('adm.map.plan_remove_text'), ok: t('common.delete'), danger: true }))) return;
+  try {
+    await call(`/mall/floors/${floor.id}/plan`, { method: 'DELETE' });
+    loadMall(true);
+  } catch (e) { err.textContent = e.message; }
+}
+const pinf = $('pinForm');
+// target: { shop } or { spot } when an existing pin was tapped (then only that one moves or goes), null for a new one.
+function openPin(floor, target, at) {
+  pinning = { floor, target };
+  pinf.reset();
+  $('pinError').textContent = '';
+  pinf.what.replaceChildren(
+    ...mapData.shops.filter((s) => s.floor === floor.name).map((s) => el('option', { value: `s${s.id}`, textContent: [s.name, s.unit, s.pin && t('adm.map.pinned')].filter(Boolean).join(' · ') })),
+    ...mapData.spots.filter((k) => k.floor_id === floor.id).map((k) => el('option', { value: `k${k.id}`, textContent: t('adm.map.kiosk_named', { name: k.label }) })),
+    el('option', { value: 'new', textContent: t('adm.map.kiosk_new') }));
+  pinf.what.value = target?.shop ? `s${target.shop.id}` : target?.spot ? `k${target.spot.id}` : pinf.what.options[0].value;
+  pinf.what.disabled = Boolean(target);
+  pinf.x.value = pct(at.x);
+  pinf.y.value = pct(at.y);
+  $('pinRemove').hidden = !target;
+  syncPinLabel();
+  $('pinDlg').showModal();
+}
+function syncPinLabel() {
+  const v = pinf.what.value, kiosk = v === 'new' || v[0] === 'k';
+  $('pinLabelBox').hidden = $('pinLabelHint').hidden = !kiosk;
+  pinf.label.required = kiosk;
+  pinf.label.value = v[0] === 'k' ? mapData.spots.find((k) => `k${k.id}` === v)?.label ?? '' : '';
+}
+pinf.what.onchange = syncPinLabel;
+$('pinCancel').onclick = () => $('pinDlg').close();
+pinf.onsubmit = async (e) => {
+  e.preventDefault();
+  $('pinError').textContent = '';
+  if (!pinf.reportValidity()) return;
+  const pin = { x: pct(Number(pinf.x.value)), y: pct(Number(pinf.y.value)) }, v = pinf.what.value, id = Number(v.slice(1)), floorId = pinning.floor.id;
+  try {
+    if (v[0] === 's') await call(`/mall/stores/${id}`, { method: 'PATCH', body: { pin } });
+    else if (v === 'new') await call('/mall/spots', { method: 'POST', body: { floor_id: floorId, label: pinf.label.value.trim(), pin } });
+    else await call(`/mall/spots/${id}`, { method: 'PATCH', body: { floor_id: floorId, label: pinf.label.value.trim(), pin } });
+    $('pinDlg').close();
+    toast(t('adm.form.saved'), { tone: 'ok' });
+    loadMall(true);
+  } catch (err) { $('pinError').textContent = err.message; }
+};
+$('pinRemove').onclick = async () => {
+  const { target } = pinning;
+  try {
+    if (target.shop) await call(`/mall/stores/${target.shop.id}`, { method: 'PATCH', body: { pin: null } });
+    else {
+      if (!(await confirmDialog({ title: t('adm.map.spot_delete', { name: target.spot.label }), text: t('adm.map.spot_delete_text'), ok: t('common.delete'), danger: true }))) return;
+      await call(`/mall/spots/${target.spot.id}`, { method: 'DELETE' });
+    }
+    $('pinDlg').close();
+    toast(t('adm.form.saved'), { tone: 'ok' });
+    loadMall(true);
+  } catch (err) { $('pinError').textContent = err.message; }
 };
 
 // A shop's directory entry: floor, unit, shown or hidden, its logo.

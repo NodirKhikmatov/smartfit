@@ -334,6 +334,7 @@ test('migration 033 down and up', async () => {
   const m = testDb();
   try {
     await m.migrate.latest();
+    await m.migrate.down(); // 034
     await m.migrate.down();
     assert.ok(!(await m.schema.hasTable('offers')) && !(await m.schema.hasTable('offer_stats')));
     assert.ok(!('slide_seconds' in (await m('malls').columnInfo())));

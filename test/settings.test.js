@@ -258,6 +258,18 @@ test('every mutating admin route writes an audit row', async () => {
     }
     return mallTok;
   };
+  // Task 44: a plan-sized PNG header, the demo mall's floor 2 (with a plan when asked) and a kiosk spot on it.
+  const sizedPng = Buffer.alloc(33);
+  png.copy(sizedPng, 0, 0, 8);
+  sizedPng.write('IHDR', 12, 'latin1');
+  sizedPng.writeUInt32BE(40, 16);
+  sizedPng.writeUInt32BE(30, 20);
+  const floor2 = async (plan = false) => {
+    const f = await db('mall_floors').where({ mall_id: (await db('malls').orderBy('id').first()).id, name: '2' }).first();
+    if (plan) await db('mall_floors').where({ id: f.id }).update({ plan_url: '/uploads/malls/walk.png', plan_w: 40, plan_h: 30 });
+    return f.id;
+  };
+  const spot = async () => (await db('mall_spots').insert({ mall_id: (await db('malls').orderBy('id').first()).id, floor_id: await floor2(), label: 'Walk spot', x: 1, y: 1 }).returning('id'))[0].id;
   // Task 43: an offer of the Tashkent store (in the demo mall), and one waiting for the mall admin.
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Tashkent' });
   const newOffer = async () => (await admin('POST', '/offers', { store_id: tashkent, title: 'Walk', title_ru: 'Обход', starts_on: today, ends_on: today }, ownerToken)).body;
@@ -368,6 +380,12 @@ test('every mutating admin route writes an audit row', async () => {
     'POST /malls/:id/invites': ['team.invite', async () => admin('POST', `/malls/${(await newMall()).body.id}/invites`, { email: `mall2${Date.now()}@smartfit.uz` }, superToken)],
     'PATCH /mall': ['mall.update', async () => admin('PATCH', '/mall', { name: `Demo ${Date.now()}` }, await mallToken())],
     'POST /mall/logo': ['mall.logo', async () => admin('POST', '/mall/logo', undefined, await mallToken(), { raw: png, type: 'image/png' })],
+    // Task 44: the map (floor 2 of the demo mall, given a plan where a recipe needs one).
+    'POST /mall/floors/:id/plan': ['mall.map', async () => admin('POST', `/mall/floors/${await floor2()}/plan`, undefined, await mallToken(), { raw: sizedPng, type: 'image/png' })],
+    'DELETE /mall/floors/:id/plan': ['mall.map', async () => admin('DELETE', `/mall/floors/${await floor2()}/plan`, undefined, await mallToken())],
+    'POST /mall/spots': ['mall.map', async () => admin('POST', '/mall/spots', { floor_id: await floor2(true), label: 'Walk', pin: { x: 1, y: 2 } }, await mallToken())],
+    'PATCH /mall/spots/:id': ['mall.map', async () => admin('PATCH', `/mall/spots/${await spot()}`, { label: 'Walk 2' }, await mallToken())],
+    'DELETE /mall/spots/:id': ['mall.map', async () => admin('DELETE', `/mall/spots/${await spot()}`, undefined, await mallToken())],
     'DELETE /mall/logo': ['mall.logo', async () => admin('DELETE', '/mall/logo', undefined, await mallToken())],
     'POST /mall/shops': ['org.create', async () => admin('POST', '/mall/shops', { name: 'Mall brand', owner_email: `shop${Date.now()}@smartfit.uz` }, await mallToken())],
     'PATCH /mall/stores/:id': ['mall.store', async () => admin('PATCH', `/mall/stores/${tashkent}`, { floor: String(Date.now() % 1e6) }, await mallToken())],

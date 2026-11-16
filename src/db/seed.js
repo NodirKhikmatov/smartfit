@@ -1,6 +1,6 @@
 // Demo data: 2 stores × ~76 items with economy/mid/premium prices, SKUs, descriptions and a demo image each.
 // Wipes all data first (dev only). Coverage (3 outfits for every gender × size × store × season) is tested.
-import { copyFile, mkdir } from 'node:fs/promises';
+import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { builtinRows } from './migrations/023_categories.js';
@@ -8,7 +8,26 @@ import { builtinRows } from './migrations/023_categories.js';
 // Task 37: one demo mall holding both demo shops, so /kiosk?mall=1 shows the mall screen. The demo has one store per
 // brand, so the Samarqand brand's store joins it too (a second Tashkent store would change every demo-store test).
 export const DEMO_MALL = { name: 'Demo Savdo Markazi', city: 'Toshkent', address: "Amir Temur ko'chasi, 15", lat: 41.2995, lon: 69.2401 };
-const MALL_ENTRY = [{ mall_floor: '1', mall_unit: '104' }, { mall_floor: '2', mall_unit: '215' }];
+// Task 44: and their opening hours (Tashkent time), so the directory shows "ochiq / yopiq".
+const MALL_ENTRY = [{ mall_floor: '1', mall_unit: '104', opens_at: '10:00', closes_at: '22:00' }, { mall_floor: '2', mall_unit: '215', opens_at: '09:00', closes_at: '21:00' }];
+
+// Task 44: a simple generated plan per demo floor (1200 × 800): six units above the corridor, four below around the
+// escalators, unit numbers only. Pins are hundredths of a percent: the demo shops sit in their units (104, 215) and
+// the demo mall kiosk stands by the escalators on floor 1 (/kiosk?mall=1&spot=1).
+const PLAN_W = 1200, PLAN_H = 800, UNIT_W = 1120 / 6;
+const PLAN_UNITS = { 1: [[101, 102, 103, 104, 105, 106], [107, 108, 109, 110]], 2: [[211, 212, 213, 214, 215, 216], [217, 218, 219, 220]] };
+const unitCentre = (i) => Math.round(((40 + UNIT_W * (i + 0.5)) / PLAN_W) * 10000); // a top-row unit's x
+const DEMO_PINS = [{ x: unitCentre(3), y: Math.round((185 / PLAN_H) * 10000) }, { x: unitCentre(4), y: Math.round((185 / PLAN_H) * 10000) }];
+function planSvg(floor) {
+  const [top, bottom] = PLAN_UNITS[floor];
+  const unit = (x, y, w, h, n) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#f3efe7" stroke="#b9b2a5" stroke-width="4"/><text x="${x + w / 2}" y="${y + h / 2 + 14}" font-size="40" text-anchor="middle" fill="#6f685c">${n}</text>`;
+  const low = [0, 1, 4, 5].map((i, k) => unit(40 + UNIT_W * i, 470, UNIT_W, 290, bottom[k]));
+  const steps = Array.from({ length: 6 }, (_, i) => `<line x1="${520 + i * 32}" y1="520" x2="${520 + i * 32}" y2="700" stroke="#c8c2b6" stroke-width="6"/>`);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PLAN_W} ${PLAN_H}" width="${PLAN_W}" height="${PLAN_H}"><rect width="${PLAN_W}" height="${PLAN_H}" fill="#ffffff"/>`
+    + `<rect x="40" y="40" width="1120" height="720" fill="#faf8f4" stroke="#8a8274" stroke-width="8"/>`
+    + top.map((n, i) => unit(40 + UNIT_W * i, 40, UNIT_W, 290, n)).join('') + low.join('') + steps.join('')
+    + `<text x="1120" y="410" font-size="64" text-anchor="end" fill="#b9b2a5">${floor}</text></svg>`;
+}
 export const STORES = [
   { name: 'Smart Fit Toshkent', city: 'Toshkent', lat: 41.2995, lon: 69.2401, address: 'Amir Temur ko\'chasi, 15', delivery_fee: 25000, free_delivery_threshold: 1000000 },
   { name: 'Smart Fit Samarqand', city: 'Samarqand', lat: 39.6542, lon: 66.9597, address: 'Registon ko\'chasi, 7', delivery_fee: 20000, free_delivery_threshold: 800000 },
@@ -161,12 +180,14 @@ export function stockFor(item, size, storeIdx, sizeCount) {
 const imageName = (storeIdx, sku) => `demo-s${storeIdx + 1}-${sku.toLowerCase()}.svg`;
 
 // Children before parents (SQLite deletes row by row, with foreign keys on).
-const WIPE = ['offer_stats', 'offers', 'fitting_requests', 'payment_transactions', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'categories', 'admins', 'stores', 'organizations', 'malls'];
+const WIPE = ['mall_spots', 'mall_floors', 'offer_stats', 'offers', 'fitting_requests', 'payment_transactions', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'categories', 'admins', 'stores', 'organizations', 'malls'];
 
 // uploadDir: where /uploads is served from. Without it (tests) image_url is still set, but no file is copied.
 export async function seed(db, { uploadDir } = {}) {
   if (process.env.NODE_ENV === 'production') throw new Error('Seed wipes all data; refusing to run in production');
   if (uploadDir) {
+    await mkdir(path.join(uploadDir, 'malls'), { recursive: true });
+    for (const f of Object.keys(PLAN_UNITS)) await writeFile(path.join(uploadDir, 'malls', `demo-plan-${f}.svg`), planSvg(f));
     await mkdir(path.join(uploadDir, 'products'), { recursive: true });
     for (const [storeIdx] of STORES.entries()) {
       for (const p of CATALOGUE.filter((x) => x.stores.includes('TS'[storeIdx]))) await copyFile(path.join(IMAGE_DIR, `${p.sku}.svg`), path.join(uploadDir, 'products', imageName(storeIdx, p.sku)));
@@ -213,6 +234,13 @@ export async function seed(db, { uploadDir } = {}) {
     // Task 43: demo offers so the mall screen shows "Aksiyalar" and the mall kiosk's idle slides: two approved (one opens
     // a coat, one the shop), one waiting for the mall admin. Pictures are the shops' own demo drawings; dates around today.
     const [s1, s2] = await trx('stores').orderBy('id').select('id', 'organization_id', 'mall_id');
+    // Task 44: the demo mall's two floors with their plans, the shops' pins and one mall kiosk.
+    for (const [i, s] of [s1, s2].entries()) {
+      const f = String(i + 1);
+      const [{ id: floorId }] = await trx('mall_floors').insert({ mall_id: mallId, name: f, plan_url: `/uploads/malls/demo-plan-${f}.svg`, plan_w: PLAN_W, plan_h: PLAN_H }).returning('id');
+      await trx('stores').where({ id: s.id }).update({ map_x: DEMO_PINS[i].x, map_y: DEMO_PINS[i].y });
+      if (!i) await trx('mall_spots').insert({ mall_id: mallId, floor_id: floorId, label: 'Eskalator yonida', x: 5000, y: 7500 });
+    }
     const coat = await trx('products').where({ store_id: s1.id, category: 'outerwear', audience: 'adult' }).orderBy('id').first('id', 'image_url');
     const top = await trx('products').where({ store_id: s2.id, category: 'top', audience: 'adult' }).orderBy('id').first('id', 'image_url');
     const day = (d) => new Date(Date.now() + d * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Tashkent' });

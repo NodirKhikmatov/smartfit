@@ -325,6 +325,13 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
     'POST /mall/offers/:id/approve': async () => refused(await admin('POST', `/mall/offers/${B.offer}/approve`, undefined, ownerA)),
     'POST /mall/offers/:id/reject': async () => refused(await admin('POST', `/mall/offers/${B.offer}/reject`, { reason: 'X' }, ownerA)),
     'PATCH /mall/slides': async () => refused(await admin('PATCH', '/mall/slides', { seconds: 10 }, ownerA)),
+    // Task 44: the mall map is the mall admin's.
+    'GET /mall/map': async () => refused(await admin('GET', '/mall/map', undefined, ownerA)),
+    'POST /mall/floors/:id/plan': async () => refused(await admin('POST', '/mall/floors/1/plan', undefined, ownerA, { raw: png, type: 'image/png' })),
+    'DELETE /mall/floors/:id/plan': async () => refused(await admin('DELETE', '/mall/floors/1/plan', undefined, ownerA)),
+    'POST /mall/spots': async () => refused(await admin('POST', '/mall/spots', { floor_id: 1, label: 'X', pin: { x: 1, y: 1 } }, ownerA)),
+    'PATCH /mall/spots/:id': async () => refused(await admin('PATCH', '/mall/spots/1', { label: 'X' }, ownerA)),
+    'DELETE /mall/spots/:id': async () => refused(await admin('DELETE', '/mall/spots/1', undefined, ownerA)),
     'GET /orgs': async () => refused(await admin('GET', '/orgs', undefined, ownerA)),
     'POST /orgs': async () => refused(await admin('POST', '/orgs', { name: 'X', owner_email: 'x2@smartfit.uz' }, ownerA)),
     'GET /demo-requests': async () => refused(await admin('GET', '/demo-requests', undefined, ownerA)),
@@ -420,7 +427,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 33; i > 12; i--) await m.migrate.down(); // 033 … 013
+    for (let i = 34; i > 12; i--) await m.migrate.down(); // 034 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

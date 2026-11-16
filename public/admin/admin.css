@@ -366,3 +366,9 @@ dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }
 .tryon-usage { list-style: none; margin: 0; padding: 0; max-width: 20rem; }
 .tryon-usage li { display: flex; justify-content: space-between; gap: var(--s-4); padding: var(--s-1) 0; border-bottom: 1px solid var(--line); }
 .inst-set h4 { margin: var(--s-4) 0 var(--s-2); font-size: var(--text-sm); }
+
+/* Task 44: the mall admin's pin editor (plan and pins: ui.css). A tap on the plan opens the pin dialog. */
+.plan-edit { cursor: crosshair; margin: var(--s-3) 0; max-width: 60rem; }
+.plan-edit .pin.here { pointer-events: auto; cursor: pointer; }
+.spot-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); }
+.spot-row .qr-url { flex: 1 1 16rem; min-width: 0; overflow-wrap: anywhere; }
