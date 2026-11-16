@@ -547,6 +547,7 @@
               <div class="form-grid">
                 <label class="field"><span data-i18n="field.cashback_percent"></span> <input name="cashback_percent" type="number" min="0" max="20" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.points.percent_hint"></span></label>
                 <label class="field"><span data-i18n="field.points_max_share"></span> <input name="points_max_share" type="number" min="0" max="100" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.points.share_hint"></span></label>
+                <label class="field"><span data-i18n="field.points_expiry"></span> <input name="points_expiry_months" type="number" min="0" max="36" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.points.expiry_hint"></span></label>
               </div>
             </fieldset>
             <p class="error" id="pointsError" role="alert"></p>
@@ -554,10 +555,14 @@
           </form>
           <div class="kpis" id="pointsKpis"></div>
           <h2 class="section-title" data-i18n="adm.points.customers"></h2>
+          <form class="toolbar" id="pointsFilter" role="search">
+            <label class="grow"><span data-i18n="adm.points.search"></span> <input name="q" type="search" maxlength="60" autocomplete="off" data-i18n-placeholder="adm.points.search_ph"></label>
+            <button type="button" class="icon-btn" id="pointsExport" data-i18n-title="adm.export" data-i18n-aria-label="adm.export"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#download"></use></svg></button>
+          </form>
           <div class="table-wrap">
             <table class="table">
               <caption class="visually-hidden" data-i18n="adm.points.customers"></caption>
-              <thead><tr><th data-i18n="adm.points.customer"></th><th class="num" data-i18n="adm.points.balance"></th><th class="num hide-sm" data-i18n="adm.points.earned"></th><th class="num hide-sm" data-i18n="adm.points.spent"></th><th class="hide-sm" data-i18n="adm.points.last"></th></tr></thead>
+              <thead><tr><th data-i18n="adm.points.customer"></th><th class="num" data-i18n="adm.points.balance"></th><th class="num hide-sm" data-i18n="adm.points.earned"></th><th class="num hide-sm" data-i18n="adm.points.spent"></th><th class="hide-sm" data-i18n="adm.points.last"></th><th class="pts-act"><span class="visually-hidden" data-i18n="adm.points.adjust"></span></th></tr></thead>
               <tbody id="pointsRows"></tbody>
             </table>
           </div>
@@ -799,6 +804,22 @@
       <button type="button" id="keyCancel" data-i18n="common.cancel"></button>
       <button class="primary" id="keyCreate" data-i18n="adm.sync.create"></button>
       <button type="button" class="primary" id="keyCopy" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="adm.qr.copy"></span></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="pointsDlg" class="narrow" aria-labelledby="pointsDlgTitle">
+  <form id="pointsAdjForm" method="dialog">
+    <h2 id="pointsDlgTitle" data-i18n="adm.points.adjust_title"></h2>
+    <p class="muted" id="pointsDlgWho"></p>
+    <label class="field"><span data-i18n="adm.points.direction"></span> <select name="sign"><option value="1" data-i18n="adm.points.add"></option><option value="-1" data-i18n="adm.points.remove"></option></select></label>
+    <label class="field"><span data-i18n="field.points_amount"></span> <input name="amount" type="number" min="1" max="10000000" step="1" required inputmode="numeric"></label>
+    <label class="field"><span data-i18n="field.points_reason"></span> <textarea name="reason" required minlength="3" maxlength="200" rows="2"></textarea><span class="hint" data-i18n="adm.points.reason_hint"></span></label>
+    <p class="muted" data-i18n="adm.points.adjust_hint"></p>
+    <p class="error" id="pointsDlgError" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="pointsDlgCancel" data-i18n="common.cancel"></button>
+      <button class="primary" id="pointsDlgSave" data-i18n="adm.form.save"></button>
     </div>
   </form>
 </dialog>

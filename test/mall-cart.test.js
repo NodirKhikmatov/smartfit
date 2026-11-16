@@ -291,7 +291,8 @@ test('migration 028 down and up', async () => {
     await m.migrate.latest();
     await seed(m);
     assert.ok('group_number' in (await m('orders').columnInfo()));
-    await m.migrate.down();
+    await m.migrate.down(); // 029
+    await m.migrate.down(); // 028
     assert.ok(!('group_number' in (await m('orders').columnInfo())));
     assert.ok(!('mall_token' in (await m('carts').columnInfo())));
     assert.ok(!('order_seq' in (await m('malls').columnInfo())));

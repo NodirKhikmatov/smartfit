@@ -356,6 +356,7 @@ test('migration 016: the orders CHECK holds discounts; down folds them in and ke
     await assert.rejects(m('orders').insert({ ...row, total: -20000, promo_discount: 120000 }), 'discounts never above the subtotal');
     const [{ id }] = await m('orders').insert({ ...row, total: 85000, promo_discount: 10000, bundle_discount: 5000 }).returning('id');
     await m('order_items').insert({ order_id: id, product_id: p.id, size: 'M', quantity: 1, unit_price: 100000, discount: 15000 });
+    await m.migrate.down(); // 029
     await m.migrate.down(); // 028
     await m.migrate.down(); // 027
     await m.migrate.down(); // 026

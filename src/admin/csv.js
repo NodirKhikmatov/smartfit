@@ -25,10 +25,11 @@ export function parseCsv(text) {
 
 // Rows → CSV for Excel: UTF-8 BOM, ';' (the list separator of ru/uz Excel), every cell quoted.
 // A cell starting with = + - @ tab or CR would run as a formula when opened, so it gets a leading apostrophe.
+// A number is never a formula, so a negative one stays a number (task 39: a points correction down).
 export function toCsv(rows) {
   const cell = (v) => {
     let s = String(v ?? '');
-    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    if (typeof v !== 'number' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return `"${s.replace(/"/g, '""')}"`;
   };
   return '﻿' + rows.map((r) => r.map(cell).join(';')).join('\r\n') + '\r\n';

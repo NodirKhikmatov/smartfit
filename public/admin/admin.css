@@ -353,3 +353,4 @@ dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }
 .inst-term { display: grid; grid-template-columns: 6rem 1fr; gap: var(--s-3); align-items: end; }
 .inst-term .check { min-height: var(--control-h); }
 .notice.inst { margin: var(--s-3) 0; }
+.pts-act { width: 1%; text-align: end; white-space: nowrap; } /* task 39: the correction button */

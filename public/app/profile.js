@@ -56,8 +56,10 @@ function render() {
     // Task 34: cashback balance and history, only when the organisation has points (or had, and rows are left).
     ...(p.points ? [el('section', { className: 'sum card' }, el('h2', { textContent: t('kiosk.points.title') }),
       row(t('kiosk.points.balance_label'), fmt.som(p.points.balance), 'grand'),
+      ...(p.points.next ? [el('p', { className: 'meta', textContent: t('kiosk.points.next', { date: fmt.date(p.points.next.at), sum: fmt.som(p.points.next.amount) }) })] : []),
       ...(p.points.percent ? [el('p', { className: 'meta', textContent: t('kiosk.points.rule', { pct: p.points.percent }) })] : []),
-      ...(p.points.history.length ? p.points.history.map((h) => row(`${t(`kiosk.points.kind.${h.kind}`)} · № ${h.number} · ${fmt.dateTime(h.created_at)}`,
+      ...(p.points.expiry_months ? [el('p', { className: 'meta', textContent: t('kiosk.points.expiry_rule', { n: p.points.expiry_months }) })] : []),
+      ...(p.points.history.length ? p.points.history.map((h) => row([t(`kiosk.points.kind.${h.kind}`), h.number && `№ ${h.number}`, h.note, fmt.dateTime(h.created_at)].filter(Boolean).join(' · '),
         `${h.amount > 0 ? '+' : '−'}${fmt.som(Math.abs(h.amount))}`, h.amount > 0 ? 'off' : '')) // green = points received
         : [el('p', { className: 'muted', textContent: t('kiosk.points.history_none') })]))] : []),
     el('section', { className: 'sum card' }, el('h2', { textContent: t('kiosk.profile.looks') }),

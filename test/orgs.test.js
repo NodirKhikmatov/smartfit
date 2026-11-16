@@ -82,7 +82,7 @@ async function orgBRecords() {
   await db('organizations').where({ id: orgB }).update({ cashback_percent: 5 });
   const [{ id: profile }] = await db('customer_profiles').insert({ organization_id: orgB, telegram_user_id: 777001, phone: '+998901112233', name: 'Bobur', consent_at: new Date().toISOString() }).returning('id');
   await db('points_ledger').insert({ organization_id: orgB, profile_id: profile, order_id: order.id, kind: 'earn', amount: 5000, ref: `earn:${order.id}` });
-  return { product, order, fitting, invite, key, member, promo };
+  return { product, order, fitting, invite, key, member, promo, profile };
 }
 
 // The isolation walk: every admin route, called by org A's owner against org B's records. A route not listed here
@@ -256,6 +256,21 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       noB(r);
       assert.equal(r.body.outstanding, 0);
     },
+    // Task 39: the CSV of the list and a correction of one customer's balance.
+    'GET /points/export': async () => {
+      refused(await admin('GET', `/points/export?store_id=${b1}`, undefined, ownerA));
+      for (const q of ['', '?q=Bobur', '?q=901112233']) {
+        const r = await admin('GET', `/points/export${q}`, undefined, ownerA);
+        assert.equal(r.status, 200);
+        assert.ok(!String(r.body).includes('Bobur') && !String(r.body).includes('90 111 22 33'), 'no org B customer in the export');
+      }
+      noB(await admin('GET', '/points?q=Bobur', undefined, ownerA));
+    },
+    'POST /points/adjust': async () => {
+      refused(await admin('POST', '/points/adjust', { store_id: b1, profile_id: B.profile, amount: 100, reason: 'Sovg\'a' }, ownerA));
+      refused(await admin('POST', '/points/adjust', { profile_id: B.profile, amount: 100, reason: 'Sovg\'a' }, ownerA)); // own store, org B's customer
+      assert.equal(await db('points_ledger').where({ profile_id: B.profile, kind: 'adjust' }).first(), undefined);
+    },
     'PATCH /points': async () => {
       refused(await admin('PATCH', '/points', { store_id: b1, cashback_percent: 20 }, ownerA));
       const r = await admin('PATCH', '/points', { cashback_percent: 3 }, ownerA);
@@ -370,7 +385,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 28; i > 12; i--) await m.migrate.down(); // 028 … 013
+    for (let i = 29; i > 12; i--) await m.migrate.down(); // 029 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

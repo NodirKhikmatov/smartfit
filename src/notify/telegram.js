@@ -9,6 +9,7 @@ import { fittingView, dayStart, DAY_MS, salesByMode } from '../admin/routes.js';
 import { demandItems, funnelStats } from '../demand.js';
 import { dbTime } from '../recommend/routes.js';
 import { handleProfileMessage } from '../profile.js';
+import { remindExpiring } from '../cart/points.js';
 import { t, productName } from '../../public/shared/i18n.js';
 
 const DONE = ['delivered', 'cancelled']; // nothing more to say after these
@@ -255,7 +256,7 @@ export function startNotifications(db, { telegram = telegramConfig(), sms = smsS
   const api = telegram && telegramApi(telegram.token);
   const send = api && ((chat_id, text, extra) => api('sendMessage', { chat_id, text, ...extra })); // extra: reply_markup
   if (!send && !sms) return console.log('Notifications off: set TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_USERNAME to enable');
-  let busy = false;
+  let busy = false, remindAt = 0;
   const flush = async () => {
     if (busy) return; // a slow round is still sending; never send the same stage twice
     busy = true;
@@ -265,6 +266,10 @@ export function startNotifications(db, { telegram = telegramConfig(), sms = smsS
     await flushStockAlerts(db, send).catch((err) => console.error('stock alert notify failed:', err.message));
     await flushDemoRequests(db, send).catch((err) => console.error('demo request notify failed:', err.message));
     await flushWeeklyReport(db, send).catch((err) => console.error('weekly report failed:', err.message));
+    if (Date.now() >= remindAt) { // task 39: the expiry reminder needs a ledger replay per customer, so every 10 min, not every round
+      remindAt = Date.now() + 10 * 60_000;
+      await remindExpiring(db, send).catch((err) => console.error('points reminder failed:', err.message));
+    }
     busy = false;
   };
   setInterval(flush, everyMs).unref();

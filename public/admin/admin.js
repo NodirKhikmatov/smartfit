@@ -1364,32 +1364,37 @@ function loadSettings() {
 // total customers can still spend and the customers with points (a manager: those from orders of their store).
 const ptf = $('pointsForm');
 const pointsStore = () => scope || String(stores[0]?.id ?? me.store_id ?? '');
+// Task 39: the search (name or phone) narrows the list, the KPIs and the CSV alike.
+const pointsQuery = () => qs({ store_id: pointsStore(), q: $('pointsFilter').q.value.trim() });
 async function loadPoints() {
   const seq = (loads.points = (loads.points || 0) + 1);
   $('pointsError').textContent = '';
   $('pointsFields').disabled = true;
   $('pointsKpis').replaceChildren(...kpiSkeleton(2));
-  const stop = skeletonRows($('pointsRows'), 5, 3);
+  const stop = skeletonRows($('pointsRows'), 6, 3);
   try {
-    const p = await call(`/points?store_id=${encodeURIComponent(pointsStore())}`);
+    const p = await call(`/points?${pointsQuery()}`);
     if (seq !== loads.points) return;
     stateBox($('pointsLoadError'));
     ptf.cashback_percent.value = p.cashback_percent;
     ptf.points_max_share.value = p.points_max_share;
+    ptf.points_expiry_months.value = p.points_expiry_months;
     $('pointsFields').disabled = !p.can_edit;
     $('pointsReadOnly').hidden = p.can_edit;
     $('pointsSave').hidden = !p.can_edit;
     $('pointsKpis').replaceChildren(
       kpi({ label: t('adm.points.outstanding'), value: money(p.outstanding) }),
       kpi({ label: t('adm.points.count'), value: fmt.num(p.count), sub: p.cashback_percent ? t('adm.points.on', { pct: p.cashback_percent }) : t('adm.points.off') }));
-    if (!p.customers.length) emptyRow($('pointsRows'), 5, { ic: 'sparkle', title: t('adm.points.none'), text: t(p.cashback_percent ? 'adm.points.none_text' : 'adm.points.off_text') });
+    if (!p.customers.length && $('pointsFilter').q.value.trim()) emptyRow($('pointsRows'), 6, { ic: 'search', title: t('adm.points.found_none'), text: t('adm.points.found_none_text') });
+    else if (!p.customers.length) emptyRow($('pointsRows'), 6, { ic: 'sparkle', title: t('adm.points.none'), text: t(p.cashback_percent ? 'adm.points.none_text' : 'adm.points.off_text') });
     else {
       $('pointsRows').replaceChildren(...p.customers.map((c) => el('tr', {},
         el('td', {}, el('strong', { textContent: c.name || '—' }), el('div', { className: 'sizes', textContent: c.phone })),
         el('td', { className: 'num', textContent: money(c.balance) }),
         el('td', { className: 'num hide-sm', textContent: money(c.earned) }),
         el('td', { className: 'num hide-sm', textContent: money(c.spent) }),
-        el('td', { className: 'hide-sm', textContent: c.last_at ? fmt.dateTime(c.last_at) : '' }))));
+        el('td', { className: 'hide-sm', textContent: c.last_at ? fmt.dateTime(c.last_at) : '' }),
+        el('td', { className: 'pts-act' }, ...(p.can_edit ? [el('button', { type: 'button', className: 'icon-btn ghost', title: t('adm.points.adjust'), ariaLabel: `${t('adm.points.adjust')}: ${c.name || c.phone}`, onclick: (e) => openAdjust(c, e.currentTarget) }, icon('edit'))] : [])))));
     }
     $('pointsMore').textContent = p.count > p.customers.length ? t('adm.points.more', { n: p.customers.length, total: p.count }) : '';
   } catch (err) {
@@ -1407,7 +1412,7 @@ ptf.onsubmit = async (e) => {
   if (!ptf.reportValidity()) return;
   $('pointsSave').disabled = true;
   try {
-    await call('/points', { method: 'PATCH', body: { store_id: Number(pointsStore()), cashback_percent: Number(ptf.cashback_percent.value), points_max_share: Number(ptf.points_max_share.value) } });
+    await call('/points', { method: 'PATCH', body: { store_id: Number(pointsStore()), cashback_percent: Number(ptf.cashback_percent.value), points_max_share: Number(ptf.points_max_share.value), points_expiry_months: Number(ptf.points_expiry_months.value) } });
     toast(t('adm.points.saved'));
     loadPoints();
   } catch (err) {
@@ -1415,6 +1420,37 @@ ptf.onsubmit = async (e) => {
   } finally {
     $('pointsSave').disabled = false;
   }
+};
+
+let pointsTimer;
+$('pointsFilter').oninput = () => { clearTimeout(pointsTimer); pointsTimer = setTimeout(loadPoints, 300); };
+$('pointsFilter').onsubmit = (e) => { e.preventDefault(); clearTimeout(pointsTimer); loadPoints(); };
+$('pointsExport').onclick = () => download(`/points/export?${pointsQuery()}`, `points-${new Date().toLocaleDateString('sv-SE', { timeZone: TZ })}.csv`);
+
+// Task 39: the owner's correction of one customer's balance (+/− with a reason). The server keeps it at or above zero.
+const paf = $('pointsAdjForm');
+let adjusting = null, adjustFrom = null;
+function openAdjust(c, from) {
+  adjusting = c;
+  adjustFrom = from;
+  paf.reset();
+  $('pointsDlgError').textContent = '';
+  $('pointsDlgWho').textContent = t('adm.points.adjust_for', { name: c.name || c.phone, sum: money(c.balance) });
+  $('pointsDlg').showModal();
+}
+$('pointsDlgCancel').onclick = () => $('pointsDlg').close();
+$('pointsDlg').addEventListener('close', () => adjustFrom?.isConnected && adjustFrom.focus());
+paf.onsubmit = async (e) => {
+  e.preventDefault();
+  $('pointsDlgError').textContent = '';
+  if (!paf.reportValidity()) return;
+  $('pointsDlgSave').disabled = true;
+  try {
+    const r = await call('/points/adjust', { method: 'POST', body: { store_id: Number(pointsStore()), profile_id: adjusting.id, amount: Number(paf.sign.value) * Number(paf.amount.value), reason: paf.reason.value.trim() } });
+    $('pointsDlg').close();
+    toast(t('adm.points.adjust_done', { sum: money(r.balance) }));
+    loadPoints();
+  } catch (err) { $('pointsDlgError').textContent = err.message; } finally { $('pointsDlgSave').disabled = false; }
 };
 
 // Store profile. A super-admin picks the store here (defaults to the sidebar's); everyone else has one.
@@ -1766,7 +1802,7 @@ function auditLines(l) {
 }
 const auditSubject = (l) => (l.entity === 'order' ? t('adm.order.title', { id: l.entity_label }) : l.entity === 'fitting' ? t('adm.fit.cabin', { cabin: l.entity_label }) : l.entity_label || '');
 const af = $('auditFilters');
-for (const e of ['product', 'category', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
+for (const e of ['product', 'category', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'points']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
 af.entity.onchange = af.admin.onchange = af.from.onchange = af.to.onchange = () =>
   setParams({ tab: 'audit', entity: af.entity.value, admin: af.admin.value, from: af.from.value, to: af.to.value });
 af.onsubmit = (e) => e.preventDefault();

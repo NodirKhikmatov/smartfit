@@ -332,6 +332,12 @@ test('every mutating admin route writes an audit row', async () => {
       const g = (await admin('GET', '/points', undefined, ownerToken)).body;
       return admin('PATCH', '/points', { cashback_percent: g.cashback_percent === 5 ? 6 : 5 }, ownerToken);
     }],
+    // Task 39: an owner's correction of a customer's points.
+    'POST /points/adjust': ['points.adjust', async () => {
+      const store = await db('stores').where({ id: tashkent }).first('organization_id');
+      const [{ id }] = await db('customer_profiles').insert({ organization_id: store.organization_id, telegram_user_id: Date.now(), phone: '+998901119999', name: 'Walk', consent_at: new Date().toISOString() }).returning('id');
+      return admin('POST', '/points/adjust', { store_id: tashkent, profile_id: id, amount: 5000, reason: 'Aksiya sovg\'asi' }, ownerToken);
+    }],
     // Task 37: malls (super) and the mall admin's own mall.
     'POST /malls': ['mall.create', () => newMall()],
     'PATCH /malls/:id': ['mall.update', async () => admin('PATCH', `/malls/${(await newMall()).body.id}`, { name: `Yangi ${Date.now()}`, store_ids: [] }, superToken)],

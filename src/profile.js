@@ -12,7 +12,7 @@ import { SIZES, isFit } from './size/size.js';
 import { REC } from './recommend/routes.js';
 import { parseJson, setKey } from './cart/promo.js';
 import { stamp } from './cart/cart.js';
-import { pointsView, balanceOf } from './cart/points.js';
+import { pointsView, balanceOf, nextExpiry } from './cart/points.js';
 import { t, fmt, LANGS, productName } from '../public/shared/i18n.js';
 
 export const SAVE_MS = 10 * 60 * 1000; // time to open Telegram and share the contact
@@ -312,7 +312,8 @@ export async function handleProfileMessage(db, m, send, { now = Date.now(), base
       const v = await profilePoints(db, p, 5);
       if (!v) continue;
       lines.push([`${p.org}: ${t('kiosk.points.balance_line', { sum: fmt.num(v.balance) }, p.lang)}`,
-        ...v.history.map((h) => `${h.amount > 0 ? '+' : '−'}${fmt.num(Math.abs(h.amount))} · ${t(`kiosk.points.kind.${h.kind}`, {}, p.lang)} · №${h.number}`)].join('\n'));
+        ...(v.next ? [t('kiosk.points.next', { date: fmt.date(v.next.at), sum: fmt.som(v.next.amount, p.lang) }, p.lang)] : []),
+        ...v.history.map((h) => [`${h.amount > 0 ? '+' : '−'}${fmt.num(Math.abs(h.amount))}`, t(`kiosk.points.kind.${h.kind}`, {}, p.lang), h.number && `№${h.number}`, h.note].filter(Boolean).join(' · '))].join('\n'));
     }
     await send(chat, lines.length ? lines.join('\n\n') : t('kiosk.bot.no_points', {}, mine[0]?.lang ?? userLang));
     return true;
@@ -333,9 +334,13 @@ export async function handleProfileMessage(db, m, send, { now = Date.now(), base
 
 // Task 34: { percent, balance, history } when this organisation has points on, or the customer still has rows from
 // when it had; null otherwise (the page and the bot then show nothing about points).
+// Task 39: + expiry_months (0 = off) and next: { amount, at } (what expires next and when) or null.
 async function profilePoints(db, p, limit = 20) {
-  const { cashback_percent: percent } = await db('organizations').where({ id: p.organization_id }).first('cashback_percent');
+  const g = await db('organizations').where({ id: p.organization_id }).first('cashback_percent', 'points_expiry_months');
   const v = await pointsView(db, p.id, limit);
-  if (!percent && !v.history.length) return null;
-  return { percent, balance: v.balance, history: v.history.map((h) => ({ ...h, created_at: stamp(h.created_at) })) };
+  if (!g.cashback_percent && !v.history.length) return null;
+  return {
+    percent: g.cashback_percent, expiry_months: g.points_expiry_months, next: await nextExpiry(db, p.id, p.organization_id),
+    balance: v.balance, history: v.history.map((h) => ({ ...h, created_at: stamp(h.created_at) })),
+  };
 }

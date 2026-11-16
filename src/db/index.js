@@ -28,12 +28,13 @@ import * as occasion from './migrations/025_occasion.js';
 import * as points from './migrations/026_points.js';
 import * as instalments from './migrations/027_instalments.js';
 import * as mallCart from './migrations/028_mall_cart.js';
+import * as pointsExpiry from './migrations/029_points_expiry.js';
 
 // Postgres returns bigint (count(*), Telegram chat ids, Payme ms times) as strings; all of ours fit in a double.
 pg.types.setTypeParser(20, Number);
 
 // Migrations are listed in code so they load the same way from any cwd.
-const migrations = { '001_init': init, '002_cart': cart, '003_payments': payments, '004_notify': notify, '005_pilot': pilot, '006_i18n': i18n, '007_catalogue': catalogue, '008_handoff': handoff, '009_team': team, '010_inventory': inventory, '011_hardening': hardening, '012_orgs': orgs, '013_returns': returns, '014_demand': demand, '015_reserve': reserve, '016_promos': promos, '017_profiles': profiles, '018_staff': staff, '019_size_methods': sizeMethods, '020_single_mode': singleMode, '021_stock_alerts': stockAlerts, '022_qr_scans': qrScans, '023_categories': categories, '024_malls': malls, '025_occasion': occasion, '026_points': points, '027_instalments': instalments, '028_mall_cart': mallCart };
+const migrations = { '001_init': init, '002_cart': cart, '003_payments': payments, '004_notify': notify, '005_pilot': pilot, '006_i18n': i18n, '007_catalogue': catalogue, '008_handoff': handoff, '009_team': team, '010_inventory': inventory, '011_hardening': hardening, '012_orgs': orgs, '013_returns': returns, '014_demand': demand, '015_reserve': reserve, '016_promos': promos, '017_profiles': profiles, '018_staff': staff, '019_size_methods': sizeMethods, '020_single_mode': singleMode, '021_stock_alerts': stockAlerts, '022_qr_scans': qrScans, '023_categories': categories, '024_malls': malls, '025_occasion': occasion, '026_points': points, '027_instalments': instalments, '028_mall_cart': mallCart, '029_points_expiry': pointsExpiry };
 const migrationSource = {
   getMigrations: async () => Object.keys(migrations),
   getMigrationName: (name) => name,

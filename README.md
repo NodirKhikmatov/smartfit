@@ -56,6 +56,11 @@ What phase 3 (tasks 23–28, features seen in similar products) added:
   for the goods comes back as points when the order is handed over or delivered; at checkout the customer confirms in
   Telegram and points pay up to a set share of the goods (never delivery). Balance and history on the profile page and
   `/points` in the bot; a per-customer list for the owner and managers. Points stay inside one organisation.
+- **Points expiry and corrections (39):** optional expiry, 1–36 months (Ballar → "Ballar amal qilish muddati"; off
+  by default; points from before it was turned on count from that day). The oldest points are used first; an hourly
+  sweep in the server writes the expired part as an `expire` ledger row, and with the bot on the customer gets one
+  Telegram reminder 7 days before. The owner can add or remove points for one customer with a reason (never below
+  zero; audited). The customer list has a search by name or phone and a CSV export.
 
 Stack: Node.js 22 + Express 5, Knex with PostgreSQL in production (SQLite file in development), vanilla JS frontend,
 Caddy for HTTPS.
@@ -406,6 +411,8 @@ the 2-week pilot.
 - [ ] Cashback points: decide the percent and the share points may pay; tell cashiers that a returned item gives back
       its points share as points (not cash) and takes back the points it earned, and that "delete my data" forfeits
       the balance. Add `/points` to the bot's command list in @BotFather.
+- [ ] Points expiry: decide whether points expire (and after how many months) before turning it on, and tell
+      customers; turning it on later is safe (old points get the full term from that day).
 - [ ] "Muddatli to'lov" (task 35): there is **no Uzum Nasiya / Alif Nasiya API integration** (it needs a merchant
       agreement). Each store that turns it on needs its own Nasiya terminal and contract; enter the terms and markup
       percents the provider really charges (the screens show "~" figures computed from them). Tell cashiers: an order

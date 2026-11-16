@@ -223,7 +223,7 @@ export const RETURN_REASONS = ['too_small', 'too_big', 'disliked', 'defect'];
 const EXPORT_MAX = 10000;
 const LABELS_MAX = 100; // task 32: one print sheet
 // '+998901234567' → '998 90 123 45 67': readable, and Excel keeps it as text (no leading '+', no 12-digit number).
-const phoneText = (p) => String(p ?? '').replace(/^\+?998(\d{2})(\d{3})(\d{2})(\d{2})$/, '998 $1 $2 $3 $4');
+export const phoneText = (p) => String(p ?? '').replace(/^\+?998(\d{2})(\d{3})(\d{2})(\d{2})$/, '998 $1 $2 $3 $4');
 const PRODUCT_SORT = { created: 'p.id', name: 'p.name', price: 'coalesce(p.discount_price, p.price)', stock: 'coalesce(s.free, 0)' };
 // Per product: free units over all sizes, and how many sizes are running out (≤ the store's low_stock_threshold free).
 const stockTotals = (db) => db('product_stock as ps').join('products as pp', 'pp.id', 'ps.product_id').join('stores as st', 'st.id', 'pp.store_id')
