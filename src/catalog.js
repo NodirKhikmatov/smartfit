@@ -17,7 +17,14 @@ const MAX_LIST = 200; // shortcut: one page (category order, newest first); add 
 const SIZE = /^[A-Za-z0-9][A-Za-z0-9./-]{0,9}$/; // any size a shop may use (task 36: its own lists too)
 // Task 36: the category's name comes along for the tiles; products of a hidden category are not shown (visible()).
 export const COLS = ['p.id', 'p.name', 'p.name_ru', 'p.category', 'p.category_id', 'p.sizes', 'c.name as category_name', 'c.name_ru as category_name_ru',
-  'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.image_url'];
+  'p.audience', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.image_url'];
+// Task 40: ?audience=adult|child. None → adults only (the default view), except a shop category picked by id, which
+// is for one audience already. Never a mix: adults don't get children's items, nor the reverse.
+export function audienceOf(v, category = null) {
+  if (v === undefined || v === '') return category && /^\d+$/.test(category) ? null : 'adult';
+  if (v !== 'adult' && v !== 'child') throw fail(400, 'err.invalid', { field: 'field.audience' });
+  return v;
+}
 const free = 'quantity - reserved > 0';
 export const inStock = (db) => db('product_stock as s').whereRaw('s.product_id = p.id').whereRaw(`s.${free}`);
 export const genders = (g) => (g === 'unisex' ? ['male', 'female', 'unisex'] : [g, 'unisex']);
@@ -41,7 +48,7 @@ async function storeById(db, id) {
 export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {}) {
   const r = express.Router();
 
-  // GET /:store?category=&gender=male|female&size=&min=&max= → { items }. Price filters the price the customer pays.
+  // GET /:store?category=&gender=male|female&size=&min=&max=&audience= → { items }. Price filters the price the customer pays.
   // category = one of the shop's category ids (task 36), or a role code (older clients).
   r.get('/:store', async (req, res) => {
     const store = await storeById(db, Number(req.params.store));
@@ -57,11 +64,13 @@ export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {})
     if (gender && !['male', 'female'].includes(gender)) throw fail(400, 'err.invalid', { field: 'field.gender' });
     if (size && !SIZE.test(size)) throw fail(400, 'err.invalid', { field: 'field.size' });
     const min = int(q.min, 'field.price'), max = int(q.max, 'field.price');
+    const audience = audienceOf(q.audience, category);
     const rows = visible(db('products as p')).where('p.store_id', store.id)
       .whereExists(size ? inStock(db).where('s.size', size) : inStock(db))
       .orderByRaw(`c.sort, case p.category ${CATEGORIES.map((c, i) => `when '${c}' then ${i}`).join(' ')} end, p.id desc`).limit(MAX_LIST).select(COLS);
     if (category) /^\d+$/.test(category) ? rows.where('p.category_id', Number(category)) : rows.where('p.category', category);
     if (gender) rows.whereIn('p.gender', genders(gender));
+    if (audience) rows.where('p.audience', audience);
     if (min !== null) rows.whereRaw('coalesce(p.discount_price, p.price) >= ?', [min]);
     if (max !== null) rows.whereRaw('coalesce(p.discount_price, p.price) <= ?', [max]);
     res.json({ items: await withSizes(db, await rows) });
@@ -77,7 +86,7 @@ export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {})
       .first(...COLS, 'p.description', 'p.description_ru', 'p.details', 'p.shelf_location', 'p.fit_offset') : null;
     const [item] = row ? await withSizes(db, [row]) : [];
     if (!item) throw fail(404, 'err.product_not_found');
-    const pool = await visible(db('products as p')).where('p.store_id', store.id).whereNot('p.id', id).whereIn('p.gender', genders(row.gender))
+    const pool = await visible(db('products as p')).where('p.store_id', store.id).whereNot('p.id', id).where('p.audience', row.audience).whereIn('p.gender', genders(row.gender))
       .whereExists(inStock(db)).orderBy('p.id').select(COLS);
     const pairs = pairWith(row, pool).map((p) => p.id);
     const { fit_offset, details, ...rest } = item;

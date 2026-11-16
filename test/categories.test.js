@@ -101,10 +101,11 @@ test('migration 023: every organisation gets the five built-in categories, produ
 test('category CRUD: validation, unique names per organisation, owners manage, managers read, staff nothing', async () => {
   const list = await admin('GET', '/categories');
   assert.equal(list.status, 200);
-  assert.deepEqual(list.body.map((c) => c.role), ['outerwear', 'top', 'bottom', 'shoes', 'accessory']);
+  // Task 40: the demo shop also has one children's category per clothing role (sort 6–9).
+  assert.deepEqual(list.body.map((c) => [c.role, c.audience]), [...['outerwear', 'top', 'bottom', 'shoes', 'accessory'].map((r) => [r, 'adult']), ...['outerwear', 'top', 'bottom', 'shoes'].map((r) => [r, 'child'])]);
   assert.ok(list.body.every((c) => c.organization_id === orgT && c.products > 0));
   const bags = await newCat({ name: 'Sumkalar', name_ru: 'Сумки', size_kind: 'one' });
-  assert.deepEqual([bags.sort, bags.sizes, bags.role, bags.hidden, bags.products], [6, ['ONE'], null, false, 0]);
+  assert.deepEqual([bags.sort, bags.sizes, bags.role, bags.hidden, bags.products], [10, ['ONE'], null, false, 0]);
   for (const [body, code] of [
     [{ name: 'sumkalar', name_ru: 'Другое', size_kind: 'one' }, 'category_taken'], // any case
     [{ name: 'Obuv', name_ru: 'обувь', size_kind: 'one' }, 'category_taken'], // the Russian name of another one
@@ -216,7 +217,7 @@ test('role-less and custom-size categories: never in an outfit, but in the catal
   // The start screen lists the shop's shown categories in its order, with role and photo.
   const store = (await call('GET', `/api/stores/${tashkent}`)).body;
   assert.deepEqual(store.categories.map((c) => [c.id, c.name, c.name_ru, c.role]), cats.filter((c) => !c.hidden).map((c) => [c.id, c.name, c.name_ru, c.role]));
-  assert.deepEqual(store.categories.slice(5).map((c) => [c.name, c.role]), [['Sumkalar', null], ["Ko'ylaklar", 'top'], ['Bolalar kiyimi', null]]);
+  assert.deepEqual(store.categories.filter((c) => c.audience === 'adult').slice(5).map((c) => [c.name, c.role]), [['Sumkalar', null], ["Ko'ylaklar", 'top'], ['Bolalar kiyimi', null]]);
   // Whole outfits at every weather: never a role-less item.
   for (const [temperature, raining] of [[-10, false], [5, false], [15, false], [17, true], [30, false]]) {
     weather = { ...weather, temperature, raining };

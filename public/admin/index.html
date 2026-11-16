@@ -858,14 +858,19 @@
         <option value="" data-i18n="adm.cats.role_none"></option><option value="outerwear" data-i18n="cat.outerwear"></option><option value="top" data-i18n="cat.top"></option>
         <option value="bottom" data-i18n="cat.bottom"></option><option value="shoes" data-i18n="cat.shoes"></option><option value="accessory" data-i18n="cat.accessory"></option>
       </select></label>
+      <label><span data-i18n="field.audience"></span> <select name="audience" aria-describedby="catAudienceHint">
+        <option value="adult" data-i18n="audience.adult"></option><option value="child" data-i18n="audience.child"></option>
+      </select></label>
       <label><span data-i18n="field.size_kind"></span> <select name="size_kind">
         <option value="clothes" data-i18n="adm.cats.kind_clothes"></option><option value="shoes" data-i18n="adm.cats.kind_shoes"></option>
+        <option value="kids" data-i18n="adm.cats.kind_kids"></option><option value="kids_shoes" data-i18n="adm.cats.kind_kids_shoes"></option>
         <option value="one" data-i18n="adm.cats.kind_one"></option><option value="custom" data-i18n="adm.cats.kind_custom"></option>
       </select></label>
       <label id="catSizesWrap" class="span-2"><span data-i18n="field.cat_sizes"></span> <input name="sizes" maxlength="400" autocomplete="off" spellcheck="false" data-i18n-placeholder="adm.cats.sizes_ph" aria-describedby="catSizesHint"></label>
       <label class="check"><input name="hidden" type="checkbox"> <span data-i18n="adm.cats.hide"></span></label>
     </div>
     <p class="hint" id="catRoleHint" data-i18n="adm.cats.role_hint"></p>
+    <p class="hint" id="catAudienceHint" data-i18n="adm.cats.audience_hint"></p>
     <p class="hint" id="catSizesHint"></p>
     <div id="catImgWrap">
       <h3 data-i18n="adm.form.image"></h3>
@@ -895,7 +900,7 @@
       <label><span data-i18n="adm.form.name_ru"></span> <input name="name_ru" lang="ru" maxlength="120"></label>
       <label><span data-i18n="adm.products.category"></span> <select name="category" required></select></label>
       <label><span data-i18n="adm.form.gender"></span> <select name="gender" required>
-        <option value="unisex" data-i18n="gender.unisex"></option><option value="male" data-i18n="gender.male"></option><option value="female" data-i18n="gender.female"></option>
+        <option value="unisex" id="gUnisex" data-i18n="gender.unisex"></option><option value="male" id="gMale" data-i18n="gender.male"></option><option value="female" id="gFemale" data-i18n="gender.female"></option>
       </select></label>
       <label><span data-i18n="adm.form.color"></span> <input name="color" required maxlength="40"></label>
       <label><span data-i18n="adm.form.style"></span> <input name="style" maxlength="40"></label>

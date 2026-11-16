@@ -89,7 +89,7 @@ test('products: sorting by name, effective price and free stock; unknown sort/fi
 
 test('products: low / out / no_image filters, always inside the manager\'s store', async () => {
   const [a, b, c] = await db('products').where({ store_id: tashkent, category: 'bottom' }).orderBy('id').limit(3);
-  const other = await db('products').where({ store_id: samarkand, category: 'bottom' }).first();
+  const other = await db('products').where({ store_id: samarkand, category: 'bottom', audience: 'adult' }).first();
   await db('product_stock').whereIn('product_id', [a.id, other.id]).update({ quantity: 0, reserved: 0 });
   await db('product_stock').where({ product_id: b.id }).update({ quantity: 5, reserved: 0 });
   await db('product_stock').where({ product_id: b.id, size: 'L' }).update({ quantity: 1 });

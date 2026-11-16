@@ -2,12 +2,12 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { testDb } from './helpers/db.js';
 import { createApp } from '../src/app.js';
-import { seed, CATALOGUE } from '../src/db/seed.js';
+import { seed, CATALOGUE, KIDS_CATALOGUE } from '../src/db/seed.js';
 import { createAdmin } from '../src/admin/routes.js';
 import { hashPassword, verifyPassword, signToken, verifyToken, TOKEN_TTL_MS } from '../src/admin/auth.js';
 
 process.env.ADMIN_TOKEN_SECRET = 'test-secret';
-const inStore = (code) => CATALOGUE.filter((p) => p.stores.includes(code)).length;
+const inStore = (code) => CATALOGUE.filter((p) => p.stores.includes(code)).length + KIDS_CATALOGUE.length; // task 40: children's items in both
 const db = testDb();
 let server, base, tashkent, samarkand, superToken, tashToken;
 
@@ -104,10 +104,10 @@ test('store manager cannot read or change another store\'s products', async () =
 
 test('search and category filter', async () => {
   const jinsi = (await api('/products?q=JINSI', { token: tashToken })).body.items;
-  assert.deepEqual(jinsi.map((p) => p.name).sort(), ['Isitilgan jinsi', 'Jinsi kurtka', 'Jinsi shorti', 'Klassik jinsi', 'Premium jinsi', 'Slim jinsi']);
+  assert.deepEqual(jinsi.map((p) => p.name).sort(), ['Bolalar jinsisi', 'Isitilgan jinsi', 'Jinsi kurtka', 'Jinsi shorti', 'Klassik jinsi', 'Premium jinsi', 'Slim jinsi']);
   const shoes = (await api('/products?category=shoes&sort=name', { token: tashToken })).body.items;
   assert.ok(shoes.length > 0 && shoes.every((p) => p.category === 'shoes'));
-  assert.deepEqual(shoes[0].stock.map((s) => s.size), ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45']);
+  assert.deepEqual(shoes.find((p) => p.audience === 'adult').stock.map((s) => s.size), ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45']);
   assert.equal(typeof shoes[0].waterproof, 'boolean');
 });
 
@@ -156,13 +156,13 @@ test('invalid product data is rejected with a message', async () => {
     assert.equal(res.status, 400, JSON.stringify(extra));
     assert.ok(res.body.error && res.body.error !== "Noto'g'ri so'rov", `specific message for ${JSON.stringify(extra)}`);
   }
-  const p = await db('products').where({ store_id: tashkent, category: 'top' }).first();
+  const p = await db('products').where({ store_id: tashkent, category: 'top', audience: 'adult' }).first();
   const res = await api(`/products/${p.id}`, { token: tashToken, method: 'PATCH', body: { category: 'shoes' } });
   assert.equal(res.status, 400, 'size group cannot change');
 });
 
 test('stock cannot drop below reserved, and ordered products cannot be deleted', async () => {
-  const p = await db('products').where({ store_id: tashkent, category: 'accessory' }).first();
+  const p = await db('products').where({ store_id: tashkent, category: 'accessory', audience: 'adult' }).first();
   await db('product_stock').where({ product_id: p.id, size: 'ONE' }).update({ quantity: 5, reserved: 2 });
   const res = await api(`/products/${p.id}`, { token: tashToken, method: 'PATCH', body: { stock: { ONE: 1 } } });
   assert.equal(res.status, 409);

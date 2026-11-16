@@ -56,7 +56,7 @@ test('parseCsv handles quotes, embedded newlines, CRLF, BOM and ; delimiter', ()
 });
 
 test('manager imports new products and updates stock by id', async () => {
-  const existing = await db('products').where({ store_id: tashkent, category: 'shoes' }).first();
+  const existing = await db('products').where({ store_id: tashkent, category: 'shoes', audience: 'adult' }).orderBy('id').first();
   const before = await count({ store_id: tashkent });
   const res = await csv(tashToken, [
     'name,category,gender,color,style,price,discount_price,temp_min,temp_max,waterproof,shelf_location,S,M,L,42,id,,',
@@ -88,7 +88,7 @@ test('manager imports new products and updates stock by id', async () => {
 
 test('bad rows are reported by line and nothing is imported', async () => {
   const other = await db('products').where({ store_id: samarkand }).first();
-  const own = await db('products').where({ store_id: tashkent, category: 'top' }).first();
+  const own = await db('products').where({ store_id: tashkent, category: 'top', audience: 'adult' }).orderBy('id').first();
   const before = await count();
   const ownStock = await db('product_stock').where({ product_id: own.id });
   const header = 'id,store_id,name,category,gender,color,price,discount_price,temp_min,temp_max,waterproof,M,42';

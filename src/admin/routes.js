@@ -4,9 +4,9 @@ import { labelPath, scanStats } from '../labels.js';
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { sizesFor, sizesOf } from '../db/seed.js';
+import { sizesFor, sizesOf, KIDS, KIDS_SHOES } from '../db/seed.js';
 import { builtinRows } from '../db/migrations/023_categories.js';
-import { categoryRoutes, categoryFor, catSizes } from './categories.js';
+import { categoryRoutes, categoryFor, catSizes, productSizes, AUDIENCES } from './categories.js';
 import { parseCsv, toCsv } from './csv.js';
 import { hashPassword, verifyPassword, DUMMY_HASH, tokenSecret, signToken, verifyToken } from './auth.js';
 import { releaseExpired, markPaid, orderView, nextStatuses, changeStatus, stamp } from '../cart/cart.js';
@@ -86,15 +86,21 @@ function validDetails(v) {
 
 // Validates a full product (create, or existing row merged with a partial edit). c = its category (task 36): the role
 // and the sizes come from it; the temperature range is required only for a category with an outfit role (a role-less
-// item without one is worn in any weather).
+// item without one is worn in any weather). Task 40: the audience comes from the category too; a body (API, CSV column)
+// that names one must name the category's, so a children's item can't land in an adult category by mistake.
 function validProduct(b, c) {
+  if (b.audience != null && b.audience !== c.audience) {
+    if (!AUDIENCES.includes(b.audience)) throw fail(400, 'err.invalid', { field: 'field.audience' });
+    throw fail(400, 'err.audience_mismatch', { category: c.name, audience: `audience.${c.audience}` });
+  }
   const anyWeather = !c.role;
   const p = {
     name: text(b.name, 120, 'field.name', true),
     name_ru: text(b.name_ru, 120, 'field.name_ru', false),
     category: c.role ?? null,
     category_id: c.id,
-    sizes: c.role ? null : catSizes(c).join(','),
+    sizes: productSizes(c),
+    audience: c.audience,
     gender: b.gender,
     color: text(b.color, 40, 'field.color', true),
     style: text(b.style, 40, 'field.style', false),
@@ -155,8 +161,8 @@ async function snapProduct(q, id) {
 // CSV import: one row = one product, stock in one column per size. A filled `id` cell, or else a `sku` already in
 // that store, updates that product; other rows create one.
 // Task 36: `category` is the shop's category by name (or an old role code); a shop's own sizes are columns too.
-const PRODUCT_COLS = ['sku', 'barcode', 'name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'shelf_location', 'description', 'description_ru'];
-const SIZE_COLS = [...sizesFor('top'), ...sizesFor('shoes'), ...sizesFor('accessory')];
+const PRODUCT_COLS = ['sku', 'barcode', 'name', 'name_ru', 'category', 'audience', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'shelf_location', 'description', 'description_ru'];
+const SIZE_COLS = [...sizesFor('top'), ...sizesFor('shoes'), ...sizesFor('accessory'), ...KIDS, ...KIDS_SHOES];
 const TEXT_COLS = ['sku', 'barcode', 'name', 'name_ru', 'category', 'color', 'style', 'shelf_location', 'description', 'description_ru'];
 const MAX_IMPORT_ROWS = 2000;
 const YES = ['1', 'true', 'ha', 'yes'], NO = ['0', 'false', "yo'q", 'yoq', 'no'];
@@ -170,7 +176,7 @@ function importCell(col, raw) {
   if (TEXT_COLS.includes(col)) return v;
   if (col === 'waterproof') return YES.includes(v.toLowerCase()) ? true : NO.includes(v.toLowerCase()) ? false : v;
   if (col === 'category') return v;
-  if (col === 'gender') return v.toLowerCase();
+  if (col === 'gender' || col === 'audience') return v.toLowerCase();
   const n = Number(v.replace(/\s/g, ''));
   return Number.isInteger(n) ? n : v;
 }
@@ -406,7 +412,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads' } = {}) {
     // The category named in the edit, else the current one (an old row without category_id: by its role).
     const named = (body.category_id ?? body.category ?? null) !== null;
     const c = await categoryFor(trx, existing.store_id, named ? body : existing.category_id ? existing : { category: existing.category });
-    const product = validProduct({ ...existing, ...body }, c);
+    const product = validProduct({ ...existing, ...body, audience: body.audience }, c); // only a named audience is checked
     // Stock rows are per size; a category with other sizes would orphan them.
     if (sizesOf(product).join() !== sizesOf(existing).join()) throw fail(400, 'err.category_locked');
     const stock = validStock(body.stock, sizesOf(product));

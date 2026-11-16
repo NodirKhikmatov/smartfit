@@ -14,7 +14,7 @@ import { qrSvg, publicBase } from '../qr.js';
 import { stamp } from '../cart/cart.js';
 import { dbTime } from '../recommend/routes.js';
 import { visible } from '../recommend/engine.js';
-import { COLS, inStock, genders, withSizes } from '../catalog.js';
+import { COLS, inStock, genders, withSizes, audienceOf } from '../catalog.js';
 import { ONLINE_MS } from '../kiosk.js';
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -323,12 +323,13 @@ export function createMallRouter(db) {
     res.json({ ...m, shops: shops.map(({ organization_id, ...s }) => ({ ...s, categories: cats.filter((c) => c.store_id === s.id).map(({ store_id, ...c }) => c) })) });
   });
 
-  // ?q=<2–60 characters>&gender=male|female → { items }: in-stock items of the mall's shown shops whose name or
+  // ?q=<2–60 characters>&gender=male|female&audience=adult|child (task 40; none = adults) → { items }: in-stock items of the mall's shown shops whose name or
   // category matches, each with only the sizes that have free stock and its shop (name, floor, unit).
   r.get('/:id/search', async (req, res) => {
     const m = await mallOf(req.params.id);
     const { q = '', gender = '' } = req.query;
     if (typeof q !== 'string' || q.length > 200 || (gender && !['male', 'female'].includes(gender))) throw fail(400, 'err.invalid', { field: 'field.search' });
+    const audience = audienceOf(req.query.audience);
     const term = q.trim();
     if (term.length < 2 || term.length > 60) return res.json({ items: [] });
     // shortcut: SQLite (dev) LIKE ignores case for ASCII only, so a Cyrillic search is case-sensitive there; Postgres ILIKE is fine.
@@ -338,6 +339,7 @@ export function createMallRouter(db) {
       .orderBy([{ column: 'st.name' }, { column: 'p.id', order: 'desc' }]).limit(SEARCH_MAX)
       .select(...COLS, 'p.store_id', 'st.name as store_name', 'st.mall_floor as floor', 'st.mall_unit as unit');
     if (gender) rows.whereIn('p.gender', genders(gender));
+    rows.where('p.audience', audience);
     res.json({ items: await withSizes(db, await rows) });
   });
   return r;

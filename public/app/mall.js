@@ -37,6 +37,7 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
       clearTimeout(timer);
       timer = setTimeout(search, SEARCH_MS);
     };
+    $('mallSearch').onchange = (e) => e.target.name === 'audience' && search(); // task 40: adults' or children's items
     load();
   }
 
@@ -234,7 +235,7 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
     $('mallStatus').textContent = t('kiosk.catalog.loading');
     const done = showAfter(300, () => mine === seq && $('mallResults').replaceChildren(skeletonCard(2), skeletonCard(2), skeletonCard(2)));
     try {
-      const r = await api(`/malls/${mallId}/search?${new URLSearchParams({ q })}`);
+      const r = await api(`/malls/${mallId}/search?${new URLSearchParams({ q, audience: $('mallSearch').elements.audience.value })}`);
       if (mine !== seq) return;
       found = { q, items: r.items };
       drawFound();
@@ -271,7 +272,7 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
     clearTimeout(timer);
     seq++;
     found = null;
-    $('mallQ').value = '';
+    $('mallSearch').reset(); // the query and the adults/children choice
     $('mallStatus').textContent = '';
     $('mallResults').replaceChildren();
     draw();

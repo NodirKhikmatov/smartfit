@@ -17,6 +17,9 @@ export const STORES = [
 const CLOTHES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 const SHOES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
 const ONE = ['ONE'];
+// Task 40: children's clothes by height band (size = the tallest height it fits: 116 = 111–116 cm) and children's shoes.
+export const KIDS = ['92', '98', '104', '110', '116', '122', '128', '134', '140', '146', '152', '158', '164'];
+export const KIDS_SHOES = Array.from({ length: 14 }, (_, i) => String(22 + i));
 
 export const IMAGE_DIR = fileURLToPath(new URL('../../demo/images/', import.meta.url));
 
@@ -111,11 +114,38 @@ const ROWS = [
   ['SF-AC-08', "Quyosh ko'zoynagi", 'Солнцезащитные очки', 'accessory', 'unisex', 'qora', 'casual', 250000, null, 15, 40, false, 'sunglasses', 'TS', "UV400 himoya, klassik shakl."],
 ];
 
+// Task 40: a few children's products per demo store, one children's category per role. Seeded after every adult product
+// and category of both stores, so the adult ids (and the recorded demo answers) stay as they were.
+// [sku, name, name_ru, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, image (an adult SKU's demo picture), description]
+const KID_ROWS = [
+  ['SF-KO-01', 'Bolalar puxovigi', 'Детский пуховик', 'outerwear', 'unisex', 'qizil', 'casual', 590000, 490000, -25, 5, true, 'SF-OW-01', "Issiq, kapyushonli, suv o'tkazmaydi."],
+  ['SF-KO-02', 'Bolalar vetrovkasi', 'Детская ветровка', 'outerwear', 'unisex', "ko'k", 'sport', 290000, null, 3, 22, true, 'SF-OW-10', "Yengil, shamol va yomg'irdan himoya."],
+  ['SF-KT-01', 'Bolalar sviteri', 'Детский свитер', 'top', 'unisex', 'kulrang', 'casual', 190000, null, -25, 12, false, 'SF-TP-01', 'Yumshoq trikotaj, tikanmaydi.'],
+  ['SF-KT-02', 'Bolalar hudisi', 'Детское худи', 'top', 'unisex', "to'q ko'k", 'sport', 160000, null, -10, 20, false, 'SF-TP-02', "Ichi tukli paxta, kapyushonli."],
+  ['SF-KT-03', 'Qizlar bluzkasi', 'Блузка для девочки', 'top', 'female', 'pushti', 'classic', 150000, null, 15, 35, false, 'SF-TP-04', 'Yengil paxta, bayramga ham.'],
+  ['SF-KT-04', 'Bolalar futbolkasi', 'Детская футболка', 'top', 'unisex', 'oq', 'casual', 69000, null, 15, 40, false, 'SF-TP-05', '100% paxta.'],
+  ['SF-KB-01', 'Bolalar isitilgan shimi', 'Детские утеплённые брюки', 'bottom', 'unisex', "to'q ko'k", 'casual', 220000, null, -25, 10, false, 'SF-BT-01', 'Ichi flisli, qishki shim.'],
+  ['SF-KB-02', 'Bolalar jinsisi', 'Детские джинсы', 'bottom', 'unisex', "ko'k", 'casual', 180000, 150000, -10, 28, false, 'SF-BT-02', 'Rezinkali belbog\'li, paxta denim.'],
+  ['SF-KB-03', 'Bolalar shortisi', 'Детские шорты', 'bottom', 'unisex', 'kulrang', 'sport', 89000, null, 20, 40, false, 'SF-BT-05', 'Yengil sport shorti.'],
+  ['SF-KS-01', 'Bolalar qishki etigi', 'Детские зимние сапоги', 'shoes', 'unisex', 'qora', 'casual', 340000, null, -25, 5, true, 'SF-SH-01', "Ichi issiq, suv o'tkazmaydi."],
+  ['SF-KS-02', 'Bolalar krossovkasi', 'Детские кроссовки', 'shoes', 'unisex', 'oq', 'sport', 260000, null, 0, 40, false, 'SF-SH-03', 'Yopishqoq bog\'ichli, yengil.'],
+];
+export const KIDS_CATALOGUE = KID_ROWS.map(([sku, name, name_ru, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, image, description]) =>
+  ({ sku, name, name_ru, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, image, description }));
+// The children's categories every demo shop gets (role → names).
+export const KIDS_CATEGORIES = [
+  { role: 'outerwear', name: 'Bolalar ustki kiyimi', name_ru: 'Детская верхняя одежда' },
+  { role: 'top', name: "Bolalar ko'ylak va futbolkalari", name_ru: 'Детские рубашки и футболки' },
+  { role: 'bottom', name: 'Bolalar shimlari', name_ru: 'Детские брюки' },
+  { role: 'shoes', name: 'Bolalar poyabzali', name_ru: 'Детская обувь' },
+];
+
 const KEYS = ['sku', 'name', 'name_ru', 'category', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'art', 'stores', 'description'];
 export const CATALOGUE = ROWS.map((r) => Object.fromEntries(KEYS.map((k, i) => [k, r[i]])));
 
 export const sizesFor = (category) => (category === 'shoes' ? SHOES : category === 'accessory' ? ONE : CLOTHES);
 // Task 36: a product's sizes. A role-less product keeps its category's list in products.sizes; others go by role.
+// Task 40: a children's role product keeps its list there too (92–164 or 22–35), so this stays the one place.
 export const sizesOf = (p) => (p.sizes ? p.sizes.split(',') : sizesFor(p.category));
 
 // Deterministic stock: middle sizes deepest, most sizes ≥ 2, and about 1 in 17 sizes sold out (exercises the stock > 0 rule).
@@ -140,6 +170,7 @@ export async function seed(db, { uploadDir } = {}) {
     await mkdir(path.join(uploadDir, 'products'), { recursive: true });
     for (const [storeIdx] of STORES.entries()) {
       for (const p of CATALOGUE.filter((x) => x.stores.includes('TS'[storeIdx]))) await copyFile(path.join(IMAGE_DIR, `${p.sku}.svg`), path.join(uploadDir, 'products', imageName(storeIdx, p.sku)));
+      for (const p of KIDS_CATALOGUE) await copyFile(path.join(IMAGE_DIR, `${p.image}.svg`), path.join(uploadDir, 'products', imageName(storeIdx, p.sku)));
     }
   }
   await db.transaction(async (trx) => {
@@ -162,6 +193,21 @@ export async function seed(db, { uploadDir } = {}) {
           .returning('id');
         const sizes = sizesFor(p.category);
         await trx('product_stock').insert(sizes.map((size, s) => ({ product_id: productId, size, quantity: stockFor(i, s, storeIdx, sizes.length) })));
+      }
+    }
+    // Task 40: children's categories and products, after all of the above (see KID_ROWS).
+    for (const [storeIdx, { id: storeId, organization_id: orgId }] of (await trx('stores').orderBy('id').select('id', 'organization_id')).entries()) {
+      const catIds = {};
+      for (const [j, c] of KIDS_CATEGORIES.entries()) {
+        const size_kind = c.role === 'shoes' ? 'kids_shoes' : 'kids';
+        [{ id: catIds[c.role] }] = await trx('categories').insert({ ...c, organization_id: orgId, sort: 6 + j, size_kind, audience: 'child' }).returning('id');
+      }
+      for (const [i, { image, ...p }] of KIDS_CATALOGUE.entries()) {
+        const sizes = p.category === 'shoes' ? KIDS_SHOES : KIDS;
+        const [{ id: productId }] = await trx('products').insert({ ...p, store_id: storeId, category_id: catIds[p.category], sizes: sizes.join(','), audience: 'child',
+          shelf_location: `K-${i + 1}`, image_url: `/uploads/products/${imageName(storeIdx, p.sku)}` }).returning('id');
+        // Every size in stock (2–4), so the child path finds an outfit at any height and temperature.
+        await trx('product_stock').insert(sizes.map((size, s) => ({ product_id: productId, size, quantity: 2 + ((i + s + storeIdx) % 3) })));
       }
     }
   });

@@ -72,7 +72,7 @@ nvm use                      # Node 22 (.nvmrc)
 npm install
 npm run vendor               # pose model for size-from-photo (9 MB, Google's MediaPipe URL, sha256-checked)
 cp .env.example .env         # every variable is optional in development
-npm run seed                 # demo data: 2 stores × ~75 items with demo images (wipes the DB!)
+npm run seed                 # demo data: 2 stores × ~75 items + 11 children's items each, with demo images (wipes the DB!)
 npm run admin:create -- boss@example.uz   # super-admin; asks for the password
 npm start                    # http://localhost:3000/kiosk?store=1  and  /admin
 ```
@@ -205,13 +205,20 @@ The demo seed has one mall, "Demo Savdo Markazi" (id 1), holding both demo store
    new manager, who sets their own password with it.
 3. Set up the shop's categories in `/admin` → "Kategoriyalar" (owner): every organisation starts with the five built-in ones
    (Ustki kiyim, Ko'ylak / futbolka, Shim / yubka, Poyabzal, Aksessuar) and can rename, hide, reorder or add its own
-   ("Sumkalar", "Bolalar kiyimi" with sizes 98–164…). A category's outfit role decides whether its items join whole outfits;
+   ("Sumkalar", "Atirlar" with their own sizes…). A category's outfit role decides whether its items join whole outfits;
    one without a role shows only in the catalogue and as single items. A category with products can be hidden, not deleted.
+   **Children's clothes (task 40):** set a category's "Kimlar uchun" to "Bolalar". With a role, its sizes become the
+   children's ones: clothes by height `92, 98 … 164` (the size is the tallest height it fits), shoes `22…35`; accessories stay
+   one size. Its products are for children: they are offered only on the kiosk's "Bolaga" path (sized by the child's height,
+   no photo, no weight) and in the catalogue / mall search under "Bolalar", never to adults, and adults' items never to a
+   child. Boy / girl / any is the product's gender (male / female / unisex).
    Then add products in `/admin` → "Kiyimlar" (form, or "CSV yuklash" for a whole catalogue), set stock per size, upload
    photos, a description in both languages and up to 10 details ("Mato → 100% paxta").
-   CSV columns (`,` or `;`, UTF-8, header row): `id, sku, barcode, store_id, name, name_ru, category, gender, color, style, price,
+   CSV columns (`,` or `;`, UTF-8, header row): `id, sku, barcode, store_id, name, name_ru, category, audience, gender, color, style, price,
    discount_price, temp_min, temp_max, waterproof, shelf_location, description, description_ru` plus one stock column per size
-   (`XS…XXL`, `36…45`, `ONE` and the shop's own sizes). A filled
+   (`XS…XXL`, `36…45`, `ONE`, the children's `92…164` and `22…35`, and the shop's own sizes). `audience` (`adult` / `child`) is
+   optional: the category decides it, and a filled cell that doesn't match the category is a row error (older files without
+   the column import as before). A filled
    `id` updates that product; else a `sku` that already exists in the row's store updates that product; else a new one is
    created. SKUs are unique per store (letters, digits, `. _ - /`, up to 40). `category` is the shop's category by name (Uzbek or
    Russian, any case; the old codes `outerwear/top/…` still work); an unknown name lists the shop's categories. Genders

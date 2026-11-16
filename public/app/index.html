@@ -46,6 +46,15 @@
   <section data-screen="form" hidden>
     <h1 tabindex="-1" data-i18n="kiosk.form.title"></h1>
     <form id="form" novalidate class="form-grid">
+      <!-- Task 40: "Bolaga" sizes a child by height. No photo step for a child, ever. -->
+      <fieldset class="span who" aria-describedby="whoHint">
+        <legend data-i18n="kiosk.who.title"></legend>
+        <div class="chips two" id="whoChips">
+          <label><input type="radio" name="audience" value="adult" checked><span data-i18n="kiosk.who.adult"></span></label>
+          <label><input type="radio" name="audience" value="child"><span data-i18n="kiosk.who.child"></span></label>
+        </div>
+        <p class="hint" id="whoHint" hidden data-i18n="kiosk.who.child_hint"></p>
+      </fieldset>
       <fieldset class="span want" aria-describedby="wantHint">
         <legend data-i18n="kiosk.want.title"></legend>
         <div class="chips want-chips" id="wantChips"></div>
@@ -66,8 +75,8 @@
       <fieldset class="span" aria-describedby="genderErr">
         <legend data-i18n="kiosk.form.gender"></legend>
         <div class="chips two">
-          <label><input type="radio" name="gender" value="male"><span data-i18n="gender.male"></span></label>
-          <label><input type="radio" name="gender" value="female"><span data-i18n="gender.female"></span></label>
+          <label><input type="radio" name="gender" value="male"><span id="genderMale" data-i18n="gender.male"></span></label>
+          <label><input type="radio" name="gender" value="female"><span id="genderFemale" data-i18n="gender.female"></span></label>
         </div>
         <p class="field-error" id="genderErr"></p>
       </fieldset>
@@ -81,6 +90,17 @@
         <input name="weight" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" aria-describedby="weightHint weightErr">
         <span class="hint" id="weightHint" data-i18n="kiosk.form.weight_hint"></span>
         <span class="field-error" id="weightErr"></span>
+      </label>
+      <label class="field need-off" data-need="kid">
+        <span data-i18n="kiosk.child.height"></span>
+        <input name="kidHeight" inputmode="numeric" autocomplete="off" maxlength="3" data-keys="digits" data-i18n-placeholder="kiosk.child.height_ph" aria-describedby="kidHeightHint kidHeightErr">
+        <span class="hint" id="kidHeightHint" data-i18n="kiosk.child.height_hint"></span>
+        <span class="field-error" id="kidHeightErr"></span>
+      </label>
+      <label class="field need-off" data-need="kid">
+        <span><span data-i18n="kiosk.child.age"></span> <span class="hint" data-i18n="kiosk.form.optional"></span></span>
+        <input name="kidAge" inputmode="numeric" autocomplete="off" maxlength="2" data-keys="digits" aria-describedby="kidAgeHint">
+        <span class="hint" id="kidAgeHint" aria-live="polite"></span>
       </label>
       <fieldset class="span" data-need="shoes">
         <legend><span data-i18n="kiosk.form.shoes"></span> <span class="hint" data-i18n="kiosk.form.optional"></span></legend>
@@ -197,6 +217,11 @@
       <div class="mall-search-row">
         <input id="mallQ" name="q" type="search" maxlength="60" autocomplete="off" enterkeyhint="search" data-i18n-placeholder="kiosk.mall.search_ph">
         <button class="primary" type="submit"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#search"></use></svg><span data-i18n="kiosk.mall.search_go"></span></button>
+      </div>
+      <!-- Task 40: adults' items by default; children's only when asked -->
+      <div class="chips two" role="group" data-i18n-aria-label="kiosk.who.title">
+        <label><input type="radio" name="audience" value="adult" checked><span data-i18n="audience.adult"></span></label>
+        <label><input type="radio" name="audience" value="child"><span data-i18n="audience.child"></span></label>
       </div>
     </form>
     <p class="meta" id="mallStatus" role="status"></p>

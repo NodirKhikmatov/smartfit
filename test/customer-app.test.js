@@ -87,7 +87,8 @@ test('GET /api/stores/:id gives the start screen its store name, weather and in-
   assert.equal(r.status, 200);
   const { looks, categories, ...rest } = JSON.parse(r.text);
   assert.deepEqual(rest, { id: tashkent, name: 'Smart Fit Toshkent', city: 'Toshkent', weather, profile: false }); // no bot → no profile (task 27)
-  assert.deepEqual(categories.map((c) => c.role), ['outerwear', 'top', 'bottom', 'shoes', 'accessory'], 'task 36: the shop\'s categories in order');
+  assert.deepEqual(categories.map((c) => c.role), ['outerwear', 'top', 'bottom', 'shoes', 'accessory', 'outerwear', 'top', 'bottom', 'shoes'], 'task 36: the shop\'s categories in order');
+  assert.deepEqual(categories.map((c) => c.audience), [...Array(5).fill('adult'), ...Array(4).fill('child')], 'task 40: then the children\'s ones');
   assert.deepEqual(looks.map((l) => l.category), ['outerwear', 'top', 'bottom', 'shoes'], 'one photo per main category');
   for (const l of looks) {
     const p = await db('products').where({ store_id: tashkent, image_url: l.image_url }).first();

@@ -151,7 +151,7 @@ test('offset rule: at least 5 answers, a clear majority, the owner override wins
 });
 
 test('the engine offers a size up for a product that runs small, never a sold-out size, and the card gets the hint', async () => {
-  const p = await db('products').where({ store_id: store, category: 'top' }).whereIn('gender', ['male', 'unisex']).where('temp_min', '<=', 15).where('temp_max', '>=', 15).orderBy('id', 'desc').first();
+  const p = await db('products').where({ store_id: store, category: 'top', audience: 'adult' }).whereIn('gender', ['male', 'unisex']).where('temp_min', '<=', 15).where('temp_max', '>=', 15).orderBy('id', 'desc').first();
   await db('product_stock').where({ product_id: p.id }).update({ quantity: 3, reserved: 0 });
   const find = async (top) => (await filterCandidates(db, { storeId: store, gender: 'male', sizes: { top, bottom: 'M' }, temperature: 15 })).find((c) => c.id === p.id);
   assert.equal((await find('M')).size, 'M', 'no answers yet: own size');

@@ -1,6 +1,6 @@
 import express from 'express';
 import { randomBytes } from 'node:crypto';
-import { sizesFor, sizesOf } from '../db/seed.js';
+import { sizesFor, sizesOf, KIDS, KIDS_SHOES } from '../db/seed.js';
 import { fail, langOf } from '../admin/routes.js';
 import { filterCandidates, ruleOutfits, ruleSingles, missedItems, swapOptions, SPREADS, ORDER, OCCASIONS, sizeKey, visible } from './engine.js';
 import { logMissed } from '../demand.js';
@@ -23,13 +23,14 @@ const pick = (v, allowed, label, required) => {
 // already has, from fixed lists, for single items only. → { want: [..] | null, own: [{ category, color, style }] }.
 // Task 36: a want entry is a role code or the id of one of the store's shown categories (cats); role codes first in
 // the engine's order, then ids in the shop's category order.
-function parseWant(b, cats) {
+function parseWant(b, cats, audience) {
   if (b.want === undefined || b.want === null) {
     if (b.own !== undefined && b.own !== null) throw fail(400, 'err.invalid', { field: 'field.own' });
     return { want: null, own: [] };
   }
   const w = b.want;
-  const known = (c) => ORDER.includes(c) || (Number.isInteger(c) && cats.some((x) => x.id === c));
+  // Task 40: a category id must be for the request's audience (a child's request never names an adult category).
+  const known = (c) => ORDER.includes(c) || (Number.isInteger(c) && cats.some((x) => x.id === c && x.audience === audience));
   if (!Array.isArray(w) || !w.length || w.length > 20 || !w.every(known) || new Set(w).size !== w.length) throw fail(400, 'err.invalid', { field: 'field.want' });
   const o = b.own ?? [];
   const ok = (x) => x && typeof x === 'object' && ORDER.includes(x.category) && COLORS.includes(x.color) && (x.style == null || STYLES.includes(x.style));
@@ -39,21 +40,26 @@ function parseWant(b, cats) {
 
 // The store's categories a customer can pick (not hidden), in the shop's order. Task 36.
 export const shownCategories = (db, storeId) => db('categories as c').join('stores as st', 'st.organization_id', 'c.organization_id')
-  .where('st.id', storeId).where('c.hidden', false).orderBy(['c.sort', 'c.id']).select('c.id', 'c.name', 'c.name_ru', 'c.role', 'c.image_url', 'c.size_kind', 'c.sizes');
+  .where('st.id', storeId).where('c.hidden', false).orderBy(['c.sort', 'c.id']).select('c.id', 'c.name', 'c.name_ru', 'c.role', 'c.audience', 'c.image_url', 'c.size_kind', 'c.sizes');
 const catsFor = (db, b) => (Array.isArray(b.want) && b.want.some(Number.isInteger) && Number.isInteger(b.store_id) && b.store_id > 0 ? shownCategories(db, b.store_id) : []);
 
 // The customer part of a /recommend body: store, gender, sizes, budget and (task 30) want/own. A single-item request
 // needs only the sizes of the wanted categories (top for outerwear/top, bottom for bottom; shoes stay optional).
+// Task 40: audience 'child' (absent = 'adult', as before): sizes are the children's height sizes (92–164) and shoe
+// sizes (22–35); gender male / female is the boy / girl choice.
 function parseRequest(b, cats = []) {
   if (!Number.isInteger(b.store_id) || b.store_id < 1) throw fail(400, 'err.invalid', { field: 'field.store' });
   if (!['male', 'female'].includes(b.gender)) throw fail(400, 'err.invalid', { field: 'field.gender' });
-  const { want, own } = parseWant(b, cats);
+  const audience = b.audience ?? 'adult';
+  if (audience !== 'adult' && audience !== 'child') throw fail(400, 'err.invalid', { field: 'field.audience' });
+  const child = audience === 'child';
+  const { want, own } = parseWant(b, cats, audience);
   const role = (c) => (Number.isInteger(c) ? cats.find((x) => x.id === c).role : c);
   const needs = (key) => !want || want.some((c) => sizeKey[role(c)] === key);
   const sizes = {
-    top: pick(b.sizes?.top, sizesFor('top'), 'field.top_size', needs('top')),
-    bottom: pick(b.sizes?.bottom, sizesFor('bottom'), 'field.bottom_size', needs('bottom')),
-    shoes: pick(b.sizes?.shoes, sizesFor('shoes'), 'field.shoe_size', false),
+    top: pick(b.sizes?.top, child ? KIDS : sizesFor('top'), 'field.top_size', needs('top')),
+    bottom: pick(b.sizes?.bottom, child ? KIDS : sizesFor('bottom'), 'field.bottom_size', needs('bottom')),
+    shoes: pick(b.sizes?.shoes, child ? KIDS_SHOES : sizesFor('shoes'), 'field.shoe_size', false),
   };
   const budget = b.budget === undefined || b.budget === null || b.budget === 0 ? null : b.budget;
   if (budget !== null && (!Number.isInteger(budget) || budget < 1 || budget > 1e9)) throw fail(400, 'err.invalid', { field: 'field.budget' });
@@ -64,7 +70,7 @@ function parseRequest(b, cats = []) {
   // Task 33: where it will be worn, from the fixed list (own property only: "constructor" is not an occasion).
   const occasion = b.occasion ?? null;
   if (occasion !== null && (typeof occasion !== 'string' || !Object.hasOwn(OCCASIONS, occasion))) throw fail(400, 'err.invalid', { field: 'field.occasion' });
-  return { sizes, budget, fit, method, want, own, occasion };
+  return { sizes, budget, fit, method, want, own, occasion, audience };
 }
 
 // shortcut: in-memory per-IP cap on paid Claude calls (over it → rules, never an error); one process only.
@@ -96,23 +102,27 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
   r.post('/', async (req, res) => {
     const b = req.body ?? {};
     const cats = await catsFor(db, b);
-    const { sizes, budget, fit, method, want, own, occasion } = parseRequest(b, cats);
-    const photo = parsePhoto(b.photo); // memory only: goes to Claude for this request, never stored or logged
+    const { sizes, budget, fit, method, want, own, occasion, audience } = parseRequest(b, cats);
+    // memory only: goes to Claude for this request, never stored or logged. Task 40: never a child's photo (the app
+    // has no photo step for a child; one sent anyway is dropped here).
+    const photo = audience === 'child' ? null : parsePhoto(b.photo);
 
     const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon', 'bundle_percent');
     if (!store) throw fail(404, 'err.store_not_found');
     const w = await weather(store);
     const ctx = { temperature: w.temperature, raining: w.raining, budget, occasion };
-    const load = (spread) => filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread, fit });
+    const load = (spread) => filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread, fit, audience });
     const mode = want ? 'single' : 'outfit';
-    if (want) return single(req, res, { b, store, w, sizes, budget, method, fit, want, own, occasion, photo, load, cats });
+    // `audience` is in the answer only for a child, so an adult request gets exactly the answer it got before task 40.
+    const kid = audience === 'child' ? { audience } : {};
+    if (want) return single(req, res, { b, store, w, sizes, budget, method, fit, want, own, occasion, photo, load, cats, audience, kid });
     const { candidates, ...rules } = await ruleOutfits(load, ctx);
     let result = { ...rules, style_guess: null, source: 'rules' };
     // No rule outfit means a required category is empty, so Claude could not build one either. Without outerwear
     // (notice) applyStylist rejects every AI outfit, so the rules answer stands. Claude sees the relaxed candidates.
     if (stylist && result.outfits.length && !result.notice && allowAi(req.ip)) {
       try {
-        const answer = await withDeadline((signal) => stylist({ photo, weather: w, sizes, budget, occasion, candidates, lang: langOf(req) }, signal), stylistTimeoutMs);
+        const answer = await withDeadline((signal) => stylist({ photo, weather: w, sizes, budget, occasion, audience, candidates, lang: langOf(req) }, signal), stylistTimeoutMs);
         const ai = applyStylist(answer, candidates, ctx);
         if (ai) result = { ...result, ...ai, partial: null, source: 'ai' };
         else console.warn('stylist: no valid outfit, using rules');
@@ -122,23 +132,23 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     }
     const { outfits, over_budget, partial, relaxed, notice, style_guess, source } = result;
 
-    const rec = await logResults({ b, store, w, sizes, budget, method, fit, occasion, source, mode,
+    const rec = await logResults({ b, store, w, sizes, budget, method, fit, occasion, audience, source, mode,
       shown: [...outfits, ...(partial ? [partial] : [])].flatMap((o) => o.items),
       // Task 26: the whole outfits shown (and their cheaper variants), so the cart can trust an "outfit" for the bundle discount.
       outfits: outfits.flatMap((o) => [o, ...(o.alternative ? [o.alternative] : [])]).map((o) => o.items.map((i) => i.id)) });
     // `occasion` only when one was asked for: a request without it gets exactly the answer it got before task 33.
-    res.json({ mode, weather: w, budget, over_budget, partial, relaxed, notice, source, style_guess, outfits, rec, bundle_percent: store.bundle_percent, ...(occasion && { occasion }) });
+    res.json({ mode, weather: w, budget, over_budget, partial, relaxed, notice, source, style_guess, outfits, rec, bundle_percent: store.bundle_percent, ...(occasion && { occasion }), ...kid });
   });
 
   // Task 30, single items: rule picks per wanted category; Claude (when there) only re-orders the items the rules chose.
-  async function single(req, res, { b, store, w, sizes, budget, method, fit, want, own, occasion, photo, load, cats }) {
+  async function single(req, res, { b, store, w, sizes, budget, method, fit, want, own, occasion, photo, load, cats, audience, kid }) {
     const ctx = { temperature: w.temperature, raining: w.raining, budget, want, own, occasion };
     let { groups, relaxed } = await ruleSingles(load, ctx);
     let style_guess = null, source = 'rules';
     const shownItems = () => groups.flatMap((g) => g.items);
     if (stylist && shownItems().length && allowAi(req.ip)) {
       try {
-        const answer = await withDeadline((signal) => stylist({ mode: 'single', photo, weather: w, sizes, budget, own, occasion,
+        const answer = await withDeadline((signal) => stylist({ mode: 'single', photo, weather: w, sizes, budget, own, occasion, audience,
           want: want.map((c) => (Number.isInteger(c) ? cats.find((x) => x.id === c).name : c)), candidates: shownItems(), lang: langOf(req) }, signal), stylistTimeoutMs);
         const ai = applyRanking(answer, groups);
         if (ai) {
@@ -150,13 +160,13 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       }
     }
     // outfits: [] — no whole outfit was shown, so the task 26 bundle discount can never apply to these items.
-    const rec = await logResults({ b, store, w, sizes, budget, method, fit, want, occasion, source, mode: 'single', shown: shownItems(), outfits: [] });
-    res.json({ mode: 'single', weather: w, budget, relaxed, source, style_guess, groups, outfits: [], over_budget: 0, partial: null, notice: null, rec, bundle_percent: 0, ...(occasion && { occasion }) });
+    const rec = await logResults({ b, store, w, sizes, budget, method, fit, want, occasion, audience, source, mode: 'single', shown: shownItems(), outfits: [] });
+    res.json({ mode: 'single', weather: w, budget, relaxed, source, style_guess, groups, outfits: [], over_budget: 0, partial: null, notice: null, rec, bundle_percent: 0, ...(occasion && { occasion }), ...kid });
   }
 
   // One recommendation_logs row per results screen (stats need product_ids as a JSON int array; no photo or body data),
   // then the task 24 missed demand under its rec. → rec.
-  async function logResults({ b, store, w, sizes, budget, method, fit, want = null, occasion = null, source, mode, shown, outfits }) {
+  async function logResults({ b, store, w, sizes, budget, method, fit, want = null, occasion = null, audience = 'adult', source, mode, shown, outfits }) {
     const log = {
       temperature: w.temperature,
       raining: w.raining,
@@ -177,7 +187,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
       await db('recommendation_logs').insert({ ...log, store_id: store.id, token: rec });
     }
     // Task 24: what this customer wanted but the shelf has none of, once per results screen (rec). Never fails the answer.
-    await missedItems(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, fit, want })
+    await missedItems(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, fit, want, audience })
       .then((items) => logMissed(db, { storeId: store.id, session: rec, items, source: 'recommend', mode }))
       .catch((err) => console.error('missed demand not logged:', err.message));
     return rec;
@@ -188,7 +198,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
   // same in-stock candidates (customer's sizes, the answer's temperature window). With `rec`, the options are kept for the bundle rule.
   r.post('/swap', async (req, res) => {
     const b = req.body ?? {};
-    const { sizes, budget, fit, occasion } = parseRequest(b, await catsFor(db, b));
+    const { sizes, budget, fit, occasion, audience } = parseRequest(b, await catsFor(db, b));
     const ids = (v, max) => {
       if (!Array.isArray(v) || v.length > max || !v.every((x) => Number.isInteger(x) && x > 0) || new Set(v).size !== v.length) throw fail(400, 'err.invalid', { field: 'field.items' });
       return v;
@@ -201,7 +211,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     // Nothing in the outfit's window → widen it like the outfits do (R1: ±3, then ±6 °C); in-window items still rank first.
     let options = [];
     for (const spread of SPREADS.filter((x) => x >= (SPREADS.includes(b.relaxed) ? b.relaxed : 0))) {
-      const candidates = await filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread, fit });
+      const candidates = await filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread, fit, audience });
       const byId = new Map(candidates.map((p) => [p.id, p]));
       const items = outfit.map((id) => byId.get(id));
       if (items.some((p) => !p)) throw fail(409, 'err.outfit_stale'); // sold out or resized since the outfit was shown
@@ -275,7 +285,7 @@ export function createStoreRouter(db, { weather, profiles = false }) {
     if (!store) throw fail(404, 'err.store_not_found');
     const w = await weather(store);
     const rows = await visible(db('products as p'))
-      .where('p.store_id', id).whereIn('p.category', LOOK).whereNotNull('p.image_url')
+      .where('p.store_id', id).where('p.audience', 'adult').whereIn('p.category', LOOK).whereNotNull('p.image_url')
       .whereRaw('p.temp_min <= cast(? as real) and p.temp_max >= cast(? as real)', [w.temperature, w.temperature])
       .whereExists(db('product_stock as s').whereRaw('s.product_id = p.id').whereRaw('s.quantity - s.reserved > 0'))
       .orderBy('p.id').select('p.category', 'p.image_url');

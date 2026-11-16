@@ -2,7 +2,7 @@ import { watchIdle } from './idle.js';
 import { loadPose, measure, framing, framingHint } from './pose.js';
 import { keypad } from './keypad.js';
 import { kioskShell, attract, kioskDevice, randomId } from './kiosk.js';
-import { CLOTHES, SHOES, JEANS, WANT, nextError, fieldError, toRequest, sizeNeeds, sizesReady, cleanWant, setCategories, categoryRoles, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
+import { CLOTHES, SHOES, KIDS, KIDS_SHOES, ageHint, JEANS, WANT, nextError, fieldError, toRequest, sizeNeeds, sizesReady, cleanWant, setCategories, categoryRoles, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
 import { mallScreen } from './mall.js';
 import { icon, confirmDialog, showAfter, skeletonCard, toast } from '/shared/ui.js';
 import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName, COLORS, STYLES } from '/shared/i18n.js';
@@ -27,7 +27,11 @@ const catName = (c) => (getLang() === 'ru' && c.name_ru) || c.name;
 const catOf = (p) => (p.category_name ? (getLang() === 'ru' && p.category_name_ru) || p.category_name : cat(p.category)); // a product's
 const wantName = (w) => (Number.isInteger(w) ? catName(shownCats().find((c) => c.id === w) ?? { name: '' }) : cat(w)); // a want entry
 // The sizes a category comes in: by its kind (clothes, shoes, one size) or the shop's own list.
-const catSizes = (c) => (c.size_kind === 'custom' ? String(c.sizes ?? '').split(',').filter(Boolean) : c.size_kind === 'shoes' ? SHOES : c.size_kind === 'one' ? [] : CLOTHES);
+const KIND_SIZES = { shoes: SHOES, one: [], kids: KIDS, kids_shoes: KIDS_SHOES };
+const catSizes = (c) => (c.size_kind === 'custom' ? String(c.sizes ?? '').split(',').filter(Boolean) : KIND_SIZES[c.size_kind] ?? CLOTHES);
+// Task 40: a category is for adults or children; the form, the "Nima kerak?" chips and the catalogue show one audience.
+const forAudience = (a) => shownCats().filter((c) => (c.audience ?? 'adult') === a);
+const formAudience = () => (form.audience.value === 'child' ? 'child' : 'adult');
 const form = $('form');
 
 // Server cart (task 8): each item holds its stock for 15 min. The phone keeps the token across reloads; the kiosk never stores it.
@@ -56,13 +60,22 @@ let store = null;
 let lastOrder = null; // the done screen's order, in memory only
 let holdTimer = null, holdDeadline = 0; // cart hold countdown (cart screen)
 
-// Shoe size chips (U11: chips, not a <select>) and budget shortcuts.
-$('shoeChips').append(...SHOES.map((s) => el('label', {}, el('input', { type: 'radio', name: 'shoes', value: s }), el('span', { textContent: s }))));
+// Shoe size chips (U11: chips, not a <select>) and budget shortcuts. Task 40: children's shoe sizes for a child.
+function shoeChips() {
+  const list = formAudience() === 'child' ? KIDS_SHOES : SHOES;
+  const now = form.shoes.value;
+  $('shoeChips').replaceChildren($('shoeChips').firstElementChild, ...list.map((s) => el('label', {}, el('input', { type: 'radio', name: 'shoes', value: s, checked: s === now }), el('span', { textContent: s }))));
+  if (!list.includes(now)) form.shoes.value = '';
+}
+shoeChips();
 // Task 30, "Nima kerak?": a whole outfit (the default) or one or more categories as single items. Picking "To'liq obraz"
 // clears the categories, picking a category clears it, and with nothing picked it comes back.
 // Task 36: the chips are the store's own shown categories (by id), drawn when the store loads; a ticked one stays ticked.
 function renderWantChips(want = formWant()) {
-  $('wantChips').replaceChildren(...[['outfit', t('kiosk.want.outfit')], ...shownCats().map((c) => [String(c.id), catName(c)])].map(([v, text]) =>
+  const cats = forAudience(formAudience());
+  const kept = want?.filter((w) => cats.some((c) => c.id === w)); // task 40: a switch of audience drops the other one's picks
+  want = kept?.length ? kept : null;
+  $('wantChips').replaceChildren(...[['outfit', t('kiosk.want.outfit')], ...cats.map((c) => [String(c.id), catName(c)])].map(([v, text]) =>
     el('label', {}, el('input', { type: 'checkbox', name: 'want', value: v, checked: want ? want.includes(Number(v)) : v === 'outfit' }), el('span', { textContent: text }))));
   applyNeeds();
 }
@@ -77,12 +90,30 @@ $('wantChips').addEventListener('change', (e) => {
 });
 renderWantChips(null);
 // Only the inputs the choice needs show (form: height/weight for the size step, shoe sizes; size step: top or bottom parts).
+// Task 40: for a child, the child's height (and age as a hint) instead of height/weight, boy / girl, children's shoes.
 function applyNeeds() {
-  const n = sizeNeeds(formWant());
+  const child = formAudience() === 'child';
+  const n = sizeNeeds(formWant(), formAudience());
   for (const x of document.querySelectorAll('[data-need]')) x.classList.toggle('need-off', !n[x.dataset.need]);
   if (!n.photo) for (const f of ['height', 'weight']) showError(f, '');
+  if (!n.kid) showError('kidHeight', '');
+  $('whoHint').hidden = !child;
+  for (const [id, adult, kid] of [['genderMale', 'gender.male', 'kiosk.child.boy'], ['genderFemale', 'gender.female', 'kiosk.child.girl']]) {
+    $(id).dataset.i18n = child ? kid : adult;
+    $(id).textContent = t($(id).dataset.i18n);
+  }
+  const h = ageHint(form.kidAge.value);
+  $('kidAgeHint').textContent = h ? t('kiosk.child.age_typical', { h }) : t('kiosk.child.age_hint');
 }
-const formFields = () => (sizeNeeds(formWant()).photo ? FORM_FIELDS : FORM_FIELDS.filter((f) => f !== 'height' && f !== 'weight'));
+const formFields = () => {
+  const n = sizeNeeds(formWant(), formAudience());
+  return FORM_FIELDS.filter((f) => (f !== 'height' && f !== 'weight') || n.photo).filter((f) => f !== 'kidHeight' || n.kid);
+};
+form.kidAge.addEventListener('input', applyNeeds);
+$('whoChips').addEventListener('change', () => {
+  shoeChips();
+  renderWantChips();
+});
 
 const BUDGETS = [500_000, 1_000_000, 2_000_000];
 function budgetChips() {
@@ -113,7 +144,8 @@ const switcher = langSwitch(() => {
 $('langBox').replaceChildren(switcher);
 
 // History routing (U2): one entry per screen, so the phone's back button steps back inside the app.
-const formValues = () => ({ gender: form.gender.value, height: form.height.value, weight: form.weight.value, shoes: form.shoes.value, budget: form.budget.value, want: formWant(), occasion: form.occasion.value });
+const formValues = () => ({ gender: form.gender.value, height: form.height.value, weight: form.weight.value, shoes: form.shoes.value, budget: form.budget.value, want: formWant(), occasion: form.occasion.value,
+  audience: formAudience(), kidHeight: form.kidHeight.value });
 const appState = () => ({ formOk: !!request, sizesOk: !!request && sizesReady(request.sizes, request.want), orderOk: !!lastOrder });
 const remember = () => saveRoute({ screen: current, form: formValues(), sizes: request?.sizes, manual: sizeInfo?.manual, method: request?.method, fit: request?.fit, item: current === 'item' ? itemId : null, own: request?.own, roles: categoryRoles() });
 const ENTER = {
@@ -307,7 +339,7 @@ function checkAll(f, names) {
   if (bad.length) (f.elements[bad[0]][0] ?? f.elements[bad[0]]).focus();
   return !bad.length;
 }
-const FORM_FIELDS = ['gender', 'height', 'weight', 'budget'];
+const FORM_FIELDS = ['gender', 'height', 'weight', 'budget', 'kidHeight'];
 inline(form, FORM_FIELDS);
 
 form.addEventListener('submit', (e) => {
@@ -315,8 +347,8 @@ form.addEventListener('submit', (e) => {
   if (!checkAll(form, formFields())) return;
   ({ body, request } = toRequest(formValues(), storeId));
   sizeInfo = sizeInput = lastResult = null;
-  // Task 30: shoes (the form's chips) and accessories need no size step.
-  if (!sizeNeeds(request.want).photo) return go('results');
+  // Task 30: shoes (the form's chips) and accessories need no size step. Task 40: a child never gets it (no photo).
+  if (!sizeNeeds(request.want, request.audience).photo) return go('results');
   go('camera');
 });
 
@@ -590,25 +622,26 @@ const CONFIDENCE = { high: 'kiosk.conf.high', medium: 'kiosk.conf.medium', low: 
 
 function renderSizes() {
   const want = request.want;
+  const list = request.audience === 'child' ? KIDS : CLOTHES; // task 40: a child steps through the height sizes
   const stepper = (key) => {
     const label = cat(key === 'top' && want && !want.includes('top') ? 'outerwear' : key); // task 30: only a jacket wanted
-    const i = CLOTHES.indexOf(request.sizes[key]);
+    const i = list.indexOf(request.sizes[key]);
     const move = (d) => () => {
-      request.sizes[key] = CLOTHES[i + d];
+      request.sizes[key] = list[i + d];
       sizeInfo = { ...sizeInfo, manual: true };
       loadResults();
     };
     return el('div', { className: 'stepper' }, el('span', { textContent: label }),
       el('button', { type: 'button', ariaLabel: t('kiosk.size.smaller', { label }), disabled: i <= 0, onclick: move(-1) }, icon('minus')),
       el('strong', { textContent: request.sizes[key] }),
-      el('button', { type: 'button', ariaLabel: t('kiosk.size.bigger', { label }), disabled: i >= CLOTHES.length - 1, onclick: move(1) }, icon('plus')));
+      el('button', { type: 'button', ariaLabel: t('kiosk.size.bigger', { label }), disabled: i >= list.length - 1, onclick: move(1) }, icon('plus')));
   };
   const keys = ['top', 'bottom'].filter((k) => sizeNeeds(want)[k]);
   if (!keys.length) return $('sizeBar').replaceChildren(); // task 30: shoes or accessories only
   $('sizeBar').replaceChildren(
     el('div', { className: 'row' }, ...keys.map(stepper)),
     // After a refresh the confidence is gone (it is not stored), so only the − / + hint is left.
-    el('p', { className: 'meta', textContent: sizeInfo?.manual ? t('kiosk.size.manual') : t('kiosk.size.adjust', { conf: sizeNote() }).trim() }),
+    el('p', { className: 'meta', textContent: sizeInfo?.manual ? t('kiosk.size.manual') : request.audience === 'child' ? t('kiosk.child.size_note') : t('kiosk.size.adjust', { conf: sizeNote() }).trim() }),
   );
 }
 
@@ -672,7 +705,7 @@ function renderResults(r) {
     ...(r.over_budget > 0 ? [warn('kiosk.results.over_budget', { sum: som(r.over_budget) })] : []),
     el('div', { className: 'outfits' }, ...(r.partial ? [partialCard(r.partial)] : []), ...r.outfits.map((o, i) => outfitCard(o, i + 1))),
     triedCard(),
-    ...(store?.profile && !kiosk ? [profileBox(r.outfits.map((o) => o.items.map((i) => i.id)))] : []), // phone flow: keep sizes + these looks
+    ...(store?.profile && !kiosk && !r.audience ? [profileBox(r.outfits.map((o) => o.items.map((i) => i.id)))] : []), // phone flow: keep sizes + these looks (an adult's: a child's sizes never go into the profile)
   );
 }
 
@@ -690,7 +723,7 @@ function renderSingles(r) {
       g.items.length ? el('div', { className: 'outfits' }, ...g.items.map(singleCard))
         : el('div', { className: 'empty' }, icon('hanger'), el('p', { textContent: t('kiosk.single.empty', { cat: wantName(g.category) }) })))),
     ...(n ? [triedCard()] : []),
-    ...(store?.profile && !kiosk ? [profileBox()] : []), // phone: keep the sizes (no outfit to keep)
+    ...(store?.profile && !kiosk && !r.audience ? [profileBox()] : []), // phone: keep the sizes (no outfit to keep; not a child's)
   );
 }
 
@@ -997,7 +1030,7 @@ function partialCard(p) {
 
 // --- Task 25: catalogue and item page. The server sends only items and sizes with free stock now.
 const PRICE_BANDS = [[null, 300_000], [300_000, 800_000], [800_000, null]]; // what the customer pays (discount price first)
-const NO_FILTER = { category: '', gender: '', size: '', price: '' };
+const NO_FILTER = { audience: 'adult', category: '', gender: '', size: '', price: '' }; // task 40: adults' items unless asked
 let filters = { ...NO_FILTER };
 let itemId = null; // the open item page
 let catalogSeq = 0, itemSeq = 0; // only the newest answer may draw
@@ -1006,8 +1039,10 @@ const bandName = ([lo, hi]) => (lo === null ? t('kiosk.catalog.price_upto', { su
   : hi === null ? t('kiosk.catalog.price_from', { sum: fmt.num(lo) }) : `${fmt.num(lo)} – ${fmt.num(hi)}`);
 function renderFilters() {
   const f = filters;
-  const picked = shownCats().find((c) => String(c.id) === f.category);
-  const sizes = picked ? catSizes(picked) : CLOTHES;
+  const child = f.audience === 'child';
+  const cats = forAudience(f.audience);
+  const picked = cats.find((c) => String(c.id) === f.category);
+  const sizes = picked ? catSizes(picked) : child ? KIDS : CLOTHES;
   const all = ['', t('common.all')];
   const group = (key, label, options) => {
     const g = el('div', { className: 'filter' }, el('div', { className: 'meta', textContent: label }), chipRow([all, ...options], f[key], label, (v) => {
@@ -1018,12 +1053,21 @@ function renderFilters() {
     g.dataset.group = key;
     return g;
   };
-  const cats = group('category', t('field.category'), shownCats().map((c) => [String(c.id), catName(c)]));
+  const catRow = group('category', t('field.category'), cats.map((c) => [String(c.id), catName(c)]));
   // Task 36: a category's photo (optional) leads its chip; the first chip is "all".
-  cats.querySelectorAll('.chip').forEach((b, i) => shownCats()[i - 1]?.image_url && b.prepend(el('img', { className: 'chip-img', src: shownCats()[i - 1].image_url, alt: '' })));
+  catRow.querySelectorAll('.chip').forEach((b, i) => cats[i - 1]?.image_url && b.prepend(el('img', { className: 'chip-img', src: cats[i - 1].image_url, alt: '' })));
+  // Task 40: adults or children, never both at once (no "all" chip); a switch starts the other filters over.
+  const who = el('div', { className: 'filter' }, el('div', { className: 'meta', textContent: t('kiosk.catalog.section') }),
+    chipRow([['adult', t('audience.adult')], ['child', t('audience.child')]], f.audience, t('kiosk.catalog.section'), (v) => {
+      filters = { ...NO_FILTER, audience: v };
+      loadCatalog();
+      $('catalogFilters').querySelector('[data-group="audience"] [aria-pressed="true"]')?.focus();
+    }));
+  who.dataset.group = 'audience';
   $('catalogFilters').replaceChildren(
-    cats,
-    group('gender', t('kiosk.catalog.gender'), [['male', t('gender.male')], ['female', t('gender.female')]]),
+    who,
+    catRow,
+    group('gender', t('kiosk.catalog.gender'), [['male', t(child ? 'kiosk.child.boy' : 'gender.male')], ['female', t(child ? 'kiosk.child.girl' : 'gender.female')]]),
     group('price', t('field.price'), PRICE_BANDS.map((b, i) => [String(i), bandName(b)])),
     ...(sizes.length ? [group('size', t('kiosk.catalog.size'), sizes.map((x) => [x, x]))] : []),
   );
@@ -1033,7 +1077,7 @@ async function loadCatalog() {
   const seq = ++catalogSeq;
   renderFilters();
   const band = PRICE_BANDS[filters.price] ?? [null, null];
-  const q = new URLSearchParams(Object.entries({ category: filters.category, gender: filters.gender, size: filters.size, min: band[0] ?? '', max: band[1] ?? '' })
+  const q = new URLSearchParams(Object.entries({ audience: filters.audience, category: filters.category, gender: filters.gender, size: filters.size, min: band[0] ?? '', max: band[1] ?? '' })
     .filter(([, v]) => v !== ''));
   $('catalogStatus').textContent = t('kiosk.catalog.loading');
   const done = showAfter(300, () => seq === catalogSeq && $('catalogGrid').replaceChildren(skeletonCard(2), skeletonCard(2), skeletonCard(2)));
@@ -1664,7 +1708,8 @@ function applyProfile(p) {
     switcher.sync();
   }
   form.reset();
-  applyNeeds();
+  shoeChips();
+  renderWantChips(null);
   budgetChips();
   form.gender.value = p.gender ?? '';
   form.height.value = p.height ?? '';
@@ -1728,7 +1773,8 @@ function reset() {
     switcher.sync();
   }
   form.reset();
-  applyNeeds();
+  shoeChips(); // task 40: the last customer may have been a child
+  renderWantChips(null);
   wayForm.reset();
   wayError('');
   showWay('photo');
@@ -1760,6 +1806,8 @@ function startShop() {
   // Refresh: restore the saved screen and the form's numbers (never a photo, name or phone), then ask the server again.
   const saved = loadRoute();
   if (saved) {
+    form.audience.value = saved.form.audience; // task 40: first, so the children's shoe chips exist for the saved size
+    shoeChips();
     for (const [k, v] of Object.entries(saved.form)) {
       if (k === 'want') continue;
       const f = form.elements[k];

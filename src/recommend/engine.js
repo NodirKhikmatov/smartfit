@@ -1,4 +1,4 @@
-import { sizesFor } from '../db/seed.js';
+import { sizesOf } from '../db/seed.js';
 import { fitOf, wantSize } from '../size/size.js';
 
 // Rule-based outfits. filterCandidates is the only source of items: task 7 sends its output to Claude as CANDIDATES.
@@ -20,24 +20,26 @@ export const totalOf = (items) => items.reduce((sum, i) => sum + i.unit_price, 0
 // Each item carries fit_offset (+1 runs small, -1 runs big) and fit_from (the customer's size when it was shifted).
 // spread widens the temperature window to ±spread °C (the relaxation fallback in ruleOutfits).
 // fit (task 29): the customer's preference tight|regular|loose shifts clothes one size first; fit_from is relative to that.
-export async function filterCandidates(db, { storeId, gender, sizes, temperature, spread = 0, fit = null }) {
+// audience (task 40): 'adult' (default) or 'child'; adults never get children's items and children never adults'.
+export async function filterCandidates(db, { storeId, gender, sizes, temperature, spread = 0, fit = null, audience = 'adult' }) {
   const rows = await visible(db('products as p'))
     .join('product_stock as s', 's.product_id', 'p.id')
     .where('p.store_id', storeId)
+    .where('p.audience', audience)
     .whereIn('p.gender', [gender, 'unisex'])
     // Live weather is fractional (11.7 °C); Postgres would type the parameter as the integer column and refuse it.
     .whereRaw('p.temp_min <= cast(? as real) and p.temp_max >= cast(? as real)', [temperature + spread, temperature - spread])
     .whereRaw('s.quantity - s.reserved > 0')
     .orderBy(['p.id', 's.id'])
-    .select('p.id', 'p.name', 'p.name_ru', 'p.category', 'p.category_id', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.waterproof', 'p.image_url', 'p.shelf_location', 'p.fit_offset', 's.size');
+    .select('p.id', 'p.name', 'p.name_ru', 'p.category', 'p.category_id', 'p.sizes as size_list', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.waterproof', 'p.image_url', 'p.shelf_location', 'p.fit_offset', 's.size');
   // Task 23: a product that runs small or big is offered one size up or down (clamped to its sizes), and only if that
   // size has free stock: never the customer's own size, which is known not to fit.
   const fits = await fitOf(db, [...new Map(rows.map((r) => [r.id, r])).values()]);
   const byId = new Map();
-  for (const { fit_offset, ...r } of rows) {
+  for (const { fit_offset, size_list, ...r } of rows) {
     const own = sizes[sizeKey[r.category]];
     const offset = fits.get(r.id).offset;
-    const { base, want } = own ? wantSize(sizesFor(r.category), r.category, own, offset, fit) : {};
+    const { base, want } = own ? wantSize(sizesOf({ category: r.category, sizes: size_list }), r.category, own, offset, fit) : {};
     if (want && r.size !== want) continue;
     const known = r.category === 'accessory' || own;
     // Several rows per item only when the shoe size is unknown: `sizes` lists them so the customer picks one.
@@ -55,21 +57,22 @@ export async function filterCandidates(db, { storeId, gender, sizes, temperature
 // after the fit shift) has no free stock. Accessories and shoes without a size are left out: no size was asked for.
 // → [{ product_id, size }].
 // want (task 30): only the categories the customer came for.
-export async function missedItems(db, { storeId, gender, sizes, temperature, fit = null, want = null }) {
+export async function missedItems(db, { storeId, gender, sizes, temperature, fit = null, want = null, audience = 'adult' }) {
   const q = db('products as p').leftJoin('product_stock as s', 's.product_id', 'p.id')
     .where('p.store_id', storeId)
+    .where('p.audience', audience)
     .whereIn('p.gender', [gender, 'unisex'])
     .whereIn('p.category', Object.keys(sizeKey).filter((c) => sizes[sizeKey[c]]));
   if (want) q.where((w) => w.whereIn('p.category', want.filter((x) => !Number.isInteger(x))).orWhereIn('p.category_id', want.filter(Number.isInteger)));
   const rows = await q
     .whereRaw('p.temp_min <= cast(? as real) and p.temp_max >= cast(? as real)', [temperature, temperature])
     .orderBy(['p.id', 's.id'])
-    .select('p.id', 'p.category', 'p.fit_offset', 's.size', db.raw('s.quantity - s.reserved as free'));
+    .select('p.id', 'p.category', 'p.sizes', 'p.fit_offset', 's.size', db.raw('s.quantity - s.reserved as free'));
   const free = new Map(rows.map((r) => [`${r.id}:${r.size}`, Number(r.free)]));
   const products = [...new Map(rows.map((r) => [r.id, r])).values()];
   const fits = await fitOf(db, products);
   return products.flatMap((p) => {
-    const size = wantSize(sizesFor(p.category), p.category, sizes[sizeKey[p.category]], fits.get(p.id).offset, fit).want;
+    const size = wantSize(sizesOf(p), p.category, sizes[sizeKey[p.category]], fits.get(p.id).offset, fit).want;
     return (free.get(`${p.id}:${size}`) ?? 0) > 0 ? [] : [{ product_id: p.id, size }];
   });
 }

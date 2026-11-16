@@ -3,6 +3,17 @@
 export const SCREENS = ['start', 'form', 'camera', 'results', 'cart', 'done', 'catalog', 'item'];
 export const CLOTHES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 export const SHOES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
+// Task 40, "Bolaga": children's sizes by height (same lists as src/db/seed.js, a test keeps them equal). A size is the
+// tallest height it fits, each band 6 cm (116 = 111–116 cm), so a child's height rounds UP to the next size: never too
+// small. Below the first band there are no sizes here; above the last, adult sizes fit.
+export const KIDS = ['92', '98', '104', '110', '116', '122', '128', '134', '140', '146', '152', '158', '164'];
+export const KIDS_SHOES = Array.from({ length: 14 }, (_, i) => String(22 + i));
+export const KID_MIN = 87, KID_MAX = 164; // heights with a children's size (87 cm → 92, 164 cm → 164)
+// → the size for a child's height in cm, or null outside KID_MIN…KID_MAX. Age never enters it (only a hint on the form).
+export const childSize = (height) => (Number.isFinite(height) && height >= KID_MIN && height <= KID_MAX ? KIDS.find((s) => Number(s) >= height) : null);
+// The typical height at an age (WHO medians, rounded), only for the hint under the height field.
+const AGE_HEIGHT = [null, 76, 87, 96, 103, 110, 116, 122, 128, 133, 138, 144, 149, 156, 162];
+export const ageHint = (age) => (/^\d{1,2}$/.test(String(age ?? '').trim()) ? AGE_HEIGHT[Number(age)] ?? null : null);
 // Task 29 (same lists as src/size/size.js, a test keeps them equal): usual jeans waist, fit preference, size methods.
 export const JEANS = Array.from({ length: 15 }, (_, i) => 26 + i);
 export const FITS = ['tight', 'regular', 'loose'];
@@ -30,6 +41,8 @@ const within = (v, lo, hi) => int(v) >= lo && int(v) <= hi;
 export const RULES = {
   gender: (v) => (['male', 'female'].includes(v) ? '' : 'kiosk.form.err_gender'),
   height: (v) => (within(v, 100, 230) ? '' : 'kiosk.form.err_height'),
+  // Task 40: a child's height. Too short or too tall for children's sizes says so (taller → adult sizes).
+  kidHeight: (v) => (!within(v, 40, 250) ? 'kiosk.child.err_height' : int(v) < KID_MIN ? 'kiosk.child.err_small' : int(v) > KID_MAX ? 'kiosk.child.err_tall' : ''),
   weight: (v) => (!str(v) || within(v, 30, 250) ? '' : 'kiosk.form.err_weight'),
   budget: (v) => (!str(v) || within(v, 1, 1e9) ? '' : 'kiosk.form.err_budget'),
   fullname: (v) => (str(v).length >= 2 ? '' : 'kiosk.checkout.err_name'),
@@ -45,16 +58,21 @@ export function nextError(event, name, value, shown) {
   if (event === 'blur') return str(value) ? fieldError(name, value) : undefined;
   return shown ? fieldError(name, value) : undefined;
 }
-const FORM = ['gender', 'height', 'weight', 'shoes', 'budget'];
+const FORM = ['gender', 'height', 'weight', 'shoes', 'budget', 'kidHeight'];
+const isChild = (v) => v?.audience === 'child';
 
 // Task 30: which sizes a choice needs. want = null (whole outfit: as before) or categories. Outerwear/top → the top
 // size, bottom → the bottom size, shoes → the shoe size (the form's chips: a photo can't measure feet), accessories →
 // none. `photo` = the size step (photo / usual size / tape) is shown at all; height and weight are asked only for it.
-export function sizeNeeds(want = null) {
-  if (!want) return { top: true, bottom: true, shoes: true, photo: true };
-  const roles = want.map(roleOf);
-  const top = roles.includes('outerwear') || roles.includes('top'), bottom = roles.includes('bottom');
-  return { top, bottom, shoes: roles.includes('shoes'), photo: top || bottom };
+// Task 40: a child (audience 'child') never gets the size step: `kid` = the child's height is asked instead (the
+// photo rule: the app never asks for a child's photo).
+export function sizeNeeds(want = null, audience = 'adult') {
+  const n = want ? (() => {
+    const roles = want.map(roleOf);
+    const top = roles.includes('outerwear') || roles.includes('top'), bottom = roles.includes('bottom');
+    return { top, bottom, shoes: roles.includes('shoes'), photo: top || bottom };
+  })() : { top: true, bottom: true, shoes: true, photo: true };
+  return audience === 'child' ? { ...n, photo: false, kid: n.photo } : n; // an adult's: no `kid` (falsy), as before
 }
 // The sizes a request still lacks for its choice (the results screen can show only when this is true).
 export const sizesReady = (sizes, want = null) => {
@@ -72,14 +90,25 @@ export function cleanWant(w) {
 
 // Form values (strings from the inputs) → the /api/size body and the /api/recommend request, or null if a field is wrong.
 // Height and weight are checked only when the choice needs the size step.
+// Task 40: for a child the sizes come from the child's height here (no /api/size, no photo); body is then null.
 export function toRequest(v, storeId) {
   const want = cleanWant(v.want);
-  const skip = sizeNeeds(want).photo ? [] : ['height', 'weight'];
+  const child = isChild(v);
+  const n = sizeNeeds(want, child ? 'child' : 'adult');
+  const skip = [...(n.photo ? [] : ['height', 'weight']), ...(n.kid ? [] : ['kidHeight'])];
   if (FORM.some((k) => !skip.includes(k) && fieldError(k, v[k]))) return null;
   const num = (x) => (str(x) ? int(x) : null);
   const occasion = OCCASIONS.includes(v.occasion) ? v.occasion : null;
+  if (child) {
+    const size = n.kid ? childSize(int(v.kidHeight)) : null;
+    return {
+      body: null,
+      request: { store_id: storeId, gender: v.gender, audience: 'child', sizes: { top: n.top ? size : null, bottom: n.bottom ? size : null, shoes: KIDS_SHOES.includes(v.shoes) ? v.shoes : null },
+        budget: num(v.budget), ...(want && { want }), ...(occasion && { occasion }) },
+    };
+  }
   return {
-    body: { gender: v.gender, height: skip.length ? null : num(v.height), weight: skip.length ? null : num(v.weight) },
+    body: { gender: v.gender, height: n.photo ? num(v.height) : null, weight: n.photo ? num(v.weight) : null },
     request: { store_id: storeId, gender: v.gender, sizes: { top: null, bottom: null, shoes: SHOES.includes(v.shoes) ? v.shoes : null }, budget: num(v.budget), ...(want && { want }), ...(occasion && { occasion }) },
   };
 }
@@ -95,13 +124,15 @@ export function routeData({ screen, form = {}, sizes = {}, manual = false, metho
   const known = new Map(Array.isArray(roles) ? roles.filter((x) => Array.isArray(x) && Number.isInteger(x[0])) : []);
   return {
     screen: SCREENS.includes(screen) ? screen : 'start',
-    form: { ...Object.fromEntries(FORM.map((k) => [k, str(form?.[k]).slice(0, 12)])), want: cleanWant(form?.want), occasion: OCCASIONS.includes(form?.occasion) ? form.occasion : '' },
+    form: { ...Object.fromEntries(FORM.map((k) => [k, str(form?.[k]).slice(0, 12)])), want: cleanWant(form?.want), occasion: OCCASIONS.includes(form?.occasion) ? form.occasion : '',
+      audience: isChild(form) ? 'child' : 'adult' },
     own: Array.isArray(own) ? own.filter(ownItem).slice(0, 5).map((x) => ({ category: x.category, color: x.color, style: x.style ?? null })) : [],
-    sizes: {
-      top: CLOTHES.includes(sizes?.top) ? sizes.top : null,
-      bottom: CLOTHES.includes(sizes?.bottom) ? sizes.bottom : null,
-      shoes: SHOES.includes(sizes?.shoes) ? sizes.shoes : null,
-    },
+    // Task 40: a child's route keeps children's sizes only, an adult's adult sizes only.
+    sizes: (([clothes, shoes]) => ({
+      top: clothes.includes(sizes?.top) ? sizes.top : null,
+      bottom: clothes.includes(sizes?.bottom) ? sizes.bottom : null,
+      shoes: shoes.includes(sizes?.shoes) ? sizes.shoes : null,
+    }))(isChild(form) ? [KIDS, KIDS_SHOES] : [CLOTHES, SHOES]),
     manual: manual === true,
     method: METHODS.includes(method) ? method : null,
     fit: FITS.includes(fit) ? fit : null,

@@ -777,7 +777,8 @@ async function loadCategories() {
         c.image_url ? el('img', { className: 'thumb', src: c.image_url, alt: '', loading: 'lazy' }) : el('span', { className: 'thumb ph' }, icon(c.role || 'hanger')),
         el('span', {},
           el('button', { type: 'button', className: 'name-btn', textContent: catText(c), onclick: () => openCat(c) }),
-          el('span', { className: 'sizes' }, getLang() === 'ru' ? c.name : c.name_ru, c.hidden ? el('span', { className: 'badge', textContent: t('adm.cats.hidden') }) : null)))),
+          el('span', { className: 'sizes' }, getLang() === 'ru' ? c.name : c.name_ru, c.hidden ? el('span', { className: 'badge', textContent: t('adm.cats.hidden') }) : null,
+            c.audience === 'child' ? el('span', { className: 'badge', textContent: t('audience.child') }) : null)))),
       el('td', { className: 'hide-sm', textContent: c.role ? cat(c.role) : t('adm.cats.role_none') }),
       el('td', { className: 'hide-sm', textContent: sizesText(c) }),
       el('td', { className: 'num', textContent: c.products }),
@@ -808,6 +809,7 @@ function openCat(c) {
   $('catDlgError').textContent = $('catImgError').textContent = '';
   $('catTitle').textContent = c ? t('adm.cats.edit_title', { name: catText(c) }) : t('adm.cats.add');
   for (const k of ['name', 'name_ru', 'size_kind']) cf[k].value = c?.[k] ?? (k === 'size_kind' ? 'one' : '');
+  cf.audience.value = c?.audience ?? 'adult';
   cf.role.value = c?.role ?? '';
   cf.sizes.value = c?.size_kind === 'custom' ? c.sizes.join(', ') : '';
   cf.hidden.checked = Boolean(c?.hidden);
@@ -820,23 +822,30 @@ function openCat(c) {
   $('catDlg').showModal();
 }
 // A role fixes the size kind (the engine matches the customer's sizes); only a role-less category picks its own.
+// Task 40: for children the role's kind is the children's one (92–164 by height, shoes 22–35), and a children's kind
+// is always for children.
+const KIDS_KINDS = ['kids', 'kids_shoes'];
 function catKind() {
   const role = cf.role.value;
-  if (role) cf.size_kind.value = { outerwear: 'clothes', top: 'clothes', bottom: 'clothes', shoes: 'shoes', accessory: 'one' }[role];
+  if (role) {
+    const kind = { outerwear: 'clothes', top: 'clothes', bottom: 'clothes', shoes: 'shoes', accessory: 'one' }[role];
+    cf.size_kind.value = cf.audience.value === 'child' ? { clothes: 'kids', shoes: 'kids_shoes' }[kind] ?? kind : kind;
+  } else if (KIDS_KINDS.includes(cf.size_kind.value)) cf.audience.value = 'child';
+  cf.audience.disabled = !role && KIDS_KINDS.includes(cf.size_kind.value);
   cf.size_kind.disabled = Boolean(role);
   const custom = cf.size_kind.value === 'custom';
   $('catSizesWrap').hidden = !custom;
   cf.sizes.required = custom;
   $('catSizesHint').textContent = [custom && t('adm.cats.sizes_hint'), editingCat?.products > 0 && t('adm.cats.in_use', { n: editingCat.products })].filter(Boolean).join(' ');
 }
-cf.role.onchange = cf.size_kind.onchange = catKind;
+cf.role.onchange = cf.size_kind.onchange = cf.audience.onchange = catKind;
 $('catCancel').onclick = () => $('catDlg').close();
 cf.onsubmit = async (e) => {
   e.preventDefault();
   $('catDlgError').textContent = '';
   if (!cf.reportValidity()) return;
   const body = {
-    name: cf.name.value, name_ru: cf.name_ru.value, role: cf.role.value || null, size_kind: cf.size_kind.value,
+    name: cf.name.value, name_ru: cf.name_ru.value, role: cf.role.value || null, audience: cf.audience.value, size_kind: cf.size_kind.value,
     sizes: cf.size_kind.value === 'custom' ? cf.sizes.value : null, hidden: cf.hidden.checked,
     ...(!editingCat && me.role === 'super' && { organization_id: catOrg() }),
   };
@@ -1051,6 +1060,12 @@ function applyCat() {
   for (const x of f.querySelectorAll('[data-outfit]')) x.hidden = !outfit;
   f.temp_min.required = f.temp_max.required = outfit;
   $('roleNote').hidden = outfit || !c;
+  // Task 40: a children's category's genders read boy / girl / any (the same values: male / female / unisex).
+  const kid = c?.audience === 'child';
+  for (const [id, adult, child] of [['gUnisex', 'gender.unisex', 'adm.form.kid_any'], ['gMale', 'gender.male', 'kiosk.child.boy'], ['gFemale', 'gender.female', 'kiosk.child.girl']]) {
+    $(id).dataset.i18n = kid ? child : adult;
+    $(id).textContent = t($(id).dataset.i18n);
+  }
   renderStock(c?.sizes ?? [], editing?.stock);
 }
 $('form').category.onchange = applyCat;
@@ -1761,7 +1776,7 @@ const AUDIT_FIELDS = {
   sku: 'field.sku', barcode: 'field.barcode', low_stock_threshold: 'field.low_stock', prefix: 'adm.sync.key',
   email: 'field.email', role: 'field.role', disabled: 'adm.team.status',
   bundle_percent: 'field.bundle_percent', instalment_on: 'adm.set.instalment_on', instalment_terms: 'field.instalment_terms', store_id: 'common.store', kind: 'field.promo_kind', value: 'field.promo_value', min_order: 'field.promo_min',
-  description: 'field.description', description_ru: 'field.description_ru', details: 'field.details', size_kind: 'field.size_kind', sizes: 'field.cat_sizes',
+  description: 'field.description', description_ru: 'field.description_ru', details: 'field.details', size_kind: 'field.size_kind', sizes: 'field.cat_sizes', audience: 'field.audience',
   hidden: 'adm.cats.hide', sort: 'adm.cats.order',
   starts_on: 'adm.promo.starts', ends_on: 'adm.promo.ends', max_uses: 'field.promo_max_uses', max_per_phone: 'field.promo_per_phone', active: 'field.promo_active',
 };
@@ -1777,6 +1792,7 @@ function auditValue(k, v) {
   if (k === 'role') return CATEGORIES.includes(v) ? cat(v) : roleName(v); // a category's outfit role, or an admin's
   if (k === 'category') return CATEGORIES.includes(v) ? cat(v) : String(v); // older rows: the role; task 36: the name
   if (k === 'size_kind') return t(`adm.cats.kind_${v}`);
+  if (k === 'audience') return t(`audience.${v}`);
   if (k === 'details') return Array.isArray(v) ? v.map((d) => `${d.name}: ${d.value}`).join('; ') : String(v);
   if (k === 'store_id') return storeName(v) || `#${v}`;
   if (k === 'kind') return t(v === 'percent' ? 'adm.promo.percent' : 'adm.promo.fixed');

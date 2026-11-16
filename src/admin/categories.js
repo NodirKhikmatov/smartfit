@@ -7,28 +7,40 @@ import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fail, text, int, imageExt } from './routes.js';
 import { audit, diff } from './audit.js';
-import { sizesFor } from '../db/seed.js';
-import { ROLES, SIZE_KINDS, ROLE_KIND } from '../db/migrations/023_categories.js';
+import { sizesFor, KIDS, KIDS_SHOES } from '../db/seed.js';
+import { ROLES, ROLE_KIND } from '../db/migrations/023_categories.js';
 
 export const CATEGORIES_MAX = 100; // per organisation
 const SIZES_MAX = 30;
 const SIZE = /^[A-Za-z0-9][A-Za-z0-9./-]{0,9}$/; // no comma (the list separator), no spaces, no CSV formula start
-const KIND_SIZES = { clothes: sizesFor('top'), shoes: sizesFor('shoes'), one: sizesFor('accessory') };
+const KIND_SIZES = { clothes: sizesFor('top'), shoes: sizesFor('shoes'), one: sizesFor('accessory'), kids: KIDS, kids_shoes: KIDS_SHOES };
+export const SIZE_KINDS = Object.keys({ ...KIND_SIZES, custom: 1 });
+export const AUDIENCES = ['adult', 'child'];
+const KIDS_KINDS = ['kids', 'kids_shoes'];
 export const catSizes = (c) => (c.size_kind === 'custom' ? String(c.sizes ?? '').split(',').filter(Boolean) : KIND_SIZES[c.size_kind]);
-const EDITABLE = ['name', 'name_ru', 'role', 'size_kind', 'sizes', 'sort', 'hidden'];
+// What a product copies from its category (task 36 role, task 40 audience): the size list is kept on the product
+// unless its role's adult list applies (sizesOf falls back to the role).
+export const productSizes = (c) => (c.role && !KIDS_KINDS.includes(c.size_kind) ? null : catSizes(c).join(','));
+const EDITABLE = ['name', 'name_ru', 'role', 'audience', 'size_kind', 'sizes', 'sort', 'hidden'];
 
 export const categoryView = (c) => ({
   id: c.id, organization_id: c.organization_id, name: c.name, name_ru: c.name_ru, image_url: c.image_url ?? null, sort: c.sort,
-  hidden: Boolean(c.hidden), role: c.role ?? null, size_kind: c.size_kind, sizes: catSizes(c), products: Number(c.products ?? 0),
+  hidden: Boolean(c.hidden), role: c.role ?? null, audience: c.audience ?? 'adult', size_kind: c.size_kind, sizes: catSizes(c), products: Number(c.products ?? 0),
 });
 
-// A role fixes the size kind (the engine matches the customer's XS–XXL / 36–45 sizes); only a role-less category picks
-// its own, including the shop's own list of sizes.
+// A role fixes the size kind (the engine matches the customer's sizes); only a role-less category picks its own,
+// including the shop's own list of sizes. Task 40: the audience picks between the adult and the children's kind of a
+// role (outerwear/top/bottom: XS–XXL or 92–164 by height, shoes: 36–45 or 22–35; accessories stay one size), and a
+// children's kind is always for children. A role-less category without a children's kind may be for either.
+const roleKind = (role, audience) => (audience === 'child' ? { clothes: 'kids', shoes: 'kids_shoes' }[ROLE_KIND[role]] ?? ROLE_KIND[role] : ROLE_KIND[role]);
 function validCategory(b) {
   const role = b.role ?? null;
   if (role !== null && !ROLES.includes(role)) throw fail(400, 'err.invalid', { field: 'field.cat_role' });
-  const size_kind = role ? ROLE_KIND[role] : b.size_kind;
+  let audience = b.audience ?? (KIDS_KINDS.includes(b.size_kind) ? 'child' : 'adult');
+  if (!AUDIENCES.includes(audience)) throw fail(400, 'err.invalid', { field: 'field.audience' });
+  const size_kind = role ? roleKind(role, audience) : b.size_kind;
   if (!SIZE_KINDS.includes(size_kind)) throw fail(400, 'err.invalid', { field: 'field.size_kind' });
+  if (KIDS_KINDS.includes(size_kind) && audience !== 'child') throw fail(400, 'err.invalid', { field: 'field.audience' });
   let sizes = null;
   if (size_kind === 'custom') {
     const raw = Array.isArray(b.sizes) ? b.sizes : typeof b.sizes === 'string' ? b.sizes.split(/[,;\s]+/) : [];
@@ -40,7 +52,7 @@ function validCategory(b) {
   }
   const hidden = b.hidden ?? false;
   if (typeof hidden !== 'boolean') throw fail(400, 'err.invalid', { field: 'field.cat_hidden' });
-  return { name: text(b.name, 60, 'field.name', true), name_ru: text(b.name_ru, 60, 'field.name_ru', true), role, size_kind, sizes, sort: int(b.sort, 0, 9999, 'field.sort'), hidden };
+  return { name: text(b.name, 60, 'field.name', true), name_ru: text(b.name_ru, 60, 'field.name_ru', true), role, audience, size_kind, sizes, sort: int(b.sort, 0, 9999, 'field.sort'), hidden };
 }
 
 // The category a product body names, which must be one of its store's organisation's. `category_id` wins; else
@@ -130,7 +142,9 @@ export function categoryRoutes(r, db, { uploadDir = 'uploads' } = {}) {
     const old = await findCategory(req);
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const before = Object.fromEntries(EDITABLE.map((k) => [k, k === 'hidden' ? Boolean(old[k]) : old[k] ?? null]));
-    const next = validCategory({ ...before, ...Object.fromEntries(Object.entries(body).filter(([k]) => EDITABLE.includes(k))) });
+    const asked = Object.fromEntries(Object.entries(body).filter(([k]) => EDITABLE.includes(k)));
+    if (KIDS_KINDS.includes(asked.size_kind) && asked.audience === undefined) asked.audience = 'child'; // a children's kind says it
+    const next = validCategory({ ...before, ...asked });
     const was = catSizes(old), now = catSizes(next);
     if (old.products > 0 && !was.every((s, i) => now[i] === s)) throw fail(409, 'err.category_sizes_locked');
     const d = diff(before, next);
@@ -138,8 +152,8 @@ export function categoryRoutes(r, db, { uploadDir = 'uploads' } = {}) {
       await db.transaction(async (trx) => {
         await nameFree(trx, old.organization_id, next, old.id);
         await trx('categories').where({ id: old.id }).update({ ...next, updated_at: trx.fn.now() });
-        if (old.products > 0 && (next.role !== (old.role ?? null) || now.length !== was.length)) {
-          await trx('products').where({ category_id: old.id }).update({ category: next.role, sizes: next.role ? null : now.join(','), updated_at: trx.fn.now() });
+        if (old.products > 0 && (next.role !== (old.role ?? null) || next.audience !== old.audience || productSizes(next) !== productSizes(old))) {
+          await trx('products').where({ category_id: old.id }).update({ category: next.role, sizes: productSizes(next), audience: next.audience, updated_at: trx.fn.now() });
           const added = now.slice(was.length);
           const ids = (await trx('products').where({ category_id: old.id }).select('id')).map((p) => p.id);
           for (const size of added) {

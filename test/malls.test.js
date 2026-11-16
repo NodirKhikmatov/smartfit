@@ -315,7 +315,7 @@ test('directory: only the shown shops of that mall, with floor, unit, logo and s
   const one = r.body.shops.find((s) => s.id === s1);
   assert.deepEqual(Object.keys(one).sort(), ['categories', 'floor', 'id', 'logo_url', 'name', 'unit']);
   assert.deepEqual([one.floor, one.unit], ['1', '104']);
-  assert.equal(one.categories.length, 4, 'hidden categories are not shown');
+  assert.equal(one.categories.length, 8, 'hidden categories are not shown'); // task 40: 5 adult + 4 children's, one hidden
   assert.ok(!one.categories.some((c) => c.id === hiddenCat.id));
   assert.deepEqual(Object.keys(one.categories[0]).sort(), ['id', 'image_url', 'name', 'name_ru']);
   // A hidden shop is gone from the directory; a store of mall B never shows here.

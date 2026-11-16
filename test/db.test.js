@@ -4,7 +4,7 @@ import { testDb } from './helpers/db.js';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { seed, CATALOGUE, IMAGE_DIR } from '../src/db/seed.js';
+import { seed, CATALOGUE, KIDS_CATALOGUE, IMAGE_DIR } from '../src/db/seed.js';
 import { createApp } from '../src/app.js';
 
 const db = testDb();
@@ -49,7 +49,7 @@ test('reseeding restarts ids: stores are 1 and 2 again, so printed QR links keep
   }
 });
 
-const inStore = (code) => CATALOGUE.filter((p) => p.stores.includes(code));
+const inStore = (code) => [...CATALOGUE.filter((p) => p.stores.includes(code)), ...KIDS_CATALOGUE]; // task 40: children's items in both stores
 
 test('seed: Tashkent and Samarkand stores, ≥ 60 items each, with per-store differences', async () => {
   const stores = await db('stores').orderBy('id');
@@ -58,6 +58,7 @@ test('seed: Tashkent and Samarkand stores, ≥ 60 items each, with per-store dif
   for (const [i, s] of stores.entries()) {
     const products = await db('products').where({ store_id: s.id });
     assert.equal(products.length, inStore('TS'[i]).length);
+    assert.equal(products.filter((p) => p.audience === 'child').length, KIDS_CATALOGUE.length);
     assert.ok(products.length >= 60, `${s.city}: ${products.length} items`);
     assert.equal(new Set(products.map((p) => p.sku)).size, products.length, 'SKU unique per store');
     for (const p of products) {
