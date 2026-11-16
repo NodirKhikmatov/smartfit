@@ -1,9 +1,9 @@
 // Kiosk service worker (task 21), served as /kiosk-sw.js with scope /kiosk.
 // Caches the app shell (network first, so updates arrive at once) and /vendor files (cache first; their paths are versioned).
 // Never API responses, product photos (/uploads) or anything else: those always go to the network.
-const CACHE = 'sf-kiosk-v2';
+const CACHE = 'sf-kiosk-v3';
 const SHELL = [
-  "/kiosk", "/app/app.js", "/app/flow.js", "/app/mall.js", "/app/idle.js", "/app/keypad.js", "/app/kiosk.js", "/app/pose.js", "/app/tryon.js", "/app/app.css",
+  "/kiosk", "/app/app.js", "/app/flow.js", "/app/mall.js", "/app/offers.js", "/app/idle.js", "/app/keypad.js", "/app/kiosk.js", "/app/pose.js", "/app/tryon.js", "/app/app.css",
   "/shared/ui.css", "/shared/ui.js", "/shared/i18n.js", "/shared/icons.svg", "/shared/favicon.svg", "/favicon.ico",
   "/shared/fonts/onest-latin-wght-normal.woff2", "/shared/fonts/onest-latin-ext-wght-normal.woff2",
   "/shared/fonts/onest-cyrillic-wght-normal.woff2", "/shared/fonts/onest-cyrillic-ext-wght-normal.woff2",

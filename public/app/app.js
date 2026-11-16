@@ -5,6 +5,7 @@ import { kioskShell, attract, kioskDevice, randomId } from './kiosk.js';
 import { CLOTHES, SHOES, KIDS, KIDS_SHOES, ageHint, JEANS, WANT, nextError, fieldError, toRequest, sizeNeeds, sizesReady, cleanWant, setCategories, categoryRoles, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter, tryonItem } from './flow.js';
 import { mallScreen } from './mall.js';
 import { createTryon } from './tryon.js';
+import { offerCard, countOffers, idleSlides } from './offers.js';
 import { icon, confirmDialog, showAfter, skeletonCard, toast } from '/shared/ui.js';
 import { t, fmt, initLang, setLang, getLang, langSwitch, productName, colorName, COLORS, STYLES } from '/shared/i18n.js';
 
@@ -152,6 +153,7 @@ const switcher = langSwitch(() => {
   for (const id of ['cartError', 'checkoutError']) $(id).textContent = '';
   store ? renderWeather() : loadStore(); // loadStore redraws a start error (no store, offline) in the new language
   if (store) renderWantChips();
+  if (store) drawOffers(false);
   setCart(cart);
   budgetChips();
   if (lastResult) renderResults(lastResult);
@@ -262,7 +264,7 @@ async function loadStore() {
   tryon.setProvider(null); // until this store says it has try-on on
   $('startError').textContent = '';
   $('catalogBtn').hidden = $('profileLogin').hidden = true;
-  $('storePicker').hidden = true;
+  $('storePicker').hidden = $('shopOffers').hidden = true;
   $('start').disabled = true;
   if (mallLook) return loadMallLook();
   if (!Number.isInteger(storeId) || storeId < 1) return showPicker('kiosk.start.no_store');
@@ -289,6 +291,16 @@ async function loadStore() {
   renderWeather();
   $('lookbook').replaceChildren(...store.looks.map((l) => el('img', { src: l.image_url, alt: '' })));
   $('lookbook').hidden = store.looks.length < 2;
+  drawOffers(true);
+}
+
+// Task 43: the shop's own current offers on its start screen (no mall approval needed here). One linked to an item in
+// stock opens it; the others are just shown. Counted as shown once per start screen load.
+function drawOffers(count) {
+  const list = store?.offers ?? [];
+  $('shopOffers').hidden = !list.length;
+  $('shopOfferList').replaceChildren(...list.map((o) => offerCard(o, { place: false, onOpen: o.item_id ? () => go('item', { data: { item: o.item_id } }) : null })));
+  if (count) countOffers({ shown: list.map((o) => o.id) });
 }
 
 // Task 42: the start screen of a mall outfit: the mall's name and the start button (the weather comes with the results).
@@ -1820,7 +1832,7 @@ async function leaveShop(idle) {
     setLang('uz');
     if (token) await api(`/mall-cart/${token}`, null, 'DELETE').catch(() => {});
   }
-  location.replace(`${location.pathname}?mall=${mallId}`);
+  location.replace(`${location.pathname}?mall=${mallId}${idle && kiosk ? '&idle=1' : ''}`); // task 43: the idle slides start there
 }
 
 // Back to start keeps the cart; only the kiosk idle reset clears it for the next customer.
@@ -1877,6 +1889,13 @@ const mall = mallHome ? mallScreen({ mallId, api, kiosk, saved: savedCart }) : n
 if (mallHome) {
   clearRoute(); // a shop's saved screen must not open in the next shop picked here
   mall.show();
+  // Task 43: a mall kiosk's idle screen rotates the mall's approved offers. After an idle reset in a shop the page
+  // comes back here with &idle=1 (the customer's cart was deleted first) and the slides start at once.
+  if (kiosk) {
+    const slides = idleSlides({ mallId, api });
+    if (params.get('idle') === '1') slides.start();
+  }
+  if (params.has('idle')) history.replaceState(null, '', `${location.pathname}?mall=${mallId}`);
 }
 else startShop();
 

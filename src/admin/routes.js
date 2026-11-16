@@ -20,6 +20,7 @@ import { mallRoutes } from './malls.js';
 import { pointsRoutes } from './points.js';
 import { returnPoints } from '../cart/points.js';
 import { promoRoutes } from './promos.js';
+import { offerRoutes } from './offers.js';
 import { fitOf } from '../size/size.js';
 import { demandItems, funnelStats, methodStats, occasionStats } from '../demand.js';
 
@@ -192,7 +193,8 @@ export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/staf
 // What the mall role may call (task 37): its own account and its mall (profile, logo, QR, the shops' directory entries,
 // shop invites, summary numbers). Every product, order, customer, team and settings route is 403 for it.
 export const MALL_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^(GET|PATCH) \/mall$/, /^(POST|DELETE) \/mall\/logo$/, /^GET \/mall\/qr$/,
-  /^POST \/mall\/shops$/, /^PATCH \/mall\/stores\/\d+$/, /^(POST|DELETE) \/mall\/stores\/\d+\/logo$/];
+  /^POST \/mall\/shops$/, /^PATCH \/mall\/stores\/\d+$/, /^(POST|DELETE) \/mall\/stores\/\d+\/logo$/,
+  /^GET \/mall\/offers$/, /^POST \/mall\/offers\/\d+\/(approve|reject)$/, /^PATCH \/mall\/slides$/]; // task 43: what shops submitted to it
 const STATS_TZ = 'Asia/Tashkent'; // every store is in Uzbekistan (UTC+5, no DST)
 export const DAY_MS = 86400000;
 export const dayKey = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: STATS_TZ });
@@ -810,6 +812,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false } =
   promoRoutes(r, db); // task 26
   categoryRoutes(r, db, { uploadDir }); // task 36
   mallRoutes(r, db, { uploadDir }); // task 37
+  offerRoutes(r, db, { uploadDir }); // task 43
   pointsRoutes(r, db, { resolveStore }); // task 34
 
   // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.

@@ -314,6 +314,14 @@ a.kpi:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); col
 .detail-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; gap: var(--s-2); align-items: center; }
 .cats-table .order { display: flex; gap: var(--s-1); }
 .cats-table .order .up .icon { transform: rotate(180deg); }
+/* Task 43: offers. Shop text wraps anywhere (a long word can't widen the table); slide order ↑ is ↓ turned over. */
+.row-actions .icon-btn.up .icon { transform: rotate(180deg); }
+#offerRows .prod > span, #mallOfferRows .prod > span { min-width: 0; overflow-wrap: anywhere; }
+.slide-form { margin: var(--s-4) 0 0; }
+.offer-dates { display: grid; }
+#offerRows td:first-child, #mallOfferRows td:first-child { min-width: 13rem; } /* on a phone the table scrolls in its box */
+#offerRows td:nth-child(3), #mallOfferRows td:nth-child(3) { min-width: 8rem; overflow-wrap: anywhere; }
+#offerForm .grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); } /* uz | ru side by side, one column on phones */
 .cats-table .badge { margin-left: var(--s-2); }
 #importErrors, #wizImportErrors { max-height: 15rem; overflow: auto; font-size: var(--text-sm); padding-left: var(--s-5); }
 dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }

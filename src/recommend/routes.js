@@ -10,6 +10,7 @@ import { parsePhoto, applyStylist, applyRanking, withDeadline, TIMEOUT_MS } from
 import { COLORS, STYLES } from '../../public/shared/i18n.js';
 import { tryonOpen } from '../tryon.js';
 import { createMallRecommendRouter } from './mall.js';
+import { storeOffers } from '../admin/offers.js';
 
 const pick = (v, allowed, label, required) => {
   if (v === undefined || v === null || v === '') {
@@ -316,6 +317,7 @@ export function createStoreRouter(db, { weather, profiles = false, tryon = null 
     // categories (task 36): the shop's shown categories for the catalogue filter and the "Nima kerak?" chips.
     res.json({ id: store.id, name: store.name, city: store.city, weather: w, looks, profile: profiles && store.organization_id != null,
       categories: await shownCategories(db, id),
+      offers: await storeOffers(db, id), // task 43: the shop's own current offers (no mall approval needed on its own screen)
       ...((await tryonOpen(db, tryon, store)) && { tryon: tryon.name }) }); // task 41: the provider's name, for the consent text
   });
   return r;

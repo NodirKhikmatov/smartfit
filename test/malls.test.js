@@ -154,7 +154,12 @@ test('route walk: a mall admin reaches only their own mall; every shop data rout
   const product = await db('products').where({ store_id: s1 }).first();
   const ids = { '/products/:id': product.id, '/orders/:id': o.id, '/fitting/:id': 1, '/stores/:id': s1, '/team/:id': 1, '/team/invites/:id': 1, '/sync-keys/:id': 1,
     '/promos/:id': 1, '/demo-requests/:id': 1, '/categories/:id': 1, '/malls/:id': mallB };
-  const fill = (p) => p.replace(/^(\/[a-z-]+(?:\/invites)?)\/:id/, (m, head) => `${head}/${ids[`${head}/:id`]}`).replace('/mall/stores/:id', `/mall/stores/${s1}`);
+  // Task 43: an offer of shop s1 waiting for mall A, and one of s3 waiting for mall B.
+  const offer = async (store, mall, title) => (await db('offers').insert({ organization_id: (await db('stores').where({ id: store }).first()).organization_id, store_id: store, mall_id: mall,
+    title, title_ru: title, starts_at: new Date(Date.now() - 1000).toISOString(), ends_at: new Date(Date.now() + 86400000).toISOString(), image_url: '/uploads/offers/x.png', status: 'submitted' }).returning('id'))[0].id;
+  const offerA = await offer(s1, mallA, 'A aksiya'), offerB = await offer(s3, mallB, 'B aksiya');
+  ids['/offers/:id'] = offerA;
+  const fill = (p) => p.replace(/^(\/[a-z-]+(?:\/invites)?)\/:id/, (m, head) => `${head}/${ids[`${head}/:id`]}`).replace('/mall/stores/:id', `/mall/stores/${s1}`).replace('/mall/offers/:id', `/mall/offers/${offerA}`);
   const PUBLIC = ['POST /login', 'POST /invite/check', 'POST /invite/accept'];
   const ALLOWED = {
     'GET /me': async () => assert.equal((await admin('GET', '/me', undefined, mallTokenA)).body.mall_id, mallA),
@@ -195,6 +200,29 @@ test('route walk: a mall admin reaches only their own mall; every shop data rout
     'POST /mall/stores/:id/logo': async () => {
       assert.equal((await admin('POST', `/mall/stores/${s1}/logo`, undefined, mallTokenA, { raw: png, type: 'image/png' })).status, 200);
       assert.equal((await admin('POST', `/mall/stores/${s3}/logo`, undefined, mallTokenA, { raw: png, type: 'image/png' })).status, 404);
+    },
+    // Task 43: what shops submitted to this mall; another mall's offer is 404 both ways.
+    'GET /mall/offers': async () => {
+      const r = (await admin('GET', '/mall/offers', undefined, mallTokenA)).body.offers.map((o) => o.id);
+      assert.ok(r.includes(offerA) && !r.includes(offerB), 'its own mall\'s offers only (and the seed\'s demo ones)');
+      assert.deepEqual((await admin('GET', '/mall/offers', undefined, mallTokenB)).body.offers.map((o) => o.id), [offerB]);
+    },
+    'POST /mall/offers/:id/approve': async () => {
+      assert.equal((await admin('POST', `/mall/offers/${offerB}/approve`, undefined, mallTokenA)).status, 404, 'another mall\'s offer');
+      assert.equal((await admin('POST', `/mall/offers/${offerA}/approve`, undefined, mallTokenB)).status, 404, 'mall B never reaches mall A');
+      assert.equal((await admin('POST', `/mall/offers/${offerA}/approve`, undefined, mallTokenA)).body.status, 'approved');
+    },
+    'POST /mall/offers/:id/reject': async () => {
+      assert.equal((await admin('POST', `/mall/offers/${offerB}/reject`, { reason: 'Yo\'q' }, mallTokenA)).status, 404);
+      assert.equal((await admin('POST', `/mall/offers/${offerA}/reject`, {}, mallTokenA)).status, 400, 'a reason is required');
+      assert.equal((await admin('POST', `/mall/offers/${offerA}/reject`, { reason: 'Rasm xira' }, mallTokenA)).body.status, 'rejected');
+      assert.equal((await db('offers').where({ id: offerB }).first()).status, 'submitted');
+    },
+    'PATCH /mall/slides': async () => {
+      assert.equal((await admin('PATCH', '/mall/slides', { seconds: 3 }, mallTokenA)).status, 400);
+      assert.equal((await admin('PATCH', '/mall/slides', { order: [offerB] }, mallTokenA)).status, 400, 'not its offer');
+      assert.equal((await admin('PATCH', '/mall/slides', { seconds: 12 }, mallTokenA)).body.seconds, 12);
+      assert.equal((await db('malls').where({ id: mallB }).first()).slide_seconds, 8);
     },
     'DELETE /mall/stores/:id/logo': async () => {
       assert.equal((await admin('DELETE', `/mall/stores/${s3}/logo`, undefined, mallTokenA)).status, 404);

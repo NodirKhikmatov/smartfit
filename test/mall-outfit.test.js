@@ -352,6 +352,7 @@ test('migration 032 down and up', async () => {
   const m = testDb();
   try {
     await m.migrate.latest();
+    await m.migrate.down(); // 033
     await m.migrate.down();
     assert.ok(!(await m.schema.hasTable('mall_recs')));
     assert.ok(!('mall_rec_id' in (await m('recommendation_logs').columnInfo())));

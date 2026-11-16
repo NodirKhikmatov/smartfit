@@ -258,7 +258,30 @@ test('every mutating admin route writes an audit row', async () => {
     }
     return mallTok;
   };
+  // Task 43: an offer of the Tashkent store (in the demo mall), and one waiting for the mall admin.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Tashkent' });
+  const newOffer = async () => (await admin('POST', '/offers', { store_id: tashkent, title: 'Walk', title_ru: 'Обход', starts_on: today, ends_on: today }, ownerToken)).body;
+  const waiting = async () => {
+    const o = await newOffer();
+    await admin('POST', `/offers/${o.id}/image`, undefined, ownerToken, { raw: png, type: 'image/png' });
+    return (await admin('POST', `/offers/${o.id}/submit`, undefined, ownerToken)).body;
+  };
   const recipes = {
+    'POST /offers': ['offer.create', () => admin('POST', '/offers', { store_id: tashkent, title: 'Yangi', title_ru: 'Новая', starts_on: today, ends_on: today }, ownerToken)],
+    'PATCH /offers/:id': ['offer.update', async () => admin('PATCH', `/offers/${(await newOffer()).id}`, { body: 'Matn' }, ownerToken)],
+    'DELETE /offers/:id': ['offer.delete', async () => admin('DELETE', `/offers/${(await newOffer()).id}`, undefined, ownerToken)],
+    'POST /offers/:id/image': ['offer.image', async () => admin('POST', `/offers/${(await newOffer()).id}/image`, undefined, ownerToken, { raw: png, type: 'image/png' })],
+    'POST /offers/:id/submit': ['offer.submit', async () => {
+      const o = await newOffer();
+      await admin('POST', `/offers/${o.id}/image`, undefined, ownerToken, { raw: png, type: 'image/png' });
+      return admin('POST', `/offers/${o.id}/submit`, undefined, ownerToken);
+    }],
+    'POST /mall/offers/:id/approve': ['offer.approve', async () => admin('POST', `/mall/offers/${(await waiting()).id}/approve`, undefined, await mallToken())],
+    'POST /mall/offers/:id/reject': ['offer.reject', async () => admin('POST', `/mall/offers/${(await waiting()).id}/reject`, { reason: 'Rasm xira' }, await mallToken())],
+    'PATCH /mall/slides': ['mall.slides', async () => {
+      const g = (await admin('GET', '/mall/offers', undefined, await mallToken())).body;
+      return admin('PATCH', '/mall/slides', { seconds: g.seconds === 10 ? 12 : 10 }, await mallToken());
+    }],
     'POST /products': ['product.create', () => admin('POST', '/products', { name: 'Yangi', category: 'top', gender: 'male', color: 'qora', price: 90000, temp_min: 0, temp_max: 25 }, ownerToken)],
     'PATCH /products/:id': ['product.update', async () => admin('PATCH', `/products/${(await product()).id}`, { price: 95000, stock: { M: 1 } }, ownerToken)],
     'DELETE /products/:id': ['product.delete', async () => admin('DELETE', `/products/${(await product()).id}`, undefined, ownerToken)],

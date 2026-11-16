@@ -93,6 +93,39 @@ html.kiosk .attract .go { min-height: 4.5rem; font-size: var(--text-xl); }
 .store-list .empty { list-style: none; }
 .tile .shop { color: var(--accent); }
 .mall-btn { flex: none; }
+
+/* ---------- Task 43: offers. Cards on the mall screen and a shop's start screen; the mall kiosk's idle slides.
+   Shop text has fixed maximum lengths; overflow-wrap keeps a long word from pushing the layout. */
+.offers { margin-bottom: var(--s-5); }
+.offers h2 { margin: 0 0 var(--s-3); }
+.offer-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-3); }
+html.kiosk .offer-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.offer-list > li { display: grid; }
+.offer-card { display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: var(--s-3); align-items: start; height: auto; min-height: 0; padding: var(--s-3);
+  text-align: left; white-space: normal; font-weight: var(--weight-regular); color: var(--ink); text-decoration: none; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.offer-card img { width: 6rem; aspect-ratio: 1; object-fit: cover; border-radius: var(--r-md); background: var(--sunken); }
+.offer-card:not(:has(img)) { grid-template-columns: minmax(0, 1fr); }
+.offer-text { display: grid; gap: var(--s-1); min-width: 0; overflow-wrap: anywhere; }
+.offer-text strong { font-size: var(--text-lg); line-height: var(--leading-snug); }
+.offer-body { color: var(--ink-2); }
+.offer-code { justify-self: start; padding: 0 var(--s-2); border: 1px dashed var(--accent); border-radius: var(--r-sm); color: var(--accent); font-weight: var(--weight-medium); }
+.attract .offers { margin: var(--s-5) 0 0; }
+html.kiosk .attract .offer-list { grid-template-columns: minmax(0, 1fr); }
+
+.slides { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: var(--s-6);
+  padding: var(--s-7) var(--s-6); background: var(--paper); text-align: center; overflow: hidden; cursor: pointer; }
+.slides[hidden] { display: none; }
+.slide { display: grid; justify-items: center; gap: var(--s-5); max-width: 44rem; min-height: 0; overflow-wrap: anywhere; }
+.slide img { max-width: 100%; max-height: 55dvh; object-fit: contain; border-radius: var(--r-lg); background: var(--sunken); }
+.slide h2 { margin: 0; font-size: calc(var(--text-4xl) * 1.2); line-height: 1.05; letter-spacing: -.02em; }
+.slide p { margin: 0; font-size: var(--text-2xl); }
+.slide .meta { font-size: var(--text-xl); }
+.slide .offer-code { justify-self: center; font-size: var(--text-xl); padding: var(--s-1) var(--s-3); }
+.slide-hint { margin: 0; color: var(--ink-2); }
+@media (prefers-reduced-motion: no-preference) {
+  .slide { animation: slide-in 600ms var(--ease-out) both; }
+}
+@keyframes slide-in { from { opacity: 0; } }
 html.kiosk .shop-link .shop-logo { width: 4rem; height: 4rem; }
 
 /* ---------- Form */

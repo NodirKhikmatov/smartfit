@@ -82,7 +82,10 @@ async function orgBRecords() {
   await db('organizations').where({ id: orgB }).update({ cashback_percent: 5 });
   const [{ id: profile }] = await db('customer_profiles').insert({ organization_id: orgB, telegram_user_id: 777001, phone: '+998901112233', name: 'Bobur', consent_at: new Date().toISOString() }).returning('id');
   await db('points_ledger').insert({ organization_id: orgB, profile_id: profile, order_id: order.id, kind: 'earn', amount: 5000, ref: `earn:${order.id}` });
-  return { product, order, fitting, invite, key, member, promo, profile };
+  // Task 43: an offer of org B linked to its promo code.
+  const [{ id: offer }] = await db('offers').insert({ organization_id: orgB, store_id: b1, title: 'B aksiya', title_ru: 'B акция', starts_at: new Date().toISOString(),
+    ends_at: new Date(Date.now() + 86400000).toISOString(), promo_code_id: promo.id, status: 'draft' }).returning('id');
+  return { product, order, fitting, invite, key, member, promo, profile, offer };
 }
 
 // The isolation walk: every admin route, called by org A's owner against org B's records. A route not listed here
@@ -297,6 +300,31 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
     'PATCH /mall/stores/:id': async () => refused(await admin('PATCH', `/mall/stores/${b1}`, { hidden: true }, ownerA)),
     'POST /mall/stores/:id/logo': async () => refused(await admin('POST', `/mall/stores/${b1}/logo`, undefined, ownerA, { raw: png, type: 'image/png' })),
     'DELETE /mall/stores/:id/logo': async () => refused(await admin('DELETE', `/mall/stores/${b1}/logo`, undefined, ownerA)),
+    // Task 43: org B's offers are org B's; org A can't link org B's promo code or product; the mall routes are the mall admin's.
+    'GET /offers': async () => {
+      for (const q of ['', `?store_id=${b1}`]) {
+        const r = await admin('GET', `/offers${q}`, undefined, ownerA);
+        assert.equal(r.status, 200);
+        assert.ok(r.body.every((o) => o.organization_id === orgA) && !r.body.some((o) => o.id === B.offer), 'no org B offer');
+      }
+    },
+    'POST /offers': async () => {
+      const day = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Tashkent' });
+      const body = { title: 'A', title_ru: 'A', starts_on: day, ends_on: day };
+      const had = (await db('offers').where({ organization_id: orgA })).length;
+      refused(await admin('POST', '/offers', { ...body, store_id: b1 }, ownerA));
+      assert.equal((await admin('POST', '/offers', { ...body, store_id: a1, promo_code_id: B.promo.id }, ownerA)).status, 400, 'org B promo code');
+      assert.equal((await admin('POST', '/offers', { ...body, store_id: a1, product_id: B.product.id }, ownerA)).status, 400, 'org B product');
+      assert.equal((await db('offers').where({ organization_id: orgA })).length, had, 'nothing made');
+    },
+    'PATCH /offers/:id': async () => refused(await admin('PATCH', `/offers/${B.offer}`, { title: 'Buzildi' }, ownerA)),
+    'DELETE /offers/:id': async () => refused(await admin('DELETE', `/offers/${B.offer}`, undefined, ownerA)),
+    'POST /offers/:id/image': async () => refused(await admin('POST', `/offers/${B.offer}/image`, undefined, ownerA, { raw: png, type: 'image/png' })),
+    'POST /offers/:id/submit': async () => refused(await admin('POST', `/offers/${B.offer}/submit`, undefined, ownerA)),
+    'GET /mall/offers': async () => refused(await admin('GET', '/mall/offers', undefined, ownerA)),
+    'POST /mall/offers/:id/approve': async () => refused(await admin('POST', `/mall/offers/${B.offer}/approve`, undefined, ownerA)),
+    'POST /mall/offers/:id/reject': async () => refused(await admin('POST', `/mall/offers/${B.offer}/reject`, { reason: 'X' }, ownerA)),
+    'PATCH /mall/slides': async () => refused(await admin('PATCH', '/mall/slides', { seconds: 10 }, ownerA)),
     'GET /orgs': async () => refused(await admin('GET', '/orgs', undefined, ownerA)),
     'POST /orgs': async () => refused(await admin('POST', '/orgs', { name: 'X', owner_email: 'x2@smartfit.uz' }, ownerA)),
     'GET /demo-requests': async () => refused(await admin('GET', '/demo-requests', undefined, ownerA)),
@@ -320,6 +348,8 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
   assert.equal((await db('sync_keys').where({ id: B.key.id }).first()).revoked_at, null);
   assert.equal((await db('promo_codes').where({ id: B.promo.id }).first()).value, 10);
   assert.equal((await db('organizations').where({ id: orgB }).first()).cashback_percent, 5);
+  const bOffer = await db('offers').where({ id: B.offer }).first();
+  assert.deepEqual([bOffer.title, bOffer.status, bOffer.image_url], ['B aksiya', 'draft', null]);
   const bStore = await db('stores').where({ id: b1 }).first();
   assert.equal(Boolean(bStore.mall_hidden), false);
   assert.equal(bStore.logo_url, null);
@@ -390,7 +420,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 32; i > 12; i--) await m.migrate.down(); // 032 … 013
+    for (let i = 33; i > 12; i--) await m.migrate.down(); // 033 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

@@ -199,7 +199,7 @@ async function show() {
   $('avatar').textContent = me.email[0].toUpperCase();
   $('storeWrap').hidden = !sup;
   $('navOrgs').hidden = $('navMalls').hidden = me.role !== 'super';
-  $('navCats').hidden = !['owner', 'super'].includes(me.role); // managers only use the categories
+  $('navCats').hidden = $('navOffers').hidden = !['owner', 'super'].includes(me.role); // managers only use the categories; offers are the owner's
   for (const li of $('nav').children) if (!li.id || li.id === 'navSettings') li.hidden = mallRole;
   $('navMall').hidden = !mallRole;
   $('userMenu').querySelector('a[href="#/settings"]').hidden = mallRole;
@@ -256,6 +256,7 @@ const PAGES = {
   cashier: { title: 'adm.route.cashier', load: loadCashier, poll: () => loadPending(true) },
   products: { title: 'adm.route.products', load: loadProducts },
   categories: { title: 'adm.route.categories', load: loadCategories },
+  offers: { title: 'adm.route.offers', load: loadOffers }, // task 43
   stats: { title: 'adm.route.stats', load: loadStats },
   demand: { title: 'adm.route.demand', load: loadDemand },
   qr: { title: 'adm.route.qr', load: loadQr },
@@ -272,6 +273,7 @@ const ACTIONS = {
     el('button', { type: 'button', className: 'primary', onclick: () => openForm(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.products.add') })),
   ],
   categories: [el('button', { type: 'button', className: 'primary', onclick: () => openCat(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.cats.add') }))],
+  offers: [el('button', { type: 'button', className: 'primary', onclick: () => openOffer(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.offers.add') }))],
   stats: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => exportStats() }, icon('download'))],
   demand: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => download('/demand/export?' + qs(scoped({ days: demandDays() })), `talab-${demandDays()}d.csv`) }, icon('download'))],
 };
@@ -282,7 +284,7 @@ function render() {
   const welcome = me.role === 'owner' && !stores.length;
   const mallRole = me.role === 'mall';
   if ((welcome && !['welcome', 'settings'].includes(route.route)) || (route.route === 'welcome' && me.role !== 'owner') || (['orgs', 'malls'].includes(route.route) && me.role !== 'super')
-    || (route.route === 'categories' && !['owner', 'super'].includes(me.role)) || (mallRole !== (route.route === 'mall'))) {
+    || (['categories', 'offers'].includes(route.route) && !['owner', 'super'].includes(me.role)) || (mallRole !== (route.route === 'mall'))) {
     route = parseHash(welcome ? '#/welcome' : mallRole ? '#/mall' : '#/dashboard');
     history.replaceState(null, '', buildHash(route.route));
   }
@@ -1783,6 +1785,151 @@ promoF.onsubmit = async (e) => {
   } catch (err) { $('promoDlgError').textContent = err.message; } finally { $('promoSave').disabled = false; }
 };
 
+// ---------- Offers (task 43): the shop owner's. Text and pictures go to the mall screen and kiosk after the mall
+// admin approves them (a shop outside any mall publishes at once); its own start screen shows them without approval.
+let offers = [], editingOffer = null;
+const offerText = (o, k = 'title') => (getLang() === 'ru' && o[`${k}_ru`]) || o[k] || '';
+const OFFER_STATES = { draft: ['adm.offers.st_draft', 'off'], submitted: ['adm.offers.st_submitted', 'warn'], approved: ['adm.offers.st_approved', 'ok'], rejected: ['adm.offers.st_rejected', 'danger'] };
+const offerBadge = (o) => {
+  const [key, tone] = o.status === 'approved' && !o.mall_id ? ['adm.offers.st_published', 'ok'] : OFFER_STATES[o.status];
+  return el('span', { className: `badge ${tone}`, textContent: t(key) });
+};
+const offerDates = (o) => el('span', { className: 'offer-dates' }, el('span', { className: 'num', textContent: `${dayText(o.starts_on)} – ${dayText(o.ends_on)}` }),
+  el('span', { className: 'sizes', textContent: t(o.live ? 'adm.offers.live' : 'adm.offers.not_live') }));
+const offerThumb = (o) => (o.image_url ? el('img', { className: 'thumb', src: o.image_url, alt: '', loading: 'lazy' }) : el('span', { className: 'thumb ph' }, icon('sparkle')));
+const offerCounts = (o) => el('td', { className: 'num hide-sm', textContent: `${fmt.num(o.shown)} / ${fmt.num(o.tapped)}` });
+async function loadOffers() {
+  const seq = (loads.offers = (loads.offers || 0) + 1);
+  stateBox($('offersError'));
+  const stop = skeletonRows($('offerRows'), 5, 3);
+  try {
+    const list = await call('/offers?' + qs(scoped({})));
+    stop();
+    if (seq !== loads.offers) return;
+    offers = list;
+    if (!list.length) return emptyRow($('offerRows'), 5, { ic: 'sparkle', title: t('adm.offers.none'), text: t('adm.offers.none_text') });
+    $('offerRows').replaceChildren(...list.map((o) => el('tr', {},
+      el('td', {}, el('span', { className: 'prod' }, offerThumb(o),
+        el('span', {}, el('button', { type: 'button', className: 'name-btn', textContent: offerText(o), onclick: () => openOffer(o) }),
+          el('span', { className: 'sizes', textContent: [many() && o.store_name, o.link && linkText(o.link)].filter(Boolean).join(' · ') })))),
+      el('td', { className: 'hide-sm' }, offerDates(o)),
+      el('td', {}, offerBadge(o), o.status === 'rejected' && o.reject_reason ? el('div', { className: 'sizes', textContent: t('adm.offers.reason', { reason: o.reject_reason }) }) : null),
+      offerCounts(o),
+      el('td', { className: 'row-actions' },
+        ['draft', 'rejected'].includes(o.status) ? iconBtn('arrow-right', t(o.in_mall ? 'adm.offers.submit_named' : 'adm.offers.publish_named', { title: offerText(o) }), () => submitOffer(o)) : null,
+        iconBtn('edit', t('adm.offers.edit_named', { title: offerText(o) }), () => openOffer(o))))));
+  } catch (err) {
+    stop();
+    if (seq === loads.offers) { $('offerRows').replaceChildren(); stateBox($('offersError'), err, () => loadOffers()); }
+  }
+}
+const linkText = (l) => (l.kind === 'promo' ? t('adm.offers.link_code', { code: l.code ?? '—' }) : productName(l));
+async function submitOffer(o) {
+  try {
+    const r = await call(`/offers/${o.id}/submit`, { method: 'POST' });
+    toast(t(r.status === 'submitted' ? 'adm.offers.sent' : 'adm.offers.published'), { tone: 'ok' });
+  } catch (err) { toast(err.message, { tone: 'danger' }); }
+  loadOffers();
+}
+const ofm = $('offerForm');
+function openOffer(o) {
+  editingOffer = o;
+  ofm.reset();
+  $('offerDlgError').textContent = $('offerImgError').textContent = '';
+  $('offerTitle').textContent = o ? t('adm.offers.edit_title', { title: offerText(o) }) : t('adm.offers.add');
+  $('offerReason').hidden = !(o?.status === 'rejected' && o.reject_reason);
+  $('offerReason').textContent = o?.reject_reason ? t('adm.offers.reason', { reason: o.reject_reason }) : '';
+  ofm.store_id.replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
+  ofm.store_id.value = o?.store_id ?? (scope || stores[0]?.id || '');
+  ofm.store_id.disabled = Boolean(o); // an offer stays in its store
+  $('offerStoreWrap').hidden = !many();
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+  for (const k of ['title', 'title_ru', 'body', 'body_ru']) ofm[k].value = o?.[k] ?? '';
+  ofm.starts_on.value = o?.starts_on ?? today;
+  ofm.ends_on.value = o?.ends_on ?? '';
+  ofm.link.value = o?.promo_code_id ? 'promo' : o?.product_id ? 'product' : '';
+  $('offerDelete').hidden = !o;
+  $('offerImgWrap').hidden = !o;
+  $('offerImgNote').hidden = Boolean(o);
+  $('offerImgFile').value = '';
+  showOfferImage(o?.image_url);
+  offerLink();
+  $('offerDlg').showModal();
+}
+// The link's own picker: the store's promo codes (shown publicly, the hint says so) or one of its products.
+async function offerLink() {
+  const kind = ofm.link.value, sid = Number(ofm.store_id.value);
+  $('offerPromoWrap').hidden = $('offerPromoHint').hidden = kind !== 'promo';
+  $('offerQWrap').hidden = $('offerProductWrap').hidden = $('offerProductHint').hidden = kind !== 'product';
+  try {
+    if (kind === 'promo') {
+      const org = stores.find((s) => s.id === sid)?.organization_id;
+      const list = (await call('/promos')).filter((p) => p.organization_id === org && (!p.store_id || p.store_id === sid));
+      ofm.promo_code_id.replaceChildren(...list.map((p) => el('option', { value: p.id, textContent: p.active ? p.code : `${p.code} (${t('adm.promo.off')})` })));
+      if (editingOffer?.promo_code_id) ofm.promo_code_id.value = editingOffer.promo_code_id;
+    } else if (kind === 'product') await offerProducts();
+  } catch (err) { $('offerDlgError').textContent = err.message; }
+}
+async function offerProducts() {
+  const r = await call('/products?' + qs({ store_id: ofm.store_id.value, q: ofm.product_q.value.trim(), sort: 'name', limit: 50 }));
+  const keep = editingOffer?.product_id && !r.items.some((p) => p.id === editingOffer.product_id) && editingOffer.link?.kind === 'product';
+  ofm.product_id.replaceChildren(...(keep ? [el('option', { value: editingOffer.product_id, textContent: productName(editingOffer.link) })] : []),
+    ...r.items.map((p) => el('option', { value: p.id, textContent: productName(p) })));
+  if (editingOffer?.product_id) ofm.product_id.value = editingOffer.product_id;
+}
+ofm.link.onchange = offerLink;
+ofm.store_id.onchange = offerLink;
+let offerQTimer;
+ofm.product_q.oninput = () => { clearTimeout(offerQTimer); offerQTimer = setTimeout(() => offerProducts().catch((err) => { $('offerDlgError').textContent = err.message; }), 300); };
+function showOfferImage(url) {
+  $('offerImg').hidden = !url;
+  if (url) $('offerImg').src = url;
+}
+$('offerCancel').onclick = () => $('offerDlg').close();
+ofm.onsubmit = async (e) => {
+  e.preventDefault();
+  $('offerDlgError').textContent = '';
+  if (!ofm.reportValidity()) return;
+  const kind = ofm.link.value;
+  const body = {
+    title: ofm.title.value.trim(), title_ru: ofm.title_ru.value.trim(), body: ofm.body.value.trim() || null, body_ru: ofm.body_ru.value.trim() || null,
+    starts_on: ofm.starts_on.value, ends_on: ofm.ends_on.value,
+    promo_code_id: kind === 'promo' && ofm.promo_code_id.value ? Number(ofm.promo_code_id.value) : null,
+    product_id: kind === 'product' && ofm.product_id.value ? Number(ofm.product_id.value) : null,
+    ...(!editingOffer && { store_id: Number(ofm.store_id.value) }),
+  };
+  $('offerSave').disabled = true;
+  try {
+    const o = await call(editingOffer ? `/offers/${editingOffer.id}` : '/offers', { method: editingOffer ? 'PATCH' : 'POST', body });
+    toast(t('adm.offers.saved'), { tone: 'ok' });
+    loadOffers();
+    if (editingOffer) $('offerDlg').close();
+    else openOffer(o); // the picture comes next
+  } catch (err) { $('offerDlgError').textContent = err.message; } finally { $('offerSave').disabled = false; }
+};
+$('offerImgUpload').onclick = async () => {
+  const file = $('offerImgFile').files[0];
+  $('offerImgError').textContent = '';
+  if (!file) return void ($('offerImgError').textContent = t('adm.form.image_pick'));
+  if (file.size > 2 * 1024 * 1024) return void ($('offerImgError').textContent = t('adm.form.image_big'));
+  try {
+    editingOffer = await call(`/offers/${editingOffer.id}/image`, { method: 'POST', raw: file, type: file.type || 'application/octet-stream' });
+    showOfferImage(editingOffer.image_url);
+    $('offerImgFile').value = '';
+    loadOffers();
+  } catch (err) { $('offerImgError').textContent = err.message; }
+};
+$('offerDelete').onclick = async () => {
+  const o = editingOffer;
+  if (!(await confirmDialog({ title: t('adm.offers.delete_title'), text: t('adm.offers.delete_text', { title: offerText(o) }), ok: t('common.delete'), cancel: t('common.cancel'), danger: true }))) return;
+  try {
+    await call(`/offers/${o.id}`, { method: 'DELETE' });
+    $('offerDlg').close();
+    toast(t('adm.offers.deleted'), { tone: 'ok' });
+    loadOffers();
+  } catch (err) { $('offerDlgError').textContent = err.message; }
+};
+
 // Audit log: newest first, filtered by what / who / dates (all in the hash), paged.
 const AUDIT_FIELDS = {
   name: 'field.name', name_ru: 'field.name_ru', category: 'field.category', gender: 'field.gender', color: 'field.color', style: 'field.style',
@@ -1795,6 +1942,8 @@ const AUDIT_FIELDS = {
   bundle_percent: 'field.bundle_percent', instalment_on: 'adm.set.instalment_on', tryon_on: 'adm.set.tryon_on', tryon_daily_limit: 'field.tryon_limit', instalment_terms: 'field.instalment_terms', store_id: 'common.store', kind: 'field.promo_kind', value: 'field.promo_value', min_order: 'field.promo_min',
   description: 'field.description', description_ru: 'field.description_ru', details: 'field.details', size_kind: 'field.size_kind', sizes: 'field.cat_sizes', audience: 'field.audience',
   hidden: 'adm.cats.hide', sort: 'adm.cats.order',
+  title: 'field.offer_title', title_ru: 'field.offer_title_ru', body: 'field.offer_body', body_ru: 'field.offer_body_ru', reject_reason: 'field.offer_reason', // task 43
+  promo_code_id: 'adm.offers.link_promo', product_id: 'adm.offers.link_product', seconds: 'field.slide_seconds', order: 'field.slide_order',
   starts_on: 'adm.promo.starts', ends_on: 'adm.promo.ends', max_uses: 'field.promo_max_uses', max_per_phone: 'field.promo_per_phone', active: 'field.promo_active',
 };
 const MONEY = ['price', 'discount_price', 'delivery_fee', 'free_delivery_threshold', 'min_order'];
@@ -2250,13 +2399,14 @@ async function loadMall(quiet = false) {
   seg($('mallDays'), [['7', t('adm.stats.days', { n: 7 })], ['30', t('adm.stats.days', { n: 30 })]], String(days), (v) => setParams({ ...route.params, days: v === '7' ? '' : v }));
   const stop = quiet ? () => {} : skeletonRows($('mallShopRows'), 6, 3);
   try {
-    const [d, qr] = await Promise.all([call(`/mall?days=${days}`), mallQr ?? call('/mall/qr')]);
+    const [d, qr, mo] = await Promise.all([call(`/mall?days=${days}`), mallQr ?? call('/mall/qr'), call('/mall/offers')]);
     stop();
     if (seq !== loads.mall) return;
     mallData = d;
     mallQr = qr;
     stateBox($('mallError'));
     drawMall(d, qr);
+    drawMallOffers(mo);
   } catch (err) {
     stop();
     if (seq === loads.mall) { $('mallShopRows').replaceChildren(); stateBox($('mallError'), err, () => loadMall()); }
@@ -2303,6 +2453,76 @@ function drawMall({ mall, days, totals, shops, pending }, qr) {
     el('p', { className: 'hint', textContent: t('adm.mall.kiosk_link') }), el('p', { className: 'muted qr-url', textContent: qr.kiosk_url }),
     el('div', { className: 'actions' }, el('button', { type: 'button', onclick: () => copy(qr.kiosk_url) }, t('adm.qr.copy'))));
 }
+
+// Task 43: offers shops submitted to this mall. Waiting ones get approve / reject; approved ones are the idle slides,
+// in this order (↑ / ↓) and for the seconds below; rejected ones keep their reason (the shop sees it) and can be approved.
+let rejecting = null;
+function drawMallOffers({ seconds, offers: list }) {
+  if (document.activeElement !== $('slideForm').seconds) $('slideForm').seconds.value = seconds;
+  if (!list.length) return emptyRow($('mallOfferRows'), 5, { ic: 'sparkle', title: t('adm.mall.offers_none'), text: t('adm.mall.offers_none_text') });
+  const shown = list.filter((o) => o.status === 'approved');
+  $('mallOfferRows').replaceChildren(...list.map((o) => {
+    const name = offerText(o), i = shown.indexOf(o);
+    const move = (d) => {
+      const b = iconBtn('chevron-down', t(d < 0 ? 'adm.cats.up_aria' : 'adm.cats.down_aria', { name }), async () => {
+        const order = shown.map((x) => x.id);
+        [order[i], order[i + d]] = [order[i + d], order[i]];
+        try { await call('/mall/slides', { method: 'PATCH', body: { order } }); } catch (err) { toast(err.message, { tone: 'danger' }); }
+        loadMall(true);
+      });
+      b.classList.toggle('up', d < 0);
+      return b;
+    };
+    return el('tr', {},
+      el('td', {}, el('span', { className: 'prod' }, offerThumb(o),
+        el('span', {}, el('strong', { textContent: name }),
+          o.body || o.body_ru ? el('span', { className: 'sizes offer-body-cell', textContent: offerText(o, 'body') }) : null,
+          el('span', { className: 'sizes', textContent: [o.store_name, placeOf(o), o.link && linkText(o.link)].filter(Boolean).join(' · ') })))),
+      el('td', { className: 'hide-sm' }, offerDates(o)),
+      el('td', {}, offerBadge(o), o.status === 'rejected' && o.reject_reason ? el('div', { className: 'sizes', textContent: t('adm.offers.reason', { reason: o.reject_reason }) }) : null),
+      offerCounts(o),
+      el('td', { className: 'row-actions' },
+        o.status !== 'approved' ? iconBtn('check', t('adm.mall.approve_named', { title: name }), () => approveOffer(o)) : null,
+        o.status !== 'rejected' ? iconBtn('close', t('adm.mall.reject_named', { title: name }), () => openReject(o)) : null,
+        i > 0 ? move(-1) : null, i >= 0 && i < shown.length - 1 ? move(1) : null));
+  }));
+}
+async function approveOffer(o) {
+  try {
+    await call(`/mall/offers/${o.id}/approve`, { method: 'POST' });
+    toast(t('adm.mall.approved'), { tone: 'ok' });
+  } catch (err) { toast(err.message, { tone: 'danger' }); }
+  loadMall(true);
+}
+const rejf = $('rejectForm');
+function openReject(o) {
+  rejecting = o;
+  rejf.reset();
+  $('rejectError').textContent = '';
+  $('rejectTitle').textContent = t('adm.mall.reject_named', { title: offerText(o) });
+  $('rejectDlg').showModal();
+}
+$('rejectCancel').onclick = () => $('rejectDlg').close();
+rejf.onsubmit = async (e) => {
+  e.preventDefault();
+  $('rejectError').textContent = '';
+  if (!rejf.reportValidity()) return;
+  try {
+    await call(`/mall/offers/${rejecting.id}/reject`, { method: 'POST', body: { reason: rejf.reason.value.trim() } });
+    $('rejectDlg').close();
+    toast(t('adm.mall.rejected'), { tone: 'ok' });
+    loadMall(true);
+  } catch (err) { $('rejectError').textContent = err.message; }
+};
+$('slideForm').onsubmit = async (e) => {
+  e.preventDefault();
+  $('slideError').textContent = '';
+  if (!e.target.reportValidity()) return;
+  try {
+    await call('/mall/slides', { method: 'PATCH', body: { seconds: Number(e.target.seconds.value) } });
+    toast(t('adm.form.saved'), { tone: 'ok' });
+  } catch (err) { $('slideError').textContent = err.message; }
+};
 
 // A shop's directory entry: floor, unit, shown or hidden, its logo.
 const ef = $('entryForm');

@@ -39,6 +39,11 @@
         <button class="secondary wide" id="catalogBtn" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><span data-i18n="kiosk.start.catalog"></span></button>
         <button class="secondary wide" id="profileLogin" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#user"></use></svg><span data-i18n="kiosk.profile.login"></span></button>
       </div>
+      <!-- Task 43: the shop's own current offers (app.js drawOffers) -->
+      <section class="offers" id="shopOffers" hidden aria-labelledby="shopOffersTitle">
+        <h2 id="shopOffersTitle" data-i18n="kiosk.offer.title"></h2>
+        <div class="offer-list" id="shopOfferList"></div>
+      </section>
     </div>
     <div class="lookbook" id="lookbook" aria-hidden="true"></div>
   </section>
@@ -217,6 +222,11 @@
       <a class="button primary wide" id="mallLook"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><span data-i18n="kiosk.mall.look"></span></a>
       <p class="hint" data-i18n="kiosk.mall.look_text"></p>
     </div>
+    <!-- Task 43: the mall's current approved offers (mall.js) -->
+    <section class="offers" id="mallOffers" hidden aria-labelledby="mallOffersTitle">
+      <h2 id="mallOffersTitle" data-i18n="kiosk.offer.title"></h2>
+      <ul class="offer-list" id="mallOfferList"></ul>
+    </section>
     <form id="mallSearch" class="mall-search card" role="search" novalidate>
       <label for="mallQ" data-i18n="kiosk.mall.search_label"></label>
       <div class="mall-search-row">
@@ -334,6 +344,8 @@
   <div><strong id="barCount"></strong><span class="muted" id="barTotal"></span></div>
   <button class="primary" id="barGo"><span data-i18n="kiosk.bar.go"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></button>
 </div>
+<!-- Task 43: a mall kiosk's idle screen, the mall's approved offers one by one; any touch ends it (public/app/offers.js) -->
+<div class="slides" id="slides" hidden data-i18n-aria-label="kiosk.offer.title" role="region"></div>
 <!-- Kiosk only: staff exit after a 3 s press on the logo (public/app/kiosk.js) -->
 <dialog id="staffDlg" class="narrow" aria-labelledby="staffTitle">
   <form id="staffForm" novalidate>

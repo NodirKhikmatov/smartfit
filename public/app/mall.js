@@ -4,6 +4,7 @@
 // one form, and one checkout that makes one order per shop. Shop and mall names come from the database: always set as text.
 import { icon, showAfter, skeletonCard } from '/shared/ui.js';
 import { t, fmt, getLang, productName } from '/shared/i18n.js';
+import { offerCard, countOffers } from './offers.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids.filter((k) => k != null && k !== false)); return e; };
@@ -12,7 +13,7 @@ const SEARCH_MS = 350; // typing pause before the search runs
 const QR_SVG = /^<svg[\s>]/; // the status-page QR is built by our server from our own URL
 
 export function mallScreen({ mallId, api, kiosk, saved }) {
-  let mall = null, found = null, seq = 0, timer = null;
+  let mall = null, found = null, seq = 0, timer = null, offers = []; // task 43: the mall's current approved offers
   let cart = null, done = null, holdTimer = null; // task 38: the mall cart view, the last checkout's answer
   const chosen = {}; // per shop: { points: use the linked points, months: '' or an instalment term }
   const shopUrl = (storeId, item) => `${location.pathname}?store=${storeId}&mall=${mallId}${item ? `&item=${item}` : ''}`;
@@ -205,6 +206,22 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
     }
     $('mallSearch').hidden = false;
     draw();
+    loadOffers();
+  }
+
+  // Task 43: "Aksiyalar": the mall's current approved offers. A tap opens the item (while it is in stock) or the shop.
+  async function loadOffers(count = true) {
+    try {
+      offers = (await api(`/malls/${mallId}/offers`)).offers;
+    } catch {
+      offers = []; // the directory works without them
+    }
+    drawOffers();
+    if (count) countOffers({ shown: offers.map((o) => o.id) });
+  }
+  function drawOffers() {
+    $('mallOffers').hidden = !offers.length;
+    $('mallOfferList').replaceChildren(...offers.map((o) => el('li', {}, offerCard(o, { href: shopUrl(o.store.id, o.item_id) }))));
   }
 
   // Header and directory; a language switch calls this again (category names change).
@@ -216,6 +233,7 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
     $('mallLogo').hidden = !mall.logo_url;
     if (mall.logo_url) $('mallLogo').src = mall.logo_url;
     $('mallShopsTitle').textContent = t('kiosk.mall.shops', { n: mall.shops.length });
+    drawOffers();
     $('mallShops').replaceChildren(...(mall.shops.length ? mall.shops.map((s) => el('li', {},
       el('a', { className: 'button store-link shop-link', href: shopUrl(s.id) }, logo(s.logo_url, 'store'),
         el('span', {}, el('strong', { textContent: s.name }), where(s) && el('span', { className: 'meta', textContent: where(s) }),
@@ -277,6 +295,7 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
     $('mallStatus').textContent = '';
     $('mallResults').replaceChildren();
     draw();
+    loadOffers(false); // what runs now, for the next customer (not counted: nobody is looking yet)
     window.scrollTo(0, 0);
   }
 

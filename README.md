@@ -110,7 +110,7 @@ docker stop smartfit-testpg
 | `DOMAIN` | `localhost` | docker compose only: the HTTPS domain Caddy serves and gets a certificate for. |
 | `NODE_ENV` | empty | `production` requires `ADMIN_TOKEN_SECRET` and blocks `npm run seed`. compose sets it. |
 | `TRUST_PROXY` | empty | Number of reverse proxies in front of the app. compose sets `1` (Caddy), so client IPs (login lock, rate limits, open-cart cap) and `https` (QR links) are right. Leave empty when the app is reached directly. |
-| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN`, `RATE_DEMO_PER_MIN`, `RATE_FUNNEL_PER_MIN`, `RATE_CATALOG_PER_MIN`, `RATE_PROMO_PER_MIN`, `RATE_PROFILE_PER_MIN`, `RATE_PROFILE_POLL_PER_MIN`, `RATE_SCAN_PER_MIN`, `RATE_MALL_PER_MIN`, `RATE_TRYON_PER_MIN` | 60, 30, 300, 20, 30, 5, 3, 120, 300, 20, 20, 300, 120, 300, 4 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat, the kiosk exit PIN, the landing page's demo form, the customer funnel events (`/api/funnel`), the catalogue (`/api/catalog/*`), promo code tries (`POST /api/cart/:token/promo`), new profile links / kiosk login QRs and the profile page (`/api/profile/*`), the screens waiting for the bot (`GET /api/profile/token/*`), garment QR label scans (`GET /q/*`; over the limit the phone is still redirected, the scan just isn't logged), the mall screen's directory and search (`/api/malls/*`), and AI try-on pictures (`POST /api/tryon`, each one paid). Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
+| `RATE_RECOMMEND_PER_MIN`, `RATE_SIZE_PER_MIN`, `RATE_CART_PER_MIN`, `RATE_LOGIN_PER_MIN`, `RATE_KIOSK_PER_MIN`, `RATE_PIN_PER_MIN`, `RATE_DEMO_PER_MIN`, `RATE_FUNNEL_PER_MIN`, `RATE_CATALOG_PER_MIN`, `RATE_PROMO_PER_MIN`, `RATE_PROFILE_PER_MIN`, `RATE_PROFILE_POLL_PER_MIN`, `RATE_SCAN_PER_MIN`, `RATE_MALL_PER_MIN`, `RATE_OFFER_PER_MIN`, `RATE_TRYON_PER_MIN` | 60, 30, 300, 20, 30, 5, 3, 120, 300, 20, 20, 300, 120, 300, 60, 4 | Per-IP token buckets (requests per minute, bursts up to the same number) on `/api/recommend`, `/api/size`, `/api/cart/*`, admin login, the kiosk heartbeat, the kiosk exit PIN, the landing page's demo form, the customer funnel events (`/api/funnel`), the catalogue (`/api/catalog/*`), promo code tries (`POST /api/cart/:token/promo`), new profile links / kiosk login QRs and the profile page (`/api/profile/*`), the screens waiting for the bot (`GET /api/profile/token/*`), garment QR label scans (`GET /q/*`; over the limit the phone is still redirected, the scan just isn't logged), the mall screen's directory and search (`/api/malls/*`), offer shown / tapped counts (`POST /api/offers/events`; each offer also counts once per IP every 30 s), and AI try-on pictures (`POST /api/tryon`, each one paid). Over the limit → `429` with `Retry-After`. `0` = off. Every phone on the shop Wi-Fi shares the kiosk's public IP, so keep them generous. |
 | `MAX_OPEN_CARTS_PER_IP` | 30 | Live carts (each holds stock for 15 min) one client IP may have at once; the next new cart → `429 too_many_carts`. Unpaid other-store reservations (task 25, held 3 h) count against the same cap (`429 too_many_reserves`). `0` = off. |
 | `ERROR_WEBHOOK_URL` | empty | Optional error monitoring: every error log line is POSTed as JSON `{text, content, level, time}` (works with Slack, Discord and Mattermost incoming webhooks), at most 10 a minute. |
 
@@ -191,8 +191,19 @@ payment. The mall gets its own admin, who sees the shops and summary numbers onl
    shop. A shop's bundle discount counts when its part of the outfit has 2+ items and all of them are bought. Each shop
    gets its own results log with only its own items (its statistics); the mall admin sees one more number, the count
    of these screens. No fitting-room request and no AI try-on on a mall outfit (each belongs to one shop's flow).
+6. **Offers, "Aksiyalar"** (task 43): the shop owner (`/admin` → **Aksiyalar**) writes an offer for one store: title and
+   text in Uzbek and Russian (60 / 160 characters), a picture (JPEG/PNG/WebP ≤ 2 MB), first and last day (Tashkent),
+   and optionally one of its promo codes (shown publicly: the shop's choice) or one of the store's products (opens the
+   item while it is in stock and shown, else the shop). "Yuborish" sends it to the mall admin; the shop's own start
+   screen shows it at once. The mall admin approves or rejects it (the reason goes to the shop) and sets the slide order
+   and seconds per slide (4–30). Approved offers inside their dates show on the mall screen and, after 90 s without a
+   touch, rotate full-screen on the mall kiosk (any touch returns to the start screen). Changing an approved offer's
+   text, picture, link or start, or running it longer, sends it back for approval; ending it sooner does not. A store
+   outside any mall publishes without approval, on its own screens only. Shown / tapped counts per offer and day, numbers
+   only, for the shop and the mall admin.
 
-The demo seed has one mall, "Demo Savdo Markazi" (id 1), holding both demo stores.
+The demo seed has one mall, "Demo Savdo Markazi" (id 1), holding both demo stores and three demo offers (two approved,
+one waiting for the mall admin).
 
 ## Adding a store and its staff from the command line
 

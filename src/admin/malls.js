@@ -16,6 +16,7 @@ import { dbTime } from '../recommend/routes.js';
 import { visible } from '../recommend/engine.js';
 import { COLS, inStock, genders, withSizes, audienceOf } from '../catalog.js';
 import { ONLINE_MS } from '../kiosk.js';
+import { mallOffers } from './offers.js';
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MALL_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'logo_url'];
@@ -324,6 +325,14 @@ export function createMallRouter(db) {
     const cats = await shown(db('categories as c').join('stores as st', 'st.organization_id', 'c.organization_id'), m.id).where('c.hidden', false)
       .orderBy(['c.sort', 'c.id']).select('st.id as store_id', 'c.id', 'c.name', 'c.name_ru', 'c.image_url');
     res.json({ ...m, shops: shops.map(({ organization_id, ...s }) => ({ ...s, categories: cats.filter((c) => c.store_id === s.id).map(({ store_id, ...c }) => c) })) });
+  });
+
+  // Task 43: → { seconds, offers }: the mall's current approved offers in the mall admin's order (the "Aksiyalar"
+  // section and the kiosk's idle slides). Asked again each time, so an offer appears and goes on time.
+  r.get('/:id/offers', async (req, res) => {
+    const m = await mallOf(req.params.id);
+    const { slide_seconds } = await db('malls').where({ id: m.id }).first('slide_seconds');
+    res.json({ seconds: slide_seconds, offers: await mallOffers(db, m.id) });
   });
 
   // ?q=<2–60 characters>&gender=male|female&audience=adult|child (task 40; none = adults) → { items }: in-stock items of the mall's shown shops whose name or

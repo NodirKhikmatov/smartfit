@@ -161,7 +161,7 @@ export function stockFor(item, size, storeIdx, sizeCount) {
 const imageName = (storeIdx, sku) => `demo-s${storeIdx + 1}-${sku.toLowerCase()}.svg`;
 
 // Children before parents (SQLite deletes row by row, with foreign keys on).
-const WIPE = ['fitting_requests', 'payment_transactions', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'categories', 'admins', 'stores', 'organizations', 'malls'];
+const WIPE = ['offer_stats', 'offers', 'fitting_requests', 'payment_transactions', 'order_items', 'orders', 'recommendation_logs', 'cart_items', 'carts', 'product_stock', 'products', 'categories', 'admins', 'stores', 'organizations', 'malls'];
 
 // uploadDir: where /uploads is served from. Without it (tests) image_url is still set, but no file is copied.
 export async function seed(db, { uploadDir } = {}) {
@@ -210,6 +210,22 @@ export async function seed(db, { uploadDir } = {}) {
         await trx('product_stock').insert(sizes.map((size, s) => ({ product_id: productId, size, quantity: 2 + ((i + s + storeIdx) % 3) })));
       }
     }
+    // Task 43: demo offers so the mall screen shows "Aksiyalar" and the mall kiosk's idle slides: two approved (one opens
+    // a coat, one the shop), one waiting for the mall admin. Pictures are the shops' own demo drawings; dates around today.
+    const [s1, s2] = await trx('stores').orderBy('id').select('id', 'organization_id', 'mall_id');
+    const coat = await trx('products').where({ store_id: s1.id, category: 'outerwear', audience: 'adult' }).orderBy('id').first('id', 'image_url');
+    const top = await trx('products').where({ store_id: s2.id, category: 'top', audience: 'adult' }).orderBy('id').first('id', 'image_url');
+    const day = (d) => new Date(Date.now() + d * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Tashkent' });
+    const run = (from, to) => ({ starts_at: new Date(`${day(from)}T00:00:00+05:00`).toISOString(), ends_at: new Date(Date.parse(`${day(to)}T00:00:00+05:00`) + 86_400_000).toISOString() });
+    const offer = (s, o) => ({ organization_id: s.organization_id, store_id: s.id, mall_id: s.mall_id, ...run(-1, 30), ...o });
+    await trx('offers').insert([
+      offer(s1, { title: "Qishki kurtkalar −20%", title_ru: 'Зимние куртки −20%', body: "Barcha qishki kurtkalarga 20% chegirma. Kiyib ko'ring!", body_ru: 'Скидка 20% на все зимние куртки. Примерьте!',
+        image_url: coat.image_url, product_id: coat.id, status: 'approved', sort: 1, reviewed_at: new Date().toISOString() }),
+      offer(s2, { title: 'Ikkinchi kiyim −50%', title_ru: 'Вторая вещь −50%', body: "Ikki kiyim olsangiz, arzonrog'i yarim narxda.", body_ru: 'Купите две вещи — вторая за полцены.',
+        image_url: top.image_url, status: 'approved', sort: 2, reviewed_at: new Date().toISOString() }),
+      offer(s2, { title: 'Yangi kolleksiya keldi', title_ru: 'Новая коллекция', body: "Bahor-yoz kolleksiyasi do'konda.", body_ru: 'Коллекция весна-лето уже в магазине.',
+        image_url: top.image_url, ...run(0, 14), status: 'submitted', sort: 0 }),
+    ]);
   });
 }
 

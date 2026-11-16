@@ -92,6 +92,8 @@ export function kioskDevice() {
 }
 
 // Attract loop: the start screen slowly cycles through today's looks until someone touches the screen.
+// Task 43: an 'attract' event tells the mall kiosk's idle slides (offers.js) to start or stop.
 export function attract(on) {
   document.documentElement.classList.toggle('attract-loop', on);
+  document.dispatchEvent(new CustomEvent('attract', { detail: on }));
 }

@@ -26,6 +26,7 @@ export function limitConfig() {
     promo: env('RATE_PROMO_PER_MIN', 20), // task 26: promo code tries (right or wrong), on top of the cart bucket
     profile: env('RATE_PROFILE_PER_MIN', 20), // task 27: new profile links / kiosk login QRs, the profile page
     profilePoll: env('RATE_PROFILE_POLL_PER_MIN', 300), // the screens waiting for the bot poll every 3 s
+    offer: env('RATE_OFFER_PER_MIN', 60), // task 43: offer shown / tapped counts (each offer also once per IP per 30 s)
     tryon: env('RATE_TRYON_PER_MIN', 4), // task 41: AI try-on pictures (each one is paid); the store's daily limit comes on top
     openCarts: env('MAX_OPEN_CARTS_PER_IP', 30),
   };
