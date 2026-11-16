@@ -79,6 +79,9 @@ html.kiosk .attract .go { min-height: 4.5rem; font-size: var(--text-xl); }
 .mall-head h1 { margin: 0; }
 .mall-head p { margin: var(--s-1) 0 0; }
 .mall-logo { width: 4rem; height: 4rem; object-fit: contain; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--line); flex: none; }
+.mall-look { margin-bottom: var(--s-4); } /* task 42 */
+.mall-look .hint { margin: var(--s-2) 0 0; }
+.shop-line { display: flex; align-items: center; gap: var(--s-1); }
 .mall-search { display: grid; gap: var(--s-2); margin-bottom: var(--s-3); }
 .mall-search label { font-weight: var(--weight-medium); }
 .mall-search-row { display: flex; gap: var(--s-2); }

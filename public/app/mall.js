@@ -26,6 +26,7 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
     $('back').onclick = () => toDirectory();
     $('cartBtn').onclick = () => { location.hash = 'cart'; };
     $('mcForm').onsubmit = place;
+    $('mallLook').href = `${location.pathname}?mall=${mallId}&look=1`; // task 42
     route();
     loadCart();
     $('mallSearch').onsubmit = (e) => {

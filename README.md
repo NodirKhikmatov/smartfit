@@ -183,6 +183,14 @@ payment. The mall gets its own admin, who sees the shops and summary numbers onl
    message names the shop. Pickup only (no delivery from a mall cart). Each shop's admin, cashier and staff app see only
    their own order, marked "Savdo markazi buyurtmasi № N qismi"; the mall admin still sees counts only. Every shop's
    hold runs out at the same moment; the kiosk idle reset empties the whole mall cart.
+5. **An outfit from the whole mall** (task 42): "Butun markazdan obraz" on the mall screen (`?mall=ID&look=1`) runs the
+   usual questionnaire and size step once and builds outfits (`POST /api/recommend/mall`) from the in-stock items, in the
+   customer's size, of every shop the mall shows. Each item names its shop, floor and unit. Fairness: at most 6 items of
+   one shop across the outfits shown; if that loses an outfit (too few shops have the size), 9, then no limit. Nothing
+   is ranked by shop, so no shop can buy a place. "Savatga qo'shish" puts the outfit into the mall cart, one part per
+   shop. A shop's bundle discount counts when its part of the outfit has 2+ items and all of them are bought. Each shop
+   gets its own results log with only its own items (its statistics); the mall admin sees one more number, the count
+   of these screens. No fitting-room request and no AI try-on on a mall outfit (each belongs to one shop's flow).
 
 The demo seed has one mall, "Demo Savdo Markazi" (id 1), holding both demo stores.
 

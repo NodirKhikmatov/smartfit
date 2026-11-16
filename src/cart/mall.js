@@ -59,32 +59,41 @@ export function createMallCartRouter(db, { maxOpenCarts = 0 } = {}) {
 
   // { token?, mall_id, store_id, items, rec?, outfit? } → the mall cart. Only a shown shop of that mall; a missing or
   // dead token (or another mall's) starts a new mall cart. Adding to one shop extends every shop's hold.
+  // Task 42: or { token?, mall_id, shops: [{ store_id, items, rec?, outfit? }] } — a mall outfit, one part per shop, each
+  // with that shop's own rec and outfit part (its bundle rule), all or nothing across the shops.
   r.post('/items', async (req, res) => {
     const b = req.body ?? {};
-    const items = parseItems(b.items);
-    const { mall_id: mallId, store_id: storeId } = b;
-    if (!Number.isInteger(mallId) || !Number.isInteger(storeId)) throw fail(404, 'err.store_not_found');
+    const parts = b.shops === undefined ? [b] : b.shops;
+    if (!Array.isArray(parts) || !parts.length || parts.length > MAX_SHOPS || !parts.every((x) => x && typeof x === 'object')
+      || new Set(parts.map((x) => x.store_id)).size !== parts.length) throw fail(400, 'err.invalid', { field: 'field.items' });
+    const asked = parts.map((x) => ({ ...x, items: parseItems(x.items) }));
+    const mallId = b.mall_id;
+    const id = (v) => Number.isInteger(v) && v > 0 && v < 1e9; // Postgres integer range
+    if (!id(mallId) || !asked.every((x) => id(x.store_id))) throw fail(404, 'err.store_not_found');
     const mallToken = await db.transaction(async (trx) => {
-      const store = await trx('stores').where({ id: storeId, mall_id: mallId }).first('id', 'mall_hidden');
-      if (!store || store.mall_hidden) throw fail(404, 'err.store_not_found');
       let mt = typeof b.token === 'string' && TOKEN.test(b.token) ? b.token : null;
       if (mt && !(await trx('carts').where({ mall_token: mt, mall_id: mallId }).first('id'))) mt = null;
       if (mt && !(await extendGroup(trx, mt))) mt = null; // every shop's hold ran out
-      let cart = null;
-      if (mt) {
-        const own = await trx('carts').where({ mall_token: mt, store_id: storeId }).first('token');
-        cart = own && (await lockCart(trx, own.token));
-        if (!cart) {
-          const [{ n }] = await trx('carts').where({ mall_token: mt }).count({ n: '*' });
-          if (Number(n) >= MAX_SHOPS) throw fail(409, 'err.mall_cart_shops', { max: MAX_SHOPS });
-          cart = await openCart(trx, req, storeId, 0, { mall_token: mt, mall_id: mallId }); // the mall cart is already counted
+      for (const part of asked) {
+        const storeId = part.store_id;
+        const store = await trx('stores').where({ id: storeId, mall_id: mallId }).first('id', 'mall_hidden');
+        if (!store || store.mall_hidden) throw fail(404, 'err.store_not_found');
+        let cart = null;
+        if (mt) {
+          const own = await trx('carts').where({ mall_token: mt, store_id: storeId }).first('token');
+          cart = own && (await lockCart(trx, own.token));
+          if (!cart) {
+            const [{ n }] = await trx('carts').where({ mall_token: mt }).count({ n: '*' });
+            if (Number(n) >= MAX_SHOPS) throw fail(409, 'err.mall_cart_shops', { max: MAX_SHOPS });
+            cart = await openCart(trx, req, storeId, 0, { mall_token: mt, mall_id: mallId }); // the mall cart is already counted
+          }
+        } else {
+          mt = token16();
+          cart = await openCart(trx, req, storeId, maxOpenCarts, { mall_token: mt, mall_id: mallId });
         }
-      } else {
-        mt = token16();
-        cart = await openCart(trx, req, storeId, maxOpenCarts, { mall_token: mt, mall_id: mallId });
+        await extendGroup(trx, mt); // the new shop's cart and the others now run out at the very same moment
+        await addLines(trx, cart, part.items, part);
       }
-      await extendGroup(trx, mt); // the new shop's cart and the others now run out at the very same moment
-      await addLines(trx, cart, items, b);
       return mt;
     }).catch(missedThen(db));
     res.json(await mallView(db, mallToken));

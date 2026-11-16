@@ -16,7 +16,10 @@ const storeId = Number(params.get('store'));
 // Task 37: ?mall=ID. Without a store it is the mall screen (directory + search); with one, that shop's flow inside the mall.
 const mallId = Number(params.get('mall'));
 const inMall = Number.isInteger(mallId) && mallId > 0;
-const mallHome = inMall && !(storeId > 0);
+// Task 42: ?mall=ID&look=1 is "Butun markazdan obraz": this app's questionnaire and size step once, outfits from every
+// shown shop of the mall (/api/recommend/mall), added to the mall cart per shop. No store of its own (no funnel visit).
+const mallLook = inMall && !(storeId > 0) && params.get('look') === '1';
+const mallHome = inMall && !(storeId > 0) && !mallLook;
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
@@ -32,6 +35,16 @@ const KIND_SIZES = { shoes: SHOES, one: [], kids: KIDS, kids_shoes: KIDS_SHOES }
 const catSizes = (c) => (c.size_kind === 'custom' ? String(c.sizes ?? '').split(',').filter(Boolean) : KIND_SIZES[c.size_kind] ?? CLOTHES);
 // Task 40: a category is for adults or children; the form, the "Nima kerak?" chips and the catalogue show one audience.
 const forAudience = (a) => shownCats().filter((c) => (c.audience ?? 'adult') === a);
+// The /recommend body; a mall outfit names the mall instead of a store and is whole outfits only.
+const toReq = (v) => {
+  const r = toRequest(v, storeId);
+  if (r && mallLook) {
+    delete r.request.store_id;
+    delete r.request.want;
+    r.request.mall_id = mallId;
+  }
+  return r;
+};
 const formAudience = () => (form.audience.value === 'child' ? 'child' : 'adult');
 const form = $('form');
 const tryon = createTryon({ storeId, kiosk, snapshot }); // task 41: "O'zimda ko'rish" (only when the shop has it on)
@@ -153,7 +166,7 @@ const remember = () => saveRoute({ screen: current, form: formValues(), sizes: r
 const ENTER = {
   camera: () => showCamera(),
   results: () => (lastResult ? renderResults(lastResult) : loadResults()),
-  cart: () => renderCartScreen(),
+  cart: () => (mallLook ? toMallCart() : renderCartScreen()),
   catalog: () => loadCatalog(),
   item: (data) => loadItem(data.item ?? itemId),
 };
@@ -212,8 +225,10 @@ function setMall(v) {
   setCart(v?.shops.find((s) => s.store.id === storeId)?.cart ?? null);
 }
 // Topbar bag button, or on the results screen a sticky bar with the count and the running total (D2).
+// Task 42: a mall outfit has no shop of its own, so the bar shows the whole mall cart (count and the shops' totals).
+const mallSum = () => mallCart?.shops.reduce((a, s) => a + s.cart.totals.pickup.total, 0) ?? 0;
 function syncCartUi() {
-  const n = cart ? cart.items.reduce((s, i) => s + i.quantity, 0) : 0;
+  const n = mallLook ? mallCart?.count ?? 0 : cart ? cart.items.reduce((s, i) => s + i.quantity, 0) : 0;
   const bar = n > 0 && current === 'results';
   $('cartBar').hidden = !bar;
   document.documentElement.classList.toggle('has-bar', bar);
@@ -221,9 +236,10 @@ function syncCartUi() {
   $('cartBtn').replaceChildren(icon('bag'), el('span', { className: 'cart-label', textContent: t('kiosk.cart') }), el('span', { className: 'count-pill', textContent: n }));
   if (!n) return;
   $('barCount').textContent = t('kiosk.bar.count', { n });
-  $('barTotal').textContent = som(cart.totals.pickup.total); // after the bundle / promo discounts
+  $('barTotal').textContent = som(mallLook ? mallSum() : cart.totals.pickup.total); // after the bundle / promo discounts
 }
-$('barGo').onclick = () => go('cart');
+const toMallCart = () => location.assign(`${location.pathname}?mall=${mallId}#cart`);
+$('barGo').onclick = () => (mallLook ? toMallCart() : go('cart'));
 
 // Start-screen weather: an icon and a one-line outfit hint from the same rules the engine uses (rain, cold, cool, warm).
 const weatherIcon = (w) => (w.raining ? 'rain' : w.temperature < 5 ? 'snow' : w.temperature < 18 ? 'cloud-sun' : 'sun');
@@ -248,6 +264,7 @@ async function loadStore() {
   $('catalogBtn').hidden = $('profileLogin').hidden = true;
   $('storePicker').hidden = true;
   $('start').disabled = true;
+  if (mallLook) return loadMallLook();
   if (!Number.isInteger(storeId) || storeId < 1) return showPicker('kiosk.start.no_store');
   try {
     store = await api('/stores/' + storeId);
@@ -272,6 +289,31 @@ async function loadStore() {
   renderWeather();
   $('lookbook').replaceChildren(...store.looks.map((l) => el('img', { src: l.image_url, alt: '' })));
   $('lookbook').hidden = store.looks.length < 2;
+}
+
+// Task 42: the start screen of a mall outfit: the mall's name and the start button (the weather comes with the results).
+async function loadMallLook() {
+  $('weather').hidden = $('lookbook').hidden = true;
+  const h1 = document.querySelector('[data-screen="start"] h1');
+  h1.dataset.i18n = 'kiosk.mall.look'; // kept for the language switch
+  h1.textContent = t(h1.dataset.i18n);
+  try {
+    const m = await api('/malls/' + mallId);
+    store = { name: m.name, city: m.city, categories: [], looks: [] };
+  } catch (err) {
+    if (err.status === 404) return location.replace(`${location.pathname}?mall=${mallId}`); // the mall screen says it is gone
+    $('startError').textContent = t('kiosk.start.offline');
+    $('start').disabled = false;
+    $('startLabel').textContent = t('common.retry');
+    return;
+  }
+  $('storeName').textContent = store.name;
+  document.querySelector('fieldset.want').hidden = true; // whole outfits only
+  setCategories([]);
+  restoredWant = null;
+  renderWantChips(null);
+  $('startLabel').textContent = t('kiosk.start.go');
+  $('start').disabled = false;
 }
 
 // U10: a missing or wrong store in the link is not a dead end: list the stores (public, names only).
@@ -299,6 +341,7 @@ async function showPicker(why) {
 
 function renderWeather() {
   const w = store.weather;
+  if (!w) return; // task 42: a mall outfit's start screen has none
   $('weather').hidden = $('start').hidden = false;
   $('weather').classList.remove('loading');
   $('weather').removeAttribute('aria-busy');
@@ -350,7 +393,7 @@ inline(form, FORM_FIELDS);
 form.addEventListener('submit', (e) => {
   e.preventDefault();
   if (!checkAll(form, formFields())) return;
-  ({ body, request } = toRequest(formValues(), storeId));
+  ({ body, request } = toReq(formValues()));
   sizeInfo = sizeInput = lastResult = null;
   // Task 30: shoes (the form's chips) and accessories need no size step. Task 40: a child never gets it (no photo).
   if (!sizeNeeds(request.want, request.audience).photo) return go('results');
@@ -674,7 +717,7 @@ async function loadResults() {
   const done = showAfter(300, () => seq === loadSeq && $('results').replaceChildren(el('div', { className: 'outfits' }, skeletonCard(5), skeletonCard(5), skeletonCard(5))));
   let r;
   try {
-    r = await api('/recommend', request);
+    r = await api(mallLook ? '/recommend/mall' : '/recommend', request);
   } catch (err) {
     done();
     if (seq !== loadSeq) return;
@@ -710,7 +753,7 @@ function renderResults(r) {
     ...(r.relaxed ? [el('p', { className: 'muted', textContent: t('kiosk.results.relaxed', { n: r.relaxed }) })] : []),
     ...(r.over_budget > 0 ? [warn('kiosk.results.over_budget', { sum: som(r.over_budget) })] : []),
     el('div', { className: 'outfits' }, ...(r.partial ? [partialCard(r.partial)] : []), ...r.outfits.map((o, i) => outfitCard(o, i + 1))),
-    triedCard(),
+    ...(mallLook ? [] : [triedCard()]), // task 42: "Kiyib ko'rdim" belongs to one shop's results screen
     ...(store?.profile && !kiosk && !r.audience ? [profileBox(r.outfits.map((o) => o.items.map((i) => i.id)))] : []), // phone flow: keep sizes + these looks (an adult's: a child's sizes never go into the profile)
   );
 }
@@ -861,6 +904,7 @@ function itemRow(p, swap) {
     el('div', { className: 'name', textContent: productName(p) }),
     priceEl(p),
     el('div', { className: 'meta', textContent: [colorName(p.color), size, p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }),
+    shopLine(p),
     fitHint(p),
     picker(p),
   );
@@ -871,6 +915,15 @@ function itemRow(p, swap) {
     li.append(b);
   }
   return li;
+}
+
+// Task 42: on a mall outfit every item names its shop, floor and unit.
+const shopOfItem = (p) => (p.store_id && lastResult?.shops?.find((s) => s.id === p.store_id)) || null;
+function shopLine(p) {
+  const s = shopOfItem(p);
+  if (!s) return '';
+  return el('div', { className: 'meta shop-line' }, icon('store'),
+    el('span', { textContent: [s.name, s.floor && t('kiosk.mall.floor', { n: s.floor }), s.unit && t('kiosk.mall.unit', { n: s.unit })].filter(Boolean).join(' · ') }));
 }
 
 // Task 23: this model runs small or big (learnt from buyers' answers and returns); the server already shifted the size.
@@ -898,7 +951,8 @@ function needSize(items, card, msg) {
 
 function addButton(items, card, className = 'primary wide', label = 'kiosk.add.btn', rec = request?.rec) {
   const size = sizeOf;
-  const has = (p) => cart?.items.some((c) => c.product_id === p.id && (!size(p) || c.size === size(p)));
+  const lines = () => (mallLook ? mallCart?.shops.flatMap((s) => s.cart.items) ?? [] : cart?.items ?? []);
+  const has = (p) => lines().some((c) => c.product_id === p.id && (!size(p) || c.size === size(p)));
   const b = el('button', { className });
   const msg = el('p', { className: 'field-error', role: 'alert' });
   const sync = () => { b.disabled = items.every(has); b.replaceChildren(...(b.disabled ? [icon('check'), t('kiosk.add.done')] : [icon('bag'), t(label)])); };
@@ -910,7 +964,8 @@ function addButton(items, card, className = 'primary wide', label = 'kiosk.add.b
       const todo = items.filter((p) => !has(p)).map((p) => ({ product_id: p.id, size: size(p) }));
       // outfit (task 26): the whole card, so the server can match it to an outfit it showed (bundle discount).
       const add = { store_id: storeId, items: todo, rec, ...(rec && { outfit: items.map((p) => p.id) }) };
-      if (inMall) setMall(await api('/mall-cart/items', { ...add, token: mallCart?.token, mall_id: mallId }));
+      if (mallLook) setMall(await api('/mall-cart/items', { token: mallCart?.token, mall_id: mallId, shops: byShop(items, todo) }));
+      else if (inMall) setMall(await api('/mall-cart/items', { ...add, token: mallCart?.token, mall_id: mallId }));
       else setCart(await api('/cart/items', { ...add, token: cart?.token }));
     } catch (err) {
       msg.textContent = err.message;
@@ -926,15 +981,28 @@ function addButton(items, card, className = 'primary wide', label = 'kiosk.add.b
   return wrap;
 }
 
+// Task 42: a mall outfit goes to the mall cart as one part per shop, each with that shop's rec and its items of the card
+// (its outfit part, for that shop's own bundle rule).
+function byShop(items, todo) {
+  return [...new Set(items.map((p) => p.store_id))].map((id) => ({
+    store_id: id, items: todo.filter((x) => items.find((p) => p.id === x.product_id).store_id === id),
+    rec: lastResult.recs[id], outfit: items.filter((p) => p.store_id === id).map((p) => p.id),
+  })).filter((x) => x.items.length);
+}
+// Task 42: the bundle hint per shop whose part of this outfit (2+ items) earns that shop's own discount.
+const shopBundles = (items) => (lastResult?.shops ?? []).filter((s) => s.bundle_percent && items.filter((p) => p.store_id === s.id).length >= 2);
+
 function card(heading, items, total, reason, swap) {
   const c = el('article', { className: 'outfit card' });
-  const pct = swap && lastResult?.bundle_percent; // task 26: only whole outfits (not the partial card) get the bundle discount
+  const pct = swap && !mallLook && lastResult?.bundle_percent; // task 26: only whole outfits (not the partial card) get the bundle discount
+  const hint = (text) => el('p', { className: 'bundle-hint' }, icon('check'), text);
   const body = el('div', { className: 'outfit-body' },
     el('h2', { textContent: heading, tabIndex: -1 }),
     ...(reason ? [el('p', { className: 'muted reason', textContent: reason })] : []),
-    ...(pct ? [el('p', { className: 'bundle-hint' }, icon('check'), t('kiosk.bundle.hint', { pct }))] : []),
+    ...(pct ? [hint(t('kiosk.bundle.hint', { pct }))] : []),
+    ...(swap && mallLook ? shopBundles(items).map((s) => hint(t('kiosk.mall.bundle_hint', { shop: s.name, pct: s.bundle_percent }))) : []),
     el('ul', { className: 'items' }, ...items.map((p) => itemRow(p, swap))),
-    el('div', { className: 'outfit-foot' }, el('div', { className: 'total' }, el('span', { textContent: t('common.total') }), el('strong', { textContent: som(total) })), addButton(items, c), fittingBox(items, c)));
+    el('div', { className: 'outfit-foot' }, el('div', { className: 'total' }, el('span', { textContent: t('common.total') }), el('strong', { textContent: som(total) })), addButton(items, c), mallLook ? '' : fittingBox(items, c))); // task 42: no one shop's staff for a mall outfit
   c.append(look(items), body);
   return c;
 }
@@ -992,7 +1060,7 @@ function outfitCard(o, n) {
     c.querySelector('.outfit-body').append(el('div', { className: 'alt' },
       thumb(swap),
       el('div', {}, el('strong', { textContent: t('kiosk.outfit.alt') }),
-        el('div', { className: 'meta', textContent: t('kiosk.outfit.alt_save', { name: productName(old), swap: productName(swap), sum: som(o.total - o.alternative.total) }) })),
+        el('div', { className: 'meta', textContent: t('kiosk.outfit.alt_save', { name: productName(old), swap: productName(swap), sum: som(o.total - o.alternative.total) }) }), shopLine(swap)),
       picker(swap),
       addButton(o.alternative.items, c, '', 'kiosk.outfit.alt_add'),
     ));
@@ -1011,11 +1079,12 @@ async function swapBox(o, n, p, li, btn) {
   const others = [...new Set(lastResult.outfits.filter((x) => x !== o).flatMap((x) => [...x.items, ...(x.alternative?.items ?? [])].map((i) => i.id)))];
   let r;
   try {
-    r = await api('/recommend/swap', { ...request, photo: undefined, items: o.items.map((i) => i.id), replace: p.id, exclude: others, relaxed: lastResult.relaxed });
+    r = await api(mallLook ? '/recommend/mall/swap' : '/recommend/swap', { ...request, photo: undefined, items: o.items.map((i) => i.id), replace: p.id, exclude: others, relaxed: lastResult.relaxed });
   } catch (err) {
     return box.replaceChildren(el('p', { className: 'field-error', role: 'alert', textContent: err.message }));
   }
   if (!r.options.length) return box.replaceChildren(el('p', { className: 'meta', role: 'status', textContent: t('kiosk.outfit.swap_none') }));
+  if (r.shops) lastResult.shops = [...lastResult.shops, ...r.shops.filter((s) => !lastResult.shops.some((x) => x.id === s.id))]; // task 42
   box.replaceChildren(el('div', { className: 'meta', textContent: t('kiosk.outfit.swap_title') }), el('ul', { className: 'swap-list' }, ...r.options.map((opt) => {
     const x = opt.items.find((i) => i.id === opt.swap);
     const pick = () => {
@@ -1025,7 +1094,7 @@ async function swapBox(o, n, p, li, btn) {
     };
     return el('li', {}, thumb(x),
       el('div', {}, el('div', { className: 'name', textContent: productName(x) }),
-        el('div', { className: 'meta', textContent: [colorName(x.color), som(x.unit_price), t('kiosk.outfit.swap_total', { sum: som(opt.total) })].join(' · ') })),
+        el('div', { className: 'meta', textContent: [shopOfItem(x)?.name, colorName(x.color), som(x.unit_price), t('kiosk.outfit.swap_total', { sum: som(opt.total) })].filter(Boolean).join(' · ') })),
       el('button', { type: 'button', className: 'secondary', onclick: pick }, t('kiosk.outfit.swap_pick')));
   })));
 }
@@ -1254,7 +1323,7 @@ function reserveForm(p, size, s, li, btn) {
 const sumRow = (label, value, className = '') => el('div', { className }, el('span', { textContent: label }), el('span', { textContent: value }));
 const checkout = $('checkout');
 
-$('cartBtn').onclick = () => go('cart');
+$('cartBtn').onclick = () => (mallLook ? toMallCart() : go('cart'));
 $('cartBack').onclick = () => go(request ? 'results' : 'start');
 checkout.addEventListener('change', (e) => ['fulfillment', 'payment', 'term'].includes(e.target.name) && renderSum());
 
@@ -1741,7 +1810,7 @@ function applyProfile(p) {
 $('mallBtn').hidden = !inMall || mallHome;
 document.documentElement.classList.toggle('in-mall', inMall && !mallHome);
 $('mallBtn').onclick = () => leaveShop(false);
-$('mallGo').onclick = () => location.assign(`${location.pathname}?mall=${mallId}#cart`);
+$('mallGo').onclick = toMallCart;
 async function leaveShop(idle) {
   clearRoute();
   if (idle) {
@@ -1827,7 +1896,7 @@ function startShop() {
     restoredWant = saved.form.want;
     for (const b of wantBoxes()) b.checked = !restoredWant;
     applyNeeds();
-    const r = toRequest(saved.form, storeId);
+    const r = toReq(saved.form);
     if (r) {
       ({ body, request } = r);
       if (request.want && saved.own.length) request.own = saved.own;
@@ -1848,7 +1917,7 @@ function startShop() {
     go('item', { replace: true, data: { item: linkItem } });
     params.delete('item'); // once: a later refresh restores the saved route instead
     history.replaceState(history.state, '', `${location.pathname}?${params}`);
-  } else go(storeId > 0 ? allowedScreen(saved?.screen ?? 'start', { ...appState(), itemOk: !!saved?.item }) : 'start', { replace: true, data: { item: saved?.item } });
+  } else go(storeId > 0 || mallLook ? allowedScreen(saved?.screen ?? 'start', { ...appState(), itemOk: !!saved?.item }) : 'start', { replace: true, data: { item: saved?.item } });
   loadStore();
   const handoffToken = params.get('handoff');
   if (!kiosk && handoffToken) {

@@ -256,7 +256,7 @@ test('mall dashboard: per-shop summary numbers only (visits, paid orders, kiosks
   const one = r.body.shops.find((s) => s.id === s1), two = r.body.shops.find((s) => s.id === s2);
   assert.deepEqual([one.visits, one.orders, one.kiosks], [{ kiosk: 1, phone: 1 }, 2, { count: 2, online: 1 }]);
   assert.deepEqual([two.visits, two.orders, two.kiosks], [{ kiosk: 0, phone: 1 }, 0, { count: 0, online: 0 }]);
-  assert.deepEqual(r.body.totals, { shops: 2, visits: 3, kiosk_visits: 1, orders: 2, kiosks_online: 1 });
+  assert.deepEqual(r.body.totals, { shops: 2, visits: 3, kiosk_visits: 1, orders: 2, kiosks_online: 1, mall_outfits: 0 }); // task 42: the mall outfit screens count
   assert.equal((await admin('GET', '/mall?days=30', undefined, mallTokenA)).body.shops.find((s) => s.id === s1).visits.kiosk + 1, 2);
   assert.equal((await admin('GET', '/mall?days=30', undefined, mallTokenA)).body.shops.find((s) => s.id === s1).visits.phone, 2, 'the older visit is in 30 days');
   // Nothing of a shop's business beyond the counts: no money, prices, products, customers or team.

@@ -21,17 +21,17 @@ export const totalOf = (items) => items.reduce((sum, i) => sum + i.unit_price, 0
 // spread widens the temperature window to ±spread °C (the relaxation fallback in ruleOutfits).
 // fit (task 29): the customer's preference tight|regular|loose shifts clothes one size first; fit_from is relative to that.
 // audience (task 40): 'adult' (default) or 'child'; adults never get children's items and children never adults'.
-export async function filterCandidates(db, { storeId, gender, sizes, temperature, spread = 0, fit = null, audience = 'adult' }) {
-  const rows = await visible(db('products as p'))
-    .join('product_stock as s', 's.product_id', 'p.id')
-    .where('p.store_id', storeId)
+// storeIds (task 42, the mall outfit): every one of these stores instead of storeId; each item then carries its store_id.
+export async function filterCandidates(db, { storeId, storeIds = null, gender, sizes, temperature, spread = 0, fit = null, audience = 'adult' }) {
+  const q = visible(db('products as p')).join('product_stock as s', 's.product_id', 'p.id');
+  const rows = await (storeIds ? q.whereIn('p.store_id', storeIds) : q.where('p.store_id', storeId))
     .where('p.audience', audience)
     .whereIn('p.gender', [gender, 'unisex'])
     // Live weather is fractional (11.7 °C); Postgres would type the parameter as the integer column and refuse it.
     .whereRaw('p.temp_min <= cast(? as real) and p.temp_max >= cast(? as real)', [temperature + spread, temperature - spread])
     .whereRaw('s.quantity - s.reserved > 0')
     .orderBy(['p.id', 's.id'])
-    .select('p.id', 'p.name', 'p.name_ru', 'p.category', 'p.category_id', 'p.sizes as size_list', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.waterproof', 'p.image_url', 'p.shelf_location', 'p.fit_offset', 's.size');
+    .select('p.id', 'p.name', 'p.name_ru', 'p.category', 'p.category_id', 'p.sizes as size_list', 'p.gender', 'p.color', 'p.style', 'p.price', 'p.discount_price', 'p.temp_min', 'p.temp_max', 'p.waterproof', 'p.image_url', 'p.shelf_location', 'p.fit_offset', 's.size', ...(storeIds ? ['p.store_id'] : []));
   // Task 23: a product that runs small or big is offered one size up or down (clamped to its sizes), and only if that
   // size has free stock: never the customer's own size, which is known not to fit.
   const fits = await fitOf(db, [...new Map(rows.map((r) => [r.id, r])).values()]);
@@ -105,30 +105,50 @@ const byOrder = (a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category);
 // the first item sets the style, later ones prefer the same style and a colour that goes with what is already picked.
 // skip: categories to leave out (outerwear when the store has none). Returns { outfits, over_budget, partial }:
 // over_budget > 0 only when nothing fits the budget, and then `partial` is the required items that do fit.
-export function buildOutfits(candidates, { temperature, raining, budget = null, skip = [], occasion = null }) {
+// Task 42, the mall outfit: caps = the per-shop limits to try in order (items of one store across all outfits shown,
+// accessories included). The first cap that loses nothing against no cap at all (same score as ruleOutfits: in-budget
+// outfits first) wins, so a shop never fills the whole list when other shops have stock, and a mall where only one or
+// two shops have the customer's size still gets every outfit. The answer says which cap held (`cap`, null = none).
+export const outfitScore = (r) => (r.over_budget ? 0 : r.outfits.length) * 4 + r.outfits.length;
+export function buildOutfits(candidates, ctx) {
+  if (!ctx.caps) return build(candidates, ctx);
+  const open = build(candidates, ctx);
+  for (const cap of ctx.caps) {
+    const r = build(candidates, { ...ctx, cap });
+    if (outfitScore(r) >= outfitScore(open)) return { ...r, cap };
+  }
+  return { ...open, cap: null };
+}
+function build(candidates, { temperature, raining, budget = null, skip = [], occasion = null, cap = null }) {
   const required = requiredCategories(temperature, raining).filter((c) => !skip.includes(c));
   const pool = rankPool(candidates, { temperature, raining, budget });
   const used = new Set();
-  const free = (c) => pool[c].filter((p) => !used.has(p.id));
+  const perShop = new Map(); // store_id → items used (cap only)
+  const room = (p, items) => !cap || (perShop.get(p.store_id) ?? 0) + items.filter((x) => x.store_id === p.store_id).length < cap;
+  const free = (c, items = []) => pool[c].filter((p) => !used.has(p.id) && room(p, items));
+  const take = (p) => {
+    used.add(p.id);
+    perShop.set(p.store_id, (perShop.get(p.store_id) ?? 0) + 1);
+  };
 
   let outfits = [];
   while (outfits.length < MAX_OUTFITS) {
     const items = [];
     for (const c of required) {
-      const p = bestFor(free(c), items, raining, occasion);
+      const p = bestFor(free(c, items), items, raining, occasion);
       if (!p) break;
       items.push(p);
     }
     if (items.length < required.length) break;
-    items.forEach((p) => used.add(p.id));
+    items.forEach(take);
     outfits.push(items);
   }
   // Optional accessory: the best unused one that goes with the outfit, only if it keeps the outfit within budget.
   for (const items of outfits) {
-    const acc = bestFor(free('accessory').filter((p) => !budget || totalOf(items) + p.unit_price <= budget), items, false, occasion);
+    const acc = bestFor(free('accessory').filter((p) => (!budget || totalOf(items) + p.unit_price <= budget) && room(p, [])), items, false, occasion);
     if (acc) {
       items.push(acc);
-      used.add(acc.id);
+      take(acc);
     }
   }
   outfits = outfits.map((items) => ({ items: items.sort(byOrder), total: totalOf(items), alternative: cheaperAlternative(items, pool, used) }));
@@ -168,7 +188,7 @@ export function partialOutfit(pool, required, budget) {
 export const SPREADS = [0, 3, 6];
 export async function ruleOutfits(load, ctx) {
   // In-budget outfits count most; an over-budget outfit (with its partial) still beats nothing.
-  const score = (r) => (r.over_budget ? 0 : r.outfits.length) * 4 + r.outfits.length;
+  const score = outfitScore;
   const attempt = async (skip) => {
     let best;
     for (const spread of SPREADS) {

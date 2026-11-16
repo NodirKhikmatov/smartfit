@@ -94,7 +94,7 @@ export function createStylist({ client, apiKey = process.env.ANTHROPIC_API_KEY, 
       ...(single && { WANT: want, OWN: own }),
       ...(occasion && { OCCASION: t(`kiosk.occasion.${occasion}`, {}, 'uz') }),
       ...(child && { AUDIENCE: 'bola' }),
-      CANDIDATES: candidates.map((p) => ({ product_id: p.id, name: (lang === 'ru' && p.name_ru) || p.name, category: p.category, color: p.color, style: p.style, price: p.unit_price, waterproof: p.waterproof })),
+      CANDIDATES: candidates.map((p) => ({ product_id: p.id, name: (lang === 'ru' && p.name_ru) || p.name, category: p.category, color: p.color, style: p.style, price: p.unit_price, waterproof: p.waterproof, ...(p.shop && { shop: p.shop }) })), // shop: task 42, mall outfit only
     };
     const content = [
       ...(photo ? [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: photo } }] : []),
@@ -136,7 +136,9 @@ const text = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 // Pure: turns Claude's answer into priced outfits, or null when nothing valid is left (→ rules).
 // Only CANDIDATES IDs survive, one item per category, no item in two outfits; missing required categories
 // are filled with the rules' next best unused item. Prices and totals come from the candidate rows (DB).
-export function applyStylist(answer, candidates, { temperature, raining, budget = null }) {
+// cap (task 42, the mall outfit): the per-shop limit the rules kept; an outfit that would break it is dropped like an
+// over-budget one, so Claude can't hand one shop the whole list either.
+export function applyStylist(answer, candidates, { temperature, raining, budget = null, cap = null }) {
   if (!Array.isArray(answer?.outfits)) return null;
   const byId = new Map(candidates.map((p) => [p.id, p]));
   const required = requiredCategories(temperature, raining);
@@ -158,6 +160,7 @@ export function applyStylist(answer, candidates, { temperature, raining, budget 
     if (!required.every((c) => items.has(c))) continue;
     const list = [...items.values()].sort((a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category));
     if (budget && totalOf(list) > budget) continue;
+    if (cap && list.some((p) => [...picked.flatMap((o) => o.items), ...list].filter((x) => x.store_id === p.store_id).length > cap)) continue;
     list.forEach((p) => used.add(p.id));
     picked.push({ title: text(o.title, 80), reason: text(o.reason, 400), items: list });
   }

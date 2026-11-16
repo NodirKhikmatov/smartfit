@@ -9,6 +9,7 @@ import { parseJson } from '../cart/promo.js';
 import { parsePhoto, applyStylist, applyRanking, withDeadline, TIMEOUT_MS } from './stylist.js';
 import { COLORS, STYLES } from '../../public/shared/i18n.js';
 import { tryonOpen } from '../tryon.js';
+import { createMallRecommendRouter } from './mall.js';
 
 const pick = (v, allowed, label, required) => {
   if (v === undefined || v === null || v === '') {
@@ -48,8 +49,10 @@ const catsFor = (db, b) => (Array.isArray(b.want) && b.want.some(Number.isIntege
 // needs only the sizes of the wanted categories (top for outerwear/top, bottom for bottom; shoes stay optional).
 // Task 40: audience 'child' (absent = 'adult', as before): sizes are the children's height sizes (92–164) and shoe
 // sizes (22–35); gender male / female is the boy / girl choice.
-function parseRequest(b, cats = []) {
+const checkStore = (b) => {
   if (!Number.isInteger(b.store_id) || b.store_id < 1) throw fail(400, 'err.invalid', { field: 'field.store' });
+};
+export function parseRequest(b, cats = []) {
   if (!['male', 'female'].includes(b.gender)) throw fail(400, 'err.invalid', { field: 'field.gender' });
   const audience = b.audience ?? 'adult';
   if (audience !== 'adult' && audience !== 'child') throw fail(400, 'err.invalid', { field: 'field.audience' });
@@ -80,7 +83,7 @@ export const REC = /^[a-f0-9]{32}$/;
 const MAX_CABIN = 99;
 const MAX_OPEN_FITTING = 3;
 const MAX_SHOWN = 60; // outfit sets kept per results screen (shortcut: a concurrent swap on one screen can drop one set; one customer per kiosk) // per results screen, so one customer can't flood the staff chat
-const REC_TTL_MS = 2 * 60 * 60 * 1000; // a re-query after this starts a new log row (a new customer at the kiosk)
+export const REC_TTL_MS = 2 * 60 * 60 * 1000; // a re-query after this starts a new log row (a new customer at the kiosk)
 // Compares right against DB-default created_at: SQLite stores 'YYYY-MM-DD HH:MM:SS' (UTC) text, Postgres timestamptz.
 export const dbTime = (ms) => `${new Date(ms).toISOString().replace('T', ' ').slice(0, 19)}+00:00`;
 
@@ -102,6 +105,7 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
 
   r.post('/', async (req, res) => {
     const b = req.body ?? {};
+    checkStore(b);
     const cats = await catsFor(db, b);
     const { sizes, budget, fit, method, want, own, occasion, audience } = parseRequest(b, cats);
     // memory only: goes to Claude for this request, never stored or logged. Task 40: never a child's photo (the app
@@ -199,34 +203,22 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
   // same in-stock candidates (customer's sizes, the answer's temperature window). With `rec`, the options are kept for the bundle rule.
   r.post('/swap', async (req, res) => {
     const b = req.body ?? {};
+    checkStore(b);
     const { sizes, budget, fit, occasion, audience } = parseRequest(b, await catsFor(db, b));
-    const ids = (v, max) => {
-      if (!Array.isArray(v) || v.length > max || !v.every((x) => Number.isInteger(x) && x > 0) || new Set(v).size !== v.length) throw fail(400, 'err.invalid', { field: 'field.items' });
-      return v;
-    };
-    const outfit = ids(b.items, 6), exclude = ids(b.exclude ?? [], 30);
-    if (!outfit.includes(b.replace)) throw fail(400, 'err.invalid', { field: 'field.items' });
+    const { outfit, exclude } = parseSwap(b);
     const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon');
     if (!store) throw fail(404, 'err.store_not_found');
     const w = await weather(store);
-    // Nothing in the outfit's window → widen it like the outfits do (R1: ±3, then ±6 °C); in-window items still rank first.
-    let options = [];
-    for (const spread of SPREADS.filter((x) => x >= (SPREADS.includes(b.relaxed) ? b.relaxed : 0))) {
-      const candidates = await filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread, fit, audience });
-      const byId = new Map(candidates.map((p) => [p.id, p]));
-      const items = outfit.map((id) => byId.get(id));
-      if (items.some((p) => !p)) throw fail(409, 'err.outfit_stale'); // sold out or resized since the outfit was shown
-      options = swapOptions(candidates, { items, replace: b.replace, exclude, budget, temperature: w.temperature, raining: w.raining, occasion });
-      if (options.length) break;
-    }
+    const options = await swapAt((spread) => filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread, fit, audience }),
+      { b, outfit, exclude, w, budget, occasion });
     // Task 26: a swapped outfit is a recommended outfit too (bundle discount). Kept on its results screen's log row, newest 60.
     const rec = typeof b.rec === 'string' && REC.test(b.rec) ? await db('recommendation_logs').where({ token: b.rec, store_id: store.id }).first('id', 'outfits') : null;
-    if (rec && options.length) {
-      const shown = [...parseJson(rec.outfits, []), ...options.map((o) => o.items.map((i) => i.id))].slice(-MAX_SHOWN);
-      await db('recommendation_logs').where({ id: rec.id }).update({ outfits: JSON.stringify(shown) });
-    }
+    if (rec && options.length) await keepShown(db, rec, options.map((o) => o.items.map((i) => i.id)));
     res.json({ options });
   });
+
+  // Task 42: the outfit from the whole mall (POST /api/recommend/mall and /mall/swap), same AI cap as above.
+  r.use('/mall', createMallRecommendRouter(db, { weather, stylist, stylistTimeoutMs, allowAi }));
 
   // Pilot funnel: the customer tapped "Kiyib ko'rdim" (tried the suggestion on). { rec } → 204, once per results screen.
   r.post('/tried', async (req, res) => {
@@ -269,6 +261,35 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     res.status(201).json({ id, cabin: b.cabin });
   });
   return r;
+}
+
+// The swap body's outfit (items) and the other outfits' ids (exclude). Task 25.
+export function parseSwap(b) {
+  const ids = (v, max) => {
+    if (!Array.isArray(v) || v.length > max || !v.every((x) => Number.isInteger(x) && x > 0) || new Set(v).size !== v.length) throw fail(400, 'err.invalid', { field: 'field.items' });
+    return v;
+  };
+  const outfit = ids(b.items, 6), exclude = ids(b.exclude ?? [], 30);
+  if (!outfit.includes(b.replace)) throw fail(400, 'err.invalid', { field: 'field.items' });
+  return { outfit, exclude };
+}
+// Swap options from load(spread): nothing in the outfit's window → widen it like the outfits do (R1: ±3, then ±6 °C);
+// in-window items still rank first.
+export async function swapAt(load, { b, outfit, exclude, w, budget, occasion }) {
+  for (const spread of SPREADS.filter((x) => x >= (SPREADS.includes(b.relaxed) ? b.relaxed : 0))) {
+    const candidates = await load(spread);
+    const byId = new Map(candidates.map((p) => [p.id, p]));
+    const items = outfit.map((id) => byId.get(id));
+    if (items.some((p) => !p)) throw fail(409, 'err.outfit_stale'); // sold out or resized since the outfit was shown
+    const options = swapOptions(candidates, { items, replace: b.replace, exclude, budget, temperature: w.temperature, raining: w.raining, occasion });
+    if (options.length) return options;
+  }
+  return [];
+}
+// Adds outfit id sets to a results screen's log row (task 26 bundle), newest MAX_SHOWN kept.
+export async function keepShown(db, rec, sets) {
+  const shown = [...parseJson(rec.outfits, []), ...sets].slice(-MAX_SHOWN);
+  await db('recommendation_logs').where({ id: rec.id }).update({ outfits: JSON.stringify(shown) });
 }
 
 // Public: GET /api/stores/:id → store name and current weather for the customer start screen.

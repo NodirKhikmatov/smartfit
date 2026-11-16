@@ -134,6 +134,7 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
       await trx('admin_invites').where({ mall_id: m.id }).del();
       await trx('admins').where({ role: 'mall', mall_id: m.id }).del(); // audit rows keep the email (admin_id is set null)
       await trx('organizations').where({ mall_id: m.id }).update({ mall_id: null });
+      await trx('mall_recs').where({ mall_id: m.id }).del(); // task 42: its outfit screens count (no foreign key)
       await trx('malls').where({ id: m.id }).del();
       await audit(trx, req.admin, { action: 'mall.delete', entityId: m.id, label: m.name, before: { ...m, admins: admins.map((a) => a.email) } });
     });
@@ -160,7 +161,7 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
     const shops = await db('stores as s').join('organizations as g', 'g.id', 's.organization_id').where('s.mall_id', mall.id).orderBy('s.name')
       .select('s.id', 's.name', 'g.name as org_name', 's.mall_floor as floor', 's.mall_unit as unit', 's.logo_url', 's.mall_hidden as hidden');
     const ids = shops.map((s) => s.id);
-    const [visits, orders, kiosks, pending] = await Promise.all([
+    const [visits, orders, kiosks, pending, [outfits]] = await Promise.all([
       db('funnel_events').whereIn('store_id', ids).where('step', 'start').where('created_at', '>=', dbTime(since))
         .groupByRaw('store_id, case when device is null then 0 else 1 end').select('store_id', db.raw('case when device is null then 0 else 1 end as kiosk')).countDistinct({ n: 'visit' }),
       db('orders').whereIn('store_id', ids).where({ payment_status: 'paid' }).whereNot('status', 'cancelled').where('paid_at', '>=', iso(since))
@@ -168,6 +169,8 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
       db('kiosks').whereIn('store_id', ids).where('last_seen_at', '>', iso(now - 7 * DAY_MS)).select('store_id', 'last_seen_at'),
       db('organizations as g').where('g.mall_id', mall.id).whereNotExists(db('stores as s').whereRaw('s.organization_id = g.id')).orderBy('g.id', 'desc')
         .select('g.id as organization_id', 'g.name', db('admin_invites as i').whereRaw('i.organization_id = g.id').whereNull('i.used_at').where('i.expires_at', '>', iso(now)).count('*').as('open')),
+      // Task 42: "Butun markazdan obraz" results screens (a count only; what was shown stays each shop's).
+      db('mall_recs').where({ mall_id: mall.id }).where('created_at', '>=', dbTime(since)).count({ n: '*' }),
     ]);
     const n = (rows, id, kiosk) => Number(rows.find((x) => x.store_id === id && (kiosk === undefined || Number(x.kiosk) === kiosk))?.n ?? 0);
     const rows = shops.map((s) => {
@@ -178,7 +181,7 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
     const sum = (f) => rows.reduce((a, s) => a + f(s), 0);
     res.json({
       mall, days, shops: rows,
-      totals: { shops: rows.length, visits: sum((s) => s.visits.kiosk + s.visits.phone), kiosk_visits: sum((s) => s.visits.kiosk), orders: sum((s) => s.orders), kiosks_online: sum((s) => s.kiosks.online) },
+      totals: { shops: rows.length, visits: sum((s) => s.visits.kiosk + s.visits.phone), kiosk_visits: sum((s) => s.visits.kiosk), orders: sum((s) => s.orders), kiosks_online: sum((s) => s.kiosks.online), mall_outfits: Number(outfits.n) },
       pending: pending.map((p) => ({ organization_id: p.organization_id, name: p.name, invite_open: Number(p.open) > 0 })),
     });
   });

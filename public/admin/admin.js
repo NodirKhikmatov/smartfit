@@ -2268,7 +2268,8 @@ function drawMall({ mall, days, totals, shops, pending }, qr) {
     kpi({ label: t('adm.mall.k_shops'), value: n(totals.shops) }),
     kpi({ label: t('adm.mall.k_visits', { n: days }), value: n(totals.visits), sub: t('adm.mall.kiosk_n', { n: totals.kiosk_visits }) }),
     kpi({ label: t('adm.mall.k_orders', { n: days }), value: n(totals.orders) }),
-    kpi({ label: t('adm.mall.k_kiosks'), value: n(totals.kiosks_online) }));
+    kpi({ label: t('adm.mall.k_kiosks'), value: n(totals.kiosks_online) }),
+    kpi({ label: t('adm.mall.k_outfits', { n: days }), value: n(totals.mall_outfits) })); // task 42
   if (!shops.length) emptyRow($('mallShopRows'), 6, { ic: 'store', title: t('adm.mall.empty'), text: t('adm.mall.empty_text') });
   else $('mallShopRows').replaceChildren(...shops.map((s) => el('tr', {},
     el('td', {}, el('span', { className: 'prod' },
