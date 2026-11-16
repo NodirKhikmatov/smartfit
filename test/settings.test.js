@@ -395,6 +395,16 @@ test('every mutating admin route writes an audit row', async () => {
       const [{ id }] = await db('demo_requests').insert({ name: 'Aziz', phone: '+998901234567', company: 'Moda', lang: 'uz' }).returning('id');
       return admin('PATCH', `/demo-requests/${id}`, { handled: true }, superToken);
     }],
+    // Task 45: super's plan change (with its note), the owner hiding the checklist, a demo request → organisation.
+    'PATCH /orgs/:id/plan': ['org.plan', async () => {
+      const org = (await db('stores').where({ id: samarkand }).first('organization_id')).organization_id;
+      return admin('PATCH', `/orgs/${org}/plan`, { plan: 'biznes', paid_until: '2030-01-31', note: 'Hisob-faktura 17' }, superToken);
+    }],
+    'POST /checklist/dismiss': ['org.checklist', () => admin('POST', '/checklist/dismiss', undefined, ownerToken)],
+    'POST /demo-requests/:id/org': ['org.create', async () => {
+      const [{ id }] = await db('demo_requests').insert({ name: 'Aziz', phone: '+998901234567', company: 'Moda Plus', lang: 'uz' }).returning('id');
+      return admin('POST', `/demo-requests/${id}/org`, { owner_email: `demo${Date.now()}@smartfit.uz` }, superToken);
+    }],
     'POST /me/password': ['account.password', async () => {
       const m = await member();
       return admin('POST', '/me/password', { current: 'walk-pass-1', password: 'walk-pass-2' }, await login(m.email, 'walk-pass-1'));

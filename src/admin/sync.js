@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { fail, langOf, errorBody } from './routes.js';
 import { sizesOf } from '../db/seed.js';
 import { audit } from './audit.js';
+import { mayDo } from '../plans.js';
 
 export const SYNC_MAX_ITEMS = 1000;
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
@@ -19,6 +20,8 @@ export function createSyncRouter(db) {
     const key = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
     const k = KEY.test(key) ? await db('sync_keys').where({ key_hash: sha256(key) }).whereNull('revoked_at').first() : undefined;
     if (!k) throw fail(401, 'err.sync_key');
+    // Task 45: a read-only organisation's POS can't push stock either (it is a write like any other).
+    await mayDo(db, (await db('stores').where({ id: k.store_id }).first('organization_id'))?.organization_id, 'write');
     req.syncKey = k;
     next();
   });

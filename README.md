@@ -155,7 +155,40 @@ The usual way, all in the browser:
 3. Later the owner adds more stores (Sozlamalar → Do'kon → "Do'kon qo'shish", the same wizard) and invites managers and
    shop-floor staff (Sozlamalar → Jamoa, role "Menejer" or "Sotuvchi"). The owner sees and manages every store of their organisation and nothing of any other.
 
-Demo requests from the landing page show under the same **Tashkilotlar** page ("Ko'rib chiqildi" marks one handled).
+Demo requests from the landing page show under the same **Tashkilotlar** page ("Ko'rib chiqildi" marks one handled;
+"Tashkilot yaratish" turns one into its organisation and owner link in one step, and marks it handled). The public form
+itself never creates anything.
+
+## Plans, trial and read-only (task 45)
+
+Plans live in code (`src/plans.js`), one table of limits and features. No prices in the app: the invoice is sent
+outside it, and super marks the organisation as paid.
+
+| Plan | Stores | Products | Kiosks (seen in 7 days) | Team (members + open invites) | Features |
+|---|---|---|---|---|---|
+| Start | 1 | 300 | 2 | 3 | instalments |
+| Pro | 3 | 3 000 | 10 | 15 | AI stylist, instalments, points, AI try-on, offers |
+| Biznes | 50 | 20 000 | 100 | 100 | all of Pro |
+
+- A new organisation (Tashkilotlar, a mall's "invite a shop", a demo request) starts a **14-day Pro trial** (today
+  and the next 13 Tashkent days). Organisations from before plans, the demo ones and anything made by the CLI have
+  Biznes with **no end date** and never lock.
+- When the trial or the paid period ends there are **7 days of grace** (everything works, the admin shows a warning),
+  then **read-only**: the admin signs in, reads everything, exports orders, products and the points list, and sees
+  Sozlamalar → Tarif; every other write is refused with one message (checked in one middleware). Staff can still
+  finish orders already placed (paid, handed over, cancelled, returned; fitting requests). The kiosk and the phone say
+  "Do'kon vaqtincha ishlamayapti" and take no cart line or order; the shop leaves its mall's directory and search.
+  Nothing is deleted.
+- Over a limit (after a downgrade) everything that exists keeps working; only adding more is refused, with a message
+  that names the limit and the plan. A feature the plan lacks is hidden and refused on the server; its data stays
+  (points in the ledger, offers, the shop's switches) and works again with the plan.
+- Super: **Tashkilotlar** → "Tarif" on a row: the plan, the last paid day and a note (e.g. the invoice number; it goes
+  to the audit log). "Tez orada tugaydi" lists organisations ending within 14 days, in grace or read-only.
+- The owner sees the plan, dates and usage in **Sozlamalar → Tarif**, with a button to the landing page's contact
+  form. A new shop's dashboard shows a first-run checklist (store address and hours, own categories, products, kiosk
+  PIN, a kiosk seen or a first customer visit, a colleague) that ticks itself and can be hidden.
+- Super-admins are never limited (they fix things for a shop). Each shop in a mall has its own plan; the mall admin
+  neither sees nor changes it, and the mall itself is not billed in the app.
 
 ## Shopping malls (several shops, one entry screen)
 
@@ -447,6 +480,13 @@ the 2-week pilot.
       in Sozlamalar shows it. Check the status path `/v1/status/<id>` and the base64 output shape against the live API
       (the docs don't show a full example of either).
 - [ ] Read FASHN's current Terms and Data Retention page once more and keep the consent text in step with them.
+
+**Plans and billing (task 45)**
+- [ ] Set the prices and send the first invoices; after each payment set the plan and the paid-until day in
+      Tashkilotlar → Tarif. Review every live organisation's plan (they all start as Biznes with no end date).
+- [ ] Online subscription payment (Click / Payme recurring or an invoice link) is not built: payment happens outside the
+      app. Build it when manual invoicing gets heavy.
+- [ ] Check the limits in `src/plans.js` against real shops after the pilot (they are first guesses).
 
 **Payments (only if delivery/online payment is in the pilot; the spec says start with pickup + cashier)**
 - [ ] Payme sandbox (test.paycom.uz, TEST_KEY) and Click test service: payment, cancel, callback, 15-min expiry.

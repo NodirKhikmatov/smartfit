@@ -260,6 +260,7 @@ async function api(path, body, method = body ? 'POST' : 'GET') {
   return data;
 }
 
+let refused = ''; // task 45: the heartbeat's refusal message, if the plan has no room for this kiosk
 async function loadStore() {
   tryon.setProvider(null); // until this store says it has try-on on
   $('startError').textContent = '';
@@ -279,6 +280,13 @@ async function loadStore() {
     return;
   }
   $('storeName').textContent = store.name;
+  // Task 45: a read-only shop (its plan ended) or a kiosk its plan has no room for: no flow starts here.
+  if (store.paused || refused) {
+    $('weather').hidden = $('lookbook').hidden = true;
+    $('startError').textContent = store.paused ? t('kiosk.start.paused') : refused;
+    $('startLabel').textContent = t('kiosk.start.go');
+    return;
+  }
   tryon.setProvider(store.tryon); // task 41: the provider's name, absent when try-on is off here (no key, switched off, today's limit)
   setCategories(store.categories.map((c) => [c.id, c.role]));
   renderWantChips(formWant());
@@ -1881,7 +1889,7 @@ function reset() {
 }
 if (kiosk) {
   watchIdle(document, { onIdle: () => { reset(); attract(true); } });
-  kioskShell({ storeId, mallId: inMall ? mallId : 0, api });
+  kioskShell({ storeId, mallId: inMall ? mallId : 0, api, onRefused: (msg) => { refused = msg; loadStore(); } });
   attract(true);
 }
 

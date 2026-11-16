@@ -23,6 +23,7 @@ import { promoRoutes } from './promos.js';
 import { offerRoutes } from './offers.js';
 import { fitOf } from '../size/size.js';
 import { demandItems, funnelStats, methodStats, occasionStats } from '../demand.js';
+import { mayDo, FEATURES } from '../plans.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -196,6 +197,11 @@ export const MALL_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^(GET|PATCH)
   /^POST \/mall\/shops$/, /^PATCH \/mall\/stores\/\d+$/, /^(POST|DELETE) \/mall\/stores\/\d+\/logo$/,
   /^GET \/mall\/offers$/, /^POST \/mall\/offers\/\d+\/(approve|reject)$/, /^PATCH \/mall\/slides$/, // task 43: what shops submitted to it
   /^GET \/mall\/map$/, /^(POST|DELETE) \/mall\/floors\/\d+\/plan$/, /^POST \/mall\/spots$/, /^(PATCH|DELETE) \/mall\/spots\/\d+$/]; // task 44: the map
+// Task 45: what a read-only organisation may still write: its own password, and finishing orders already placed
+// (paid, handed over, cancelled, returned; a fitting request answered), so a customer who paid gets the goods.
+export const READONLY_ROUTES = [/^POST \/me\/password$/, /^POST \/orders\/\d+\/(status|pay|returns)$/, /^POST \/fitting\/\d+\/(accept|done)$/];
+// Admin routes that belong to a plan feature (offers have their own one check, canPostOffers).
+const FEATURE_ROUTES = [[/^(POST \/points\/adjust|PATCH \/points)$/, 'points']];
 const STATS_TZ = 'Asia/Tashkent'; // every store is in Uzbekistan (UTC+5, no DST)
 export const DAY_MS = 86400000;
 export const dayKey = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: STATS_TZ });
@@ -241,7 +247,7 @@ const stockTotals = (db) => db('product_stock as ps').join('products as pp', 'pp
   .sum({ thin: db.raw('case when ps.quantity - ps.reserved <= st.low_stock_threshold then 1 else 0 end') })
   .groupBy('ps.product_id');
 
-export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false } = {}) {
+export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, now = Date.now } = {}) {
   const imageDir = path.resolve(uploadDir, 'products');
   const secret = tokenSecret();
   // shortcut: per-process, per-IP lockout map; move to a shared store if we run several instances.
@@ -287,6 +293,11 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false } =
     // Task 28: the staff role reaches only the shop-floor routes; every other admin route is 403 for it, whatever it is.
     if (admin.role === 'staff' && !STAFF_ROUTES.some((re) => re.test(`${req.method} ${req.path}`))) throw fail(403, 'err.forbidden');
     if (admin.role === 'mall' && !MALL_ROUTES.some((re) => re.test(`${req.method} ${req.path}`))) throw fail(403, 'err.forbidden');
+    // Task 45: the plan. Every write of a read-only organisation stops here (one place, so a new route is covered too).
+    const call = `${req.method} ${req.path}`;
+    if (admin.organization_id != null && !['GET', 'HEAD'].includes(req.method) && !READONLY_ROUTES.some((re) => re.test(call))) {
+      await mayDo(db, admin.organization_id, FEATURE_ROUTES.find(([re]) => re.test(call))?.[1] ?? 'write', { now: now(), admin });
+    }
     req.admin = admin;
     next();
   });
@@ -316,7 +327,11 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false } =
     });
   }
 
-  r.get('/me', (req, res) => res.json(publicAdmin(req.admin)));
+  // Task 45: an organisation's admins also get its plan state and features (the banner, and hiding switched-off features).
+  r.get('/me', async (req, res) => {
+    const s = await mayDo(db, req.admin.organization_id, 'read', { now: now() });
+    res.json({ ...publicAdmin(req.admin), ...(s && { plan: { name: s.plan, state: s.state, ends: s.ends, readonly_from: s.readonly_from, features: FEATURES.filter((f) => s.features.includes(f)) } }) });
+  });
 
   r.get('/stores', async (req, res) => {
     const q = db('stores').select('id', 'name', 'city', 'organization_id').orderBy('id');
@@ -373,6 +388,23 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false } =
     res.json({ items: await withStock(rows), total: Number(n), limit, offset });
   });
 
+  // Task 45: the caller's products (?store_id narrows) as the import's own CSV: id, store_id, the columns and the stock per
+  // size, so a shop can take its catalogue out (a read-only one too) and bring it back with the same file.
+  r.get('/products/export', async (req, res) => {
+    const q = inStores(req.admin, db('products as p').leftJoin('categories as c', 'c.id', 'p.category_id'), 'p.store_id');
+    if (req.query.store_id) q.where('p.store_id', Number(req.query.store_id) || 0);
+    const rows = await q.orderBy('p.id').limit(EXPORT_MAX).select('p.*', 'c.name as category_name');
+    const stock = await db('product_stock').whereIn('product_id', rows.map((p) => p.id)).select('product_id', 'size', 'quantity');
+    const at = (x) => (SIZE_COLS.includes(x) ? SIZE_COLS.indexOf(x) : SIZE_COLS.length);
+    const sizes = [...new Set(rows.flatMap((p) => sizesOf(p)))].sort((a, b) => at(a) - at(b));
+    const qty = new Map(stock.map((s) => [`${s.product_id} ${s.size}`, s.quantity]));
+    const cell = (p, c) => (c === 'category' ? p.category_name ?? p.category : c === 'waterproof' ? (p.waterproof ? 1 : 0) : p[c]);
+    res.type('text/csv; charset=utf-8').attachment(`products-${dayKey(Date.now())}.csv`).send(toCsv([
+      ['id', 'store_id', ...PRODUCT_COLS, ...sizes],
+      ...rows.map((p) => [p.id, p.store_id, ...PRODUCT_COLS.map((c) => cell(p, c)), ...sizes.map((x) => qty.get(`${p.id} ${x}`) ?? '')]),
+    ]));
+  });
+
   r.get('/products/:id', async (req, res) => {
     const [p] = await withStock([await findProduct(req)]);
     res.json(p);
@@ -399,6 +431,8 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false } =
 
   async function insertProduct(trx, admin, body) {
     const storeId = await resolveStore(trx, admin, body.store_id);
+    // Task 45: the plan's product limit (a CSV import counts its own rows as it goes, inside its transaction).
+    await mayDo(trx, (await trx('stores').where({ id: storeId }).first('organization_id')).organization_id, 'products', { now: now(), admin });
     const product = validProduct(body, await categoryFor(trx, storeId, body));
     const stock = validStock(body.stock, sizesOf(product));
     await skuFree(trx, storeId, product.sku);
@@ -808,8 +842,8 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false } =
     });
   });
 
-  settingsRoutes(r, db, { secret, lock, resolveStore, tryon });
-  orgRoutes(r, db);
+  settingsRoutes(r, db, { secret, lock, resolveStore, tryon, now });
+  orgRoutes(r, db, { now }); // task 45: plans, the checklist
   promoRoutes(r, db); // task 26
   categoryRoutes(r, db, { uploadDir }); // task 36
   mallRoutes(r, db, { uploadDir }); // task 37

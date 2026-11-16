@@ -7,14 +7,16 @@
 import { randomBytes } from 'node:crypto';
 import { fail, msOf } from '../admin/routes.js';
 import { fmt, t } from '../../public/shared/i18n.js';
+import { planState } from '../plans.js';
 
 export const PERCENT_MAX = 20;
 
 // The store's organisation settings, or null when points are off there (cashback 0 %, or a store without an organisation).
 export async function pointsConfig(q, storeId) {
   const g = await q('stores as s').join('organizations as g', 'g.id', 's.organization_id').where('s.id', storeId)
-    .first('g.id', 'g.cashback_percent', 'g.points_max_share');
-  return g?.cashback_percent > 0 ? { orgId: g.id, percent: g.cashback_percent, share: g.points_max_share } : null;
+    .first('g.id', 'g.cashback_percent', 'g.points_max_share', 'g.plan');
+  // Task 45: a plan without points switches earning and spending off; the ledger stays and counts again with the plan.
+  return g?.cashback_percent > 0 && planState(g).features.includes('points') ? { orgId: g.id, percent: g.cashback_percent, share: g.points_max_share } : null;
 }
 
 export const balanceOf = async (q, profileId) => Number((await q('points_ledger').where({ profile_id: profileId }).sum({ n: 'amount' }))[0].n ?? 0);
@@ -50,8 +52,8 @@ export async function refundSpent(trx, orderId) {
 // that logged in at checkout, else this organisation's profile with the order's phone (Telegram-verified).
 export async function earnPoints(trx, orderId) {
   const o = await trx('orders as o').join('stores as s', 's.id', 'o.store_id').join('organizations as g', 'g.id', 's.organization_id').where('o.id', orderId)
-    .first('o.id', 'o.total', 'o.delivery_fee', 'o.phone', 'o.profile_id', 'g.id as org', 'g.cashback_percent');
-  const amount = o?.cashback_percent > 0 ? Math.floor(((o.total - o.delivery_fee) * o.cashback_percent) / 100) : 0;
+    .first('o.id', 'o.total', 'o.delivery_fee', 'o.phone', 'o.profile_id', 'g.id as org', 'g.cashback_percent', 'g.plan');
+  const amount = o?.cashback_percent > 0 && planState(o).features.includes('points') ? Math.floor(((o.total - o.delivery_fee) * o.cashback_percent) / 100) : 0;
   if (amount < 1) return 0;
   const mine = trx('customer_profiles').where({ organization_id: o.org });
   const p = (o.profile_id && await mine.clone().where({ id: o.profile_id }).first('id')) || await mine.clone().where({ phone: o.phone }).orderBy('id', 'desc').first('id');

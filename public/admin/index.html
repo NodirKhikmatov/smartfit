@@ -85,6 +85,8 @@
       <div class="top-actions" id="topActions"></div>
     </header>
     <main id="main" tabindex="-1">
+      <!-- Task 45: the plan's trial / grace / read-only line, on every page of an organisation's admins -->
+      <p class="notice plan-banner" id="planBanner" role="status" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#info"></use></svg><span><span id="planBannerText"></span> <a id="planBannerLink" href="#/settings?tab=plan" data-i18n="adm.plan.open"></a></span></p>
       <!-- Dashboard -->
       <section data-page="dashboard" hidden>
         <div class="page-head">
@@ -92,6 +94,14 @@
           <div class="seg" role="group" data-i18n-aria-label="adm.stats.period" id="dashDays"></div>
         </div>
         <div id="dashError"></div>
+        <!-- Task 45: the new shop's first-run checklist (owner), ticked from real data -->
+        <section class="card panel checklist" id="checklist" hidden aria-labelledby="checkTitle">
+          <div class="panel-head">
+            <div><h2 id="checkTitle" data-i18n="adm.check.title"></h2><p class="panel-sub" id="checkSub"></p></div>
+            <button type="button" class="ghost" id="checkHide" data-i18n="adm.check.hide"></button>
+          </div>
+          <ol class="check-steps" id="checkList"></ol>
+        </section>
         <div class="kpis" id="kpis"></div>
         <div class="dash-grid">
           <section class="card panel span-2" aria-labelledby="dashChartTitle">
@@ -331,10 +341,14 @@
           <button type="button" class="primary" id="orgBtn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="adm.orgs.add"></span></button>
         </div>
         <div id="orgError"></div>
+        <section class="card panel ending" aria-labelledby="endingTitle">
+          <div class="panel-head"><div><h2 id="endingTitle" data-i18n="adm.orgs.ending"></h2><p class="panel-sub" data-i18n="adm.orgs.ending_sub"></p></div></div>
+          <ul class="low-list" id="orgEnding"></ul>
+        </section>
         <div class="table-wrap">
           <table class="table">
             <caption class="visually-hidden" data-i18n="adm.route.orgs"></caption>
-            <thead><tr><th data-i18n="field.org_name"></th><th class="num" data-i18n="adm.orgs.stores"></th><th class="num hide-sm" data-i18n="adm.orgs.admins"></th><th class="num hide-sm" data-i18n="adm.orgs.invites"></th><th class="hide-sm" data-i18n="adm.orgs.created"></th></tr></thead>
+            <thead><tr><th data-i18n="field.org_name"></th><th data-i18n="adm.orgs.plan_col"></th><th class="hide-sm" data-i18n="adm.orgs.ends_col"></th><th class="num" data-i18n="adm.orgs.stores"></th><th class="num hide-sm" data-i18n="adm.orgs.admins"></th><th class="num hide-sm" data-i18n="adm.orgs.invites"></th><th class="hide-sm" data-i18n="adm.orgs.created"></th><th><span class="visually-hidden" data-i18n="adm.actions"></span></th></tr></thead>
             <tbody id="orgRows"></tbody>
           </table>
         </div>
@@ -524,6 +538,7 @@
                 <label class="field"><span data-i18n="field.bundle_percent"></span> <input name="bundle_percent" type="number" min="0" max="90" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.bundle_hint"></span></label>
                 <div class="span-all inst-set" role="group" aria-labelledby="instTitle">
                   <h3 id="instTitle" data-i18n="adm.set.instalment_title"></h3>
+                  <p class="notice warn" id="instPlanOff" hidden data-i18n="adm.plan.off_notice"></p>
                   <label class="check"><input name="instalment_on" type="checkbox" aria-describedby="instHint"> <span data-i18n="adm.set.instalment_on"></span></label>
                   <p class="hint" id="instHint" data-i18n="adm.set.instalment_hint"></p>
                   <div class="inst-terms" id="instTerms"></div>
@@ -531,6 +546,7 @@
                 <div class="span-all inst-set" role="group" aria-labelledby="tryonTitle">
                   <h3 id="tryonTitle" data-i18n="adm.set.tryon_title"></h3>
                   <p class="notice warn" id="tryonNoKey" hidden data-i18n="adm.set.tryon_nokey"></p>
+                  <p class="notice warn" id="tryonPlanOff" hidden data-i18n="adm.plan.off_notice"></p>
                   <label class="check"><input name="tryon_on" type="checkbox" aria-describedby="tryonHint"> <span data-i18n="adm.set.tryon_on"></span></label>
                   <p class="hint" id="tryonHint" data-i18n="adm.set.tryon_hint"></p>
                   <label class="field"><span data-i18n="field.tryon_limit"></span> <input name="tryon_daily_limit" type="number" min="1" max="1000" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.tryon_limit_hint"></span></label>
@@ -593,6 +609,7 @@
           <form class="card settings-card" id="pointsForm" aria-labelledby="pointsTitle">
             <div class="panel-head"><div><h2 id="pointsTitle" data-i18n="adm.points.title"></h2><p class="panel-sub" data-i18n="adm.points.sub"></p></div></div>
             <div id="pointsLoadError"></div>
+            <p class="notice warn" id="pointsPlanOff" hidden data-i18n="adm.plan.points_off"></p>
             <p class="notice" id="pointsReadOnly" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#info"></use></svg><span data-i18n="adm.points.read_only"></span></p>
             <fieldset id="pointsFields">
               <legend class="visually-hidden" data-i18n="adm.points.title"></legend>
@@ -637,6 +654,25 @@
             </table>
           </div>
           <nav class="pager" id="auditPager" data-i18n-aria-label="adm.pager"></nav>
+        </section>
+
+        <!-- Task 45: the organisation's plan, its dates, what counts toward each limit, and which features it has -->
+        <section data-tab="plan" hidden>
+          <div id="planError"></div>
+          <div class="settings">
+            <section class="card" aria-labelledby="planTitle">
+              <div class="panel-head"><h2 id="planTitle"></h2><span class="badge" id="planState"></span></div>
+              <dl class="facts" id="planFacts"></dl>
+              <p class="muted" data-i18n="adm.plan.invoice"></p>
+              <div class="actions"><a class="button primary" href="/#demo" target="_blank" rel="noopener" data-i18n="adm.plan.contact"></a></div>
+            </section>
+            <section class="card" aria-labelledby="planLimitsTitle">
+              <h2 id="planLimitsTitle" data-i18n="adm.plan.limits"></h2>
+              <ul class="plan-list" id="planLimits"></ul>
+              <h3 data-i18n="adm.plan.features"></h3>
+              <ul class="plan-list" id="planFeatures"></ul>
+            </section>
+          </div>
         </section>
 
         <section data-tab="account" hidden>
@@ -759,6 +795,22 @@
       <button type="button" id="orgCancel" data-i18n="common.cancel"></button>
       <button class="primary" id="orgCreate" data-i18n="adm.orgs.create"></button>
       <button type="button" class="primary" id="orgCopy" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="adm.qr.copy"></span></button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Task 45: an organisation's plan (super): the plan, paid until, and a note for the audit log -->
+<dialog id="planDlg" class="narrow" aria-labelledby="planDlgTitle">
+  <form id="planForm" method="dialog">
+    <h2 id="planDlgTitle"></h2>
+    <p class="muted" id="planDlgNow"></p>
+    <label class="field"><span data-i18n="field.plan"></span> <select name="plan" required></select></label>
+    <label class="field"><span data-i18n="field.paid_until"></span> <input name="paid_until" type="date"><span class="hint" data-i18n="adm.orgs.paid_hint"></span></label>
+    <label class="field"><span data-i18n="field.plan_note"></span> <textarea name="note" required minlength="3" maxlength="300" rows="3"></textarea><span class="hint" data-i18n="adm.orgs.note_hint"></span></label>
+    <p class="error" id="planDlgError" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="planCancel" data-i18n="common.cancel"></button>
+      <button class="primary" data-i18n="adm.set.save"></button>
     </div>
   </form>
 </dialog>

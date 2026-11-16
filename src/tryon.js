@@ -10,6 +10,7 @@ import { withDeadline, parsePhoto } from './recommend/stylist.js';
 import { visible } from './recommend/engine.js';
 import { inStock } from './catalog.js';
 import { tryonGarment, TRYON_ROLES } from '../public/app/flow.js';
+import { allows } from './plans.js';
 
 export const TRYON_TIMEOUT_MS = 45_000; // FASHN "balanced" takes ~8 s; queueing gets the rest
 export const TRYON_PHOTO_MAX = 1_500_000; // base64 chars (~1.1 MB JPEG); the app sends ≤ 1280 px, usually 150–400 KB
@@ -56,9 +57,9 @@ export function createFashn({ apiKey = process.env.FASHN_API_KEY?.trim(), fetch 
   };
 }
 
-// The one on/off check (task 45 will add the shop's plan here): a provider key, the shop's switch and today's count.
+// The one on/off check: a provider key, the shop's switch, the plan (task 45: has try-on, not read-only) and today's count.
 export async function tryonOpen(db, provider, store, now = Date.now()) {
-  if (!provider || !store?.tryon_on) return false;
+  if (!provider || !store?.tryon_on || !(await allows(db, store.organization_id, 'tryon', now))) return false;
   const row = await db('tryon_usage').where({ store_id: store.id, day: tashDay(now) }).first('count');
   return Number(row?.count ?? 0) < store.tryon_daily_limit;
 }
@@ -83,7 +84,7 @@ export function createTryonRouter(db, { provider, uploadDir, timeoutMs = TRYON_T
     if (b.consent !== true) throw fail(400, 'err.tryon_consent'); // asked every time, in the app's dialog
     const photo = parsePhoto(b.photo, TRYON_PHOTO_MAX);
     if (!photo) throw fail(400, 'err.invalid', { field: 'field.photo' });
-    const store = Number.isInteger(b.store_id) && b.store_id > 0 ? await db('stores').where({ id: b.store_id }).first('id', 'tryon_on', 'tryon_daily_limit') : null;
+    const store = Number.isInteger(b.store_id) && b.store_id > 0 ? await db('stores').where({ id: b.store_id }).first('id', 'organization_id', 'tryon_on', 'tryon_daily_limit') : null;
     if (!store) throw fail(404, 'err.store_not_found');
     if (!(await tryonOpen(db, provider, store, now()))) throw fail(403, 'err.tryon_off');
     // An item this shop shows and sells right now (stock > 0), usable for a try-on (never a child's).

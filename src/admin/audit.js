@@ -9,6 +9,7 @@ export const AUDIT_ACTIONS = [
   'category.create', 'category.update', 'category.delete', 'category.image',
   'mall.create', 'mall.update', 'mall.delete', 'mall.logo', 'mall.store', 'org.points', 'points.adjust',
   'offer.create', 'offer.update', 'offer.image', 'offer.submit', 'offer.delete', 'offer.approve', 'offer.reject', 'mall.slides', 'mall.map',
+  'org.plan', 'org.checklist', // task 45
 ];
 export const AUDIT_ENTITIES = ['product', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'org', 'demo', 'promo', 'category', 'mall', 'points', 'offer'];
 

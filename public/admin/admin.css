@@ -372,3 +372,20 @@ dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }
 .plan-edit .pin.here { pointer-events: auto; cursor: pointer; }
 .spot-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); }
 .spot-row .qr-url { flex: 1 1 16rem; min-width: 0; overflow-wrap: anywhere; }
+
+/* Task 45: the plan banner, the first-run checklist, the "Tarif" page's lists and super's "ending soon" panel */
+.plan-banner { align-items: center; }
+.plan-banner a { font-weight: var(--weight-strong); }
+.checklist, .ending { margin-bottom: var(--s-4); }
+.check-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0 var(--s-4); }
+.check-steps li { display: flex; align-items: center; gap: var(--s-2); min-height: 2.75rem; }
+.check-steps li > .icon { color: var(--accent); flex: none; }
+.check-steps li.done a { color: var(--ink-3); text-decoration: line-through; }
+.check-steps .dot { width: .75rem; height: .75rem; margin: 0 .25rem; border: 2px solid var(--line-strong); border-radius: 50%; flex: none; }
+.plan-list { list-style: none; margin: 0 0 var(--s-4); padding: 0; }
+.plan-list li { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) 0; border-top: 1px solid var(--line); }
+.plan-list li:first-child { border-top: 0; }
+.plan-list meter { width: 6rem; flex: none; }
+.plan-list .grow, .low-list .grow { flex: 1; min-width: 0; }
+.ending .low-list li { flex-wrap: wrap; }
+.ending .low-list .grow { min-width: 12rem; }

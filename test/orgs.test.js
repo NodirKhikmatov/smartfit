@@ -336,6 +336,26 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
     'POST /orgs': async () => refused(await admin('POST', '/orgs', { name: 'X', owner_email: 'x2@smartfit.uz' }, ownerA)),
     'GET /demo-requests': async () => refused(await admin('GET', '/demo-requests', undefined, ownerA)),
     'PATCH /demo-requests/:id': async () => refused(await admin('PATCH', '/demo-requests/1', { handled: true }, ownerA)),
+    // Task 45: plans, the products CSV and the first-run checklist.
+    'GET /products/export': async () => {
+      const r = await admin('GET', `/products/export?store_id=${b1}`, undefined, ownerA);
+      assert.equal(r.status, 200);
+      assert.ok(!String(r.body).includes('ORGB-ONLY-1') && String(r.body).split('\r\n').filter(Boolean).length === 1, 'only the header: ?store_id cannot widen the scope');
+      assert.ok(!String((await admin('GET', '/products/export', undefined, ownerA)).body).includes('ORGB-ONLY-1'), 'no org B product');
+    },
+    'GET /plan': async () => {
+      const mine = await admin('GET', '/plan', undefined, ownerA);
+      assert.equal(mine.status, 200);
+      assert.deepEqual((await admin('GET', `/plan?organization_id=${orgB}`, undefined, ownerA)).body, mine.body, '?organization_id is super-only');
+    },
+    'PATCH /orgs/:id/plan': async () => refused(await admin('PATCH', `/orgs/${orgB}/plan`, { plan: 'start', paid_until: null, note: 'Sinov' }, ownerA)),
+    'POST /demo-requests/:id/org': async () => refused(await admin('POST', '/demo-requests/1/org', { owner_email: 'x3@smartfit.uz' }, ownerA)),
+    'GET /checklist': async () => assert.equal((await admin('GET', '/checklist', undefined, ownerA)).status, 200),
+    'POST /checklist/dismiss': async () => {
+      assert.equal((await admin('POST', '/checklist/dismiss', undefined, ownerA)).status, 204);
+      assert.equal((await db('organizations').where({ id: orgB }).first()).checklist_dismissed_at, null, 'org B untouched');
+      await db('organizations').where({ id: orgA }).update({ checklist_dismissed_at: null });
+    },
   };
   // Not about stores: credentials, the invite flow and the caller's own password.
   const NOT_SCOPED = ['POST /login', 'POST /invite/check', 'POST /invite/accept', 'POST /me/password'];
@@ -427,7 +447,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 34; i > 12; i--) await m.migrate.down(); // 034 … 013
+    for (let i = 35; i > 12; i--) await m.migrate.down(); // 035 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

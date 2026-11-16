@@ -9,6 +9,7 @@ import { parseJson } from '../cart/promo.js';
 import { parsePhoto, applyStylist, applyRanking, withDeadline, TIMEOUT_MS } from './stylist.js';
 import { COLORS, STYLES } from '../../public/shared/i18n.js';
 import { tryonOpen } from '../tryon.js';
+import { allows, mayDo } from '../plans.js';
 import { createMallRecommendRouter } from './mall.js';
 import { storeOffers } from '../admin/offers.js';
 
@@ -113,22 +114,24 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
     // has no photo step for a child; one sent anyway is dropped here).
     const photo = audience === 'child' ? null : parsePhoto(b.photo);
 
-    const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon', 'bundle_percent');
+    const store = await db('stores').where({ id: b.store_id }).first('id', 'lat', 'lon', 'bundle_percent', 'organization_id');
     if (!store) throw fail(404, 'err.store_not_found');
+    // Task 45: the AI stylist only on a plan that has it; the rules answer otherwise (same as without a key).
+    const aiStylist = stylist && (await allows(db, store.organization_id, 'stylist')) ? stylist : null;
     const w = await weather(store);
     const ctx = { temperature: w.temperature, raining: w.raining, budget, occasion };
     const load = (spread) => filterCandidates(db, { storeId: store.id, gender: b.gender, sizes, temperature: w.temperature, spread, fit, audience });
     const mode = want ? 'single' : 'outfit';
     // `audience` is in the answer only for a child, so an adult request gets exactly the answer it got before task 40.
     const kid = audience === 'child' ? { audience } : {};
-    if (want) return single(req, res, { b, store, w, sizes, budget, method, fit, want, own, occasion, photo, load, cats, audience, kid });
+    if (want) return single(req, res, { b, store, w, sizes, budget, method, fit, want, own, occasion, photo, load, cats, audience, kid, aiStylist });
     const { candidates, ...rules } = await ruleOutfits(load, ctx);
     let result = { ...rules, style_guess: null, source: 'rules' };
     // No rule outfit means a required category is empty, so Claude could not build one either. Without outerwear
     // (notice) applyStylist rejects every AI outfit, so the rules answer stands. Claude sees the relaxed candidates.
-    if (stylist && result.outfits.length && !result.notice && allowAi(req.ip)) {
+    if (aiStylist && result.outfits.length && !result.notice && allowAi(req.ip)) {
       try {
-        const answer = await withDeadline((signal) => stylist({ photo, weather: w, sizes, budget, occasion, audience, candidates, lang: langOf(req) }, signal), stylistTimeoutMs);
+        const answer = await withDeadline((signal) => aiStylist({ photo, weather: w, sizes, budget, occasion, audience, candidates, lang: langOf(req) }, signal), stylistTimeoutMs);
         const ai = applyStylist(answer, candidates, ctx);
         if (ai) result = { ...result, ...ai, partial: null, source: 'ai' };
         else console.warn('stylist: no valid outfit, using rules');
@@ -147,14 +150,14 @@ export function createRecommendRouter(db, { weather, stylist = null, stylistTime
   });
 
   // Task 30, single items: rule picks per wanted category; Claude (when there) only re-orders the items the rules chose.
-  async function single(req, res, { b, store, w, sizes, budget, method, fit, want, own, occasion, photo, load, cats, audience, kid }) {
+  async function single(req, res, { b, store, w, sizes, budget, method, fit, want, own, occasion, photo, load, cats, audience, kid, aiStylist }) {
     const ctx = { temperature: w.temperature, raining: w.raining, budget, want, own, occasion };
     let { groups, relaxed } = await ruleSingles(load, ctx);
     let style_guess = null, source = 'rules';
     const shownItems = () => groups.flatMap((g) => g.items);
-    if (stylist && shownItems().length && allowAi(req.ip)) {
+    if (aiStylist && shownItems().length && allowAi(req.ip)) {
       try {
-        const answer = await withDeadline((signal) => stylist({ mode: 'single', photo, weather: w, sizes, budget, own, occasion, audience,
+        const answer = await withDeadline((signal) => aiStylist({ mode: 'single', photo, weather: w, sizes, budget, own, occasion, audience,
           want: want.map((c) => (Number.isInteger(c) ? cats.find((x) => x.id === c).name : c)), candidates: shownItems(), lang: langOf(req) }, signal), stylistTimeoutMs);
         const ai = applyRanking(answer, groups);
         if (ai) {
@@ -315,6 +318,8 @@ export function createStoreRouter(db, { weather, profiles = false, tryon = null 
     const looks = LOOK.map((c) => rows.find((p) => p.category === c)).filter(Boolean);
     // profile: show the task 27 buttons (needs the Telegram bot and an organisation to scope the profile to).
     // categories (task 36): the shop's shown categories for the catalogue filter and the "Nima kerak?" chips.
+    // Task 45: a read-only shop's kiosk and phone show "vaqtincha ishlamayapti" and take no orders (cart.js refuses them too).
+    if ((await mayDo(db, store.organization_id, 'read'))?.state === 'readonly') return res.json({ id: store.id, name: store.name, city: store.city, paused: true });
     res.json({ id: store.id, name: store.name, city: store.city, weather: w, looks, profile: profiles && store.organization_id != null,
       categories: await shownCategories(db, id),
       offers: await storeOffers(db, id), // task 43: the shop's own current offers (no mall approval needed on its own screen)

@@ -7,7 +7,7 @@ import { sizesOf } from './db/seed.js';
 import { unitPrice, pairWith, visible } from './recommend/engine.js';
 import { fitOf } from './size/size.js';
 import { logMissed } from './demand.js';
-import { hold, customer, insertOrder, orderView, releaseExpired, storeOf } from './cart/cart.js';
+import { hold, customer, insertOrder, orderView, releaseExpired, storeOf, planInstalments } from './cart/cart.js';
 import { termsOf, plan } from './cart/instalment.js';
 import { clientKey } from './limits.js';
 import { qrSvg, publicBase } from './qr.js';
@@ -42,7 +42,7 @@ export async function withSizes(db, rows) {
 async function storeById(db, id) {
   const store = posInt(id) ? await db('stores').where({ id }).first('id', 'organization_id', 'instalment_on', 'instalment_terms') : null;
   if (!store) throw fail(404, 'err.store_not_found');
-  return store;
+  return planInstalments(db, store);
 }
 
 export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {}) {

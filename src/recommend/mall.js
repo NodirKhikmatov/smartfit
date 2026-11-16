@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { fail, langOf } from '../admin/routes.js';
 import { filterCandidates, ruleOutfits, rankPool, ORDER } from './engine.js';
 import { applyStylist, parsePhoto, withDeadline } from './stylist.js';
+import { closedOrgs, openOrgs } from '../plans.js';
 import { parseRequest, parseSwap, swapAt, keepShown, REC, REC_TTL_MS, dbTime } from './routes.js';
 
 export const MALL_CAPS = [6, 9]; // items of one shop across the shown outfits, tried in order; then no cap
@@ -30,7 +31,7 @@ export function createMallRecommendRouter(db, { weather, stylist, stylistTimeout
     const q = parseRequest(b);
     const mall = await db('malls').where({ id: b.mall_id }).first('id', 'lat', 'lon');
     if (!mall) throw fail(404, 'err.mall_not_found');
-    const shops = await db('stores').where({ mall_id: mall.id, mall_hidden: false }).orderBy('id')
+    const shops = await openOrgs(db('stores').where({ mall_id: mall.id, mall_hidden: false }), 'organization_id', await closedOrgs(db)).orderBy('id') // task 45: not a paused shop
       .select('id', 'name', 'mall_floor as floor', 'mall_unit as unit', 'logo_url', 'bundle_percent', 'lat', 'lon');
     // The shops share the mall's place: its coordinates (task 37), else its first shop's; same cache and offline fallback.
     const w = await weather(mall.lat != null ? mall : shops[0] ?? mall);

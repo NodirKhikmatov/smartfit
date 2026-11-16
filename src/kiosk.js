@@ -3,6 +3,7 @@ import express from 'express';
 import { fail } from './admin/routes.js';
 import { verifyPassword } from './admin/auth.js';
 import { stamp } from './cart/cart.js';
+import { mayDo } from './plans.js';
 
 export const KIOSKS_MAX = 20; // per store; rows not seen for a week make room
 export const ONLINE_MS = 3 * 60 * 1000; // the kiosk pings every minute
@@ -10,7 +11,7 @@ const DEVICE = /^[a-f0-9]{16,32}$/;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const iso = (ms) => new Date(ms).toISOString();
 
-const storeOf = async (db, id) => (Number.isInteger(id) && id > 0 ? db('stores').where({ id }).first('id', 'kiosk_pin_hash') : undefined);
+const storeOf = async (db, id) => (Number.isInteger(id) && id > 0 ? db('stores').where({ id }).first('id', 'organization_id', 'kiosk_pin_hash') : undefined);
 
 export function createKioskRouter(db) {
   const r = express.Router();
@@ -19,10 +20,12 @@ export function createKioskRouter(db) {
   r.post('/ping', async (req, res) => {
     const { store_id, device } = req.body ?? {};
     if (typeof device !== 'string' || !DEVICE.test(device)) throw fail(400, 'err.bad_request');
-    if (!(await storeOf(db, store_id))) throw fail(404, 'err.store_not_found');
+    const store = await storeOf(db, store_id);
+    if (!store) throw fail(404, 'err.store_not_found');
     const now = Date.now();
     if (await db('kiosks').where({ store_id, device }).update({ last_seen_at: iso(now) })) return res.status(204).end();
     await db('kiosks').where({ store_id }).where('last_seen_at', '<', iso(now - WEEK_MS)).del();
+    await mayDo(db, store.organization_id, 'kiosks', { now }); // task 45: a kiosk the plan has no room for is not registered (403)
     const [{ n }] = await db('kiosks').where({ store_id }).count({ n: '*' });
     if (Number(n) >= KIOSKS_MAX) throw fail(429, 'err.rate_limited');
     await db('kiosks').insert({ store_id, device, last_seen_at: iso(now) }).onConflict(['store_id', 'device']).merge({ last_seen_at: iso(now) });

@@ -174,6 +174,26 @@ function fillCatFilter() {
   pf.category.replaceChildren(el('option', { value: '', textContent: t('common.all') }), ...list.map((c) => el('option', { value: c.id, textContent: catText(c) })));
 }
 
+// Task 45: the organisation's plan (me.plan; super and the mall role have none, so everything shows for them).
+const feat = (f) => !me?.plan || me.plan.features.includes(f);
+const PLAN_NAME = { start: 'adm.plan.n_start', pro: 'adm.plan.n_pro', biznes: 'adm.plan.n_biznes' };
+const PLAN_STATE = { active: 'adm.plan.s_active', trial: 'adm.plan.s_trial', paid: 'adm.plan.s_paid', grace: 'adm.plan.s_grace', readonly: 'adm.plan.s_readonly' };
+const STATE_TONE = { active: 'ok', paid: 'ok', trial: 'accent', grace: 'warn', readonly: 'off' };
+const LIMIT_NAME = { stores: 'adm.plan.l_stores', products: 'adm.plan.l_products', kiosks: 'adm.plan.l_kiosks', team: 'adm.plan.l_team' };
+const FEATURE_NAME = { stylist: 'adm.plan.f_stylist', instalments: 'adm.plan.f_instalments', points: 'adm.plan.f_points', tryon: 'adm.plan.f_tryon', offers: 'adm.plan.f_offers' };
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1); // the limit names are written to sit inside the error sentence
+const stateBadge = (state) => el('span', { className: `badge ${STATE_TONE[state]}`, textContent: t(PLAN_STATE[state]) });
+function planBanner() {
+  const p = me.plan;
+  const shown = p && ['trial', 'grace', 'readonly'].includes(p.state);
+  $('planBanner').hidden = !shown;
+  if (!shown) return;
+  $('planBanner').className = `notice plan-banner${p.state === 'grace' ? ' warn' : p.state === 'readonly' ? ' danger' : ''}`;
+  $('planBannerText').textContent = t({ trial: 'adm.plan.banner_trial', grace: 'adm.plan.banner_grace', readonly: 'adm.plan.banner_readonly' }[p.state],
+    { date: dayText(p.state === 'trial' ? p.ends : p.readonly_from) });
+  $('planBannerLink').hidden = me.role !== 'owner'; // the Tarif page is the owner's
+}
+
 const roleName = (r) => t({ super: 'adm.role_super', owner: 'adm.role_owner', manager: 'adm.role_manager', staff: 'adm.role_staff', mall: 'adm.role_mall' }[r]);
 
 async function show() {
@@ -199,7 +219,9 @@ async function show() {
   $('avatar').textContent = me.email[0].toUpperCase();
   $('storeWrap').hidden = !sup;
   $('navOrgs').hidden = $('navMalls').hidden = me.role !== 'super';
-  $('navCats').hidden = $('navOffers').hidden = !['owner', 'super'].includes(me.role); // managers only use the categories; offers are the owner's
+  $('navCats').hidden = !['owner', 'super'].includes(me.role); // managers only use the categories
+  $('navOffers').hidden = !['owner', 'super'].includes(me.role) || !feat('offers'); // offers are the owner's, on a plan with them (task 45)
+  planBanner();
   for (const li of $('nav').children) if (!li.id || li.id === 'navSettings') li.hidden = mallRole;
   $('navMall').hidden = !mallRole;
   $('userMenu').querySelector('a[href="#/settings"]').hidden = mallRole;
@@ -269,6 +291,7 @@ const PAGES = {
 const ACTIONS = {
   orders: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => exportOrders() }, icon('download'))],
   products: [
+    el('button', { type: 'button', className: 'icon-btn', title: t('adm.products.export'), ariaLabel: t('adm.products.export'), onclick: () => download('/products/export?' + qs(scoped({})), 'products.csv') }, icon('download')), // task 45
     el('button', { type: 'button', onclick: () => openImport() }, icon('upload'), el('span', { className: 'label', textContent: t('adm.products.import') })),
     el('button', { type: 'button', className: 'primary', onclick: () => openForm(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.products.add') })),
   ],
@@ -284,7 +307,7 @@ function render() {
   const welcome = me.role === 'owner' && !stores.length;
   const mallRole = me.role === 'mall';
   if ((welcome && !['welcome', 'settings'].includes(route.route)) || (route.route === 'welcome' && me.role !== 'owner') || (['orgs', 'malls'].includes(route.route) && me.role !== 'super')
-    || (['categories', 'offers'].includes(route.route) && !['owner', 'super'].includes(me.role)) || (mallRole !== (route.route === 'mall'))) {
+    || (['categories', 'offers'].includes(route.route) && !['owner', 'super'].includes(me.role)) || (route.route === 'offers' && !feat('offers')) || (mallRole !== (route.route === 'mall'))) {
     route = parseHash(welcome ? '#/welcome' : mallRole ? '#/mall' : '#/dashboard');
     history.replaceState(null, '', buildHash(route.route));
   }
@@ -366,6 +389,7 @@ async function loadDashboard(quiet) {
   seg($('dashMetric'), [['revenue', t('adm.dash.revenue')], ['recs', t('adm.dash.recs')]], metric, (v) => setParams({ ...p, metric: v === 'revenue' ? '' : v }));
   $('dashDate').textContent = t('adm.dash.today', { date: new Date().toLocaleDateString('ru-RU', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric' }) });
   const stop = quiet ? () => {} : showAfter(200, () => $('kpis').replaceChildren(...kpiSkeleton(5)));
+  if (!quiet) loadChecklist();
   let d, s;
   try {
     [d, s] = await Promise.all([call('/dashboard?' + qs(scoped({ days }))), call('/stats?' + qs(scoped({ days })))]);
@@ -417,6 +441,35 @@ async function loadDashboard(quiet) {
     el('span', { className: `badge ${k.online ? 'ok' : 'off'}`, textContent: t(k.online ? 'adm.dash.online' : 'adm.dash.offline') }))) :
     [el('li', { className: 'li-empty' }, emptyState({ ic: 'info', title: t('adm.dash.kiosks_none'), text: t('adm.dash.kiosks_none_text') }))]));
 }
+
+// Task 45: the new shop's first-run checklist (owner): each line from real data, linking to its page; gone when every
+// line is ticked or the owner hides it.
+const CHECK = { store: ['adm.check.store', '#/settings'], categories: ['adm.check.categories', '#/categories'], products: ['adm.check.products', '#/products'],
+  kiosk_pin: ['adm.check.kiosk_pin', '#/settings'], qr: ['adm.check.qr', '#/qr'], team: ['adm.check.team', '#/settings?tab=team'] };
+async function loadChecklist() {
+  if (me.role !== 'owner') return ($('checklist').hidden = true);
+  let c;
+  try {
+    c = await call('/checklist');
+  } catch { return; } // the dashboard works without it
+  $('checklist').hidden = c.done || c.dismissed;
+  if ($('checklist').hidden) return;
+  $('checkSub').textContent = t('adm.check.sub', { done: c.items.filter((i) => i.done).length, n: c.items.length });
+  $('checkList').replaceChildren(...c.items.map((i) => el('li', { className: i.done ? 'done' : '' },
+    i.done ? icon('check') : el('span', { className: 'dot', ariaHidden: 'true' }),
+    el('a', { href: CHECK[i.key][1], textContent: t(CHECK[i.key][0]) }),
+    i.done ? el('span', { className: 'visually-hidden', textContent: t('adm.check.done') }) : null)));
+}
+$('checkHide').onclick = async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
+    await call('/checklist/dismiss', { method: 'POST' });
+    $('checklist').hidden = true;
+    $('main').focus({ preventScroll: true });
+  } catch (err) { toast(err.message, { tone: 'danger' }); }
+  btn.disabled = false;
+};
 
 // Task 30: paid orders of the period by how the customer chose: a whole outfit, single items, or the catalogue.
 const salesPart = (x) => t('adm.sales.part', { n: x.orders, sum: money(x.revenue) });
@@ -1364,9 +1417,9 @@ function printQr(q) {
 // ---------- Settings: store profile, team, audit log, my account (#/settings?tab=…).
 // The server decides who may do what; the tabs only hide what a role can't open.
 
-const SET_TABS = [['store', 'adm.set.store'], ['team', 'adm.set.team'], ['promo', 'adm.set.promo'], ['points', 'adm.set.points'], ['sync', 'adm.set.sync'], ['audit', 'adm.set.audit'], ['account', 'adm.set.account']];
+const SET_TABS = [['store', 'adm.set.store'], ['team', 'adm.set.team'], ['promo', 'adm.set.promo'], ['points', 'adm.set.points'], ['sync', 'adm.set.sync'], ['audit', 'adm.set.audit'], ['plan', 'adm.set.plan'], ['account', 'adm.set.account']];
 function loadSettings() {
-  const tabs = SET_TABS.filter(([k]) => me.role !== 'manager' || ['store', 'points', 'account'].includes(k));
+  const tabs = SET_TABS.filter(([k]) => (me.role !== 'manager' || ['store', 'points', 'account'].includes(k)) && (k !== 'plan' || me.role === 'owner'));
   const tab = tabs.some(([k]) => k === route.params.tab) ? route.params.tab : stores.length ? 'store' : 'account'; // a new owner has no store yet
   $('setTabs').replaceChildren(...tabs.map(([k, label]) => {
     const a = el('a', { className: 'chip', href: buildHash('settings', k === 'store' ? {} : { tab: k }), textContent: t(label) });
@@ -1374,7 +1427,38 @@ function loadSettings() {
     return a;
   }));
   for (const s of document.querySelectorAll('[data-tab]')) s.hidden = s.dataset.tab !== tab;
-  ({ store: loadStore, team: loadTeam, promo: loadPromos, points: loadPoints, sync: loadKeys, audit: loadAudit, account: loadAccount })[tab]();
+  ({ store: loadStore, team: loadTeam, promo: loadPromos, points: loadPoints, sync: loadKeys, audit: loadAudit, plan: loadPlan, account: loadAccount })[tab]();
+}
+
+// Task 45: the "Tarif" tab (owner): plan and state, the dates, each limit with what counts toward it now, the features.
+// No prices here: the team sends the invoice; the button opens the landing page's contact form.
+async function loadPlan() {
+  const seq = (loads.plan = (loads.plan || 0) + 1);
+  let p;
+  try {
+    p = await call('/plan');
+  } catch (err) {
+    if (seq === loads.plan) stateBox($('planError'), err, () => loadPlan());
+    return;
+  }
+  if (seq !== loads.plan) return;
+  stateBox($('planError'));
+  $('planTitle').textContent = t('adm.plan.title', { name: t(PLAN_NAME[p.plan]) });
+  $('planState').className = `badge ${STATE_TONE[p.state]}`;
+  $('planState').textContent = t(PLAN_STATE[p.state]);
+  const fact = (k, v) => [el('dt', { textContent: t(k) }), el('dd', { textContent: v })];
+  $('planFacts').replaceChildren(
+    ...(p.trial_until ? fact('adm.plan.trial_until', dayText(p.trial_until)) : []),
+    ...(p.paid_until ? fact('adm.plan.paid_until', dayText(p.paid_until)) : []),
+    ...(p.ends ? [...fact('adm.plan.grace_until', dayText(p.grace_until)), ...fact('adm.plan.readonly_from', dayText(p.readonly_from))] : fact('adm.plan.ends', t('adm.plan.no_end'))));
+  $('planLimits').replaceChildren(...Object.entries(p.limits).map(([k, x]) => el('li', {},
+    el('span', { className: 'grow' }, el('span', { textContent: cap(t(LIMIT_NAME[k])) }),
+      x.used >= x.max ? el('span', { className: 'sizes', textContent: t(x.used > x.max ? 'adm.plan.over' : 'adm.plan.full') }) : null),
+    el('meter', { min: 0, max: x.max, value: Math.min(x.used, x.max), high: x.max * 0.8, optimum: 0, ariaLabel: cap(t(LIMIT_NAME[k])) }),
+    el('strong', { className: 'num', textContent: t('adm.plan.used', { used: x.used, max: x.max }) }))));
+  $('planFeatures').replaceChildren(...Object.entries(p.features).map(([k, on]) => el('li', {},
+    el('span', { className: 'grow', textContent: t(FEATURE_NAME[k]) }),
+    el('span', { className: `badge ${on ? 'ok' : 'off'}`, textContent: t(on ? 'adm.plan.on' : 'adm.plan.off') }))));
 }
 
 // Task 34: cashback points of the organisation the picked store belongs to (owner/super edit; a manager reads), the
@@ -1396,8 +1480,9 @@ async function loadPoints() {
     ptf.cashback_percent.value = p.cashback_percent;
     ptf.points_max_share.value = p.points_max_share;
     ptf.points_expiry_months.value = p.points_expiry_months;
-    $('pointsFields').disabled = !p.can_edit;
+    $('pointsFields').disabled = !p.can_edit || !feat('points');
     $('pointsReadOnly').hidden = p.can_edit;
+    $('pointsPlanOff').hidden = feat('points'); // task 45: the list and the CSV stay; earning, spending and edits wait for the plan
     $('pointsSave').hidden = !p.can_edit;
     $('pointsKpis').replaceChildren(
       kpi({ label: t('adm.points.outstanding'), value: money(p.outstanding) }),
@@ -1530,6 +1615,8 @@ async function loadTryon(id, seq) {
   }
   if (seq !== loads.store) return;
   $('tryonNoKey').hidden = !r || r.available;
+  $('instPlanOff').hidden = feat('instalments'); // task 45: the setting is kept, the plan switches it off
+  $('tryonPlanOff').hidden = feat('tryon');
   const used = r?.days.filter((d) => d.count > 0) ?? [];
   $('tryonUsage').replaceChildren(...(used.length ? used.map((d) => el('li', {}, el('span', { textContent: fmt.date(`${d.day}T12:00:00+05:00`) }), el('strong', { textContent: t('adm.set.tryon_count', { n: d.count }) })))
     : [el('li', { className: 'muted', textContent: r ? t('adm.set.tryon_none') : t('common.error') })]));
@@ -2055,7 +2142,7 @@ $('pwForm').onsubmit = async (e) => {
 
 async function loadOrgs() {
   const seq = (loads.orgs = (loads.orgs || 0) + 1);
-  const stop = [skeletonRows($('orgRows'), 5, 3), skeletonRows($('demoRows'), 5, 3)];
+  const stop = [skeletonRows($('orgRows'), 8, 3), skeletonRows($('demoRows'), 5, 3)];
   const offset = offsetOf(route.params.page, LIMIT);
   try {
     const [orgs, demo] = await Promise.all([call('/orgs'), call('/demo-requests?' + qs({ limit: LIMIT, offset }))]);
@@ -2064,23 +2151,67 @@ async function loadOrgs() {
     stateBox($('orgError'));
     stateBox($('demoError'));
     const num = (n, cls = '') => el('td', { className: `num ${cls}`, textContent: n });
-    if (!orgs.length) emptyRow($('orgRows'), 5, { ic: 'store', title: t('adm.orgs.empty'), text: t('adm.orgs.empty_text') });
+    if (!orgs.length) emptyRow($('orgRows'), 8, { ic: 'store', title: t('adm.orgs.empty'), text: t('adm.orgs.empty_text') });
     else $('orgRows').replaceChildren(...orgs.map((o) => el('tr', {}, el('td', {}, el('strong', { textContent: o.name })),
-      num(o.stores), num(o.admins, 'hide-sm'), num(o.invites, 'hide-sm'), el('td', { className: 'hide-sm', textContent: fmt.dateTime(o.created_at) }))));
+      el('td', {}, el('div', { textContent: t(PLAN_NAME[o.plan]) }), stateBadge(o.state)),
+      el('td', { className: 'hide-sm num', textContent: o.ends ? dayText(o.ends) : t('adm.plan.no_end') }),
+      num(o.stores), num(o.admins, 'hide-sm'), num(o.invites, 'hide-sm'), el('td', { className: 'hide-sm', textContent: fmt.dateTime(o.created_at) }),
+      el('td', { className: 'row-actions' }, el('button', { type: 'button', onclick: (e) => openPlan(o, e.currentTarget) }, t('adm.orgs.plan_edit'))))));
+    // Task 45: ending soon = read-only, in grace, or the last paid / trial day within 14 days; the soonest first.
+    const soon = addDaysKey(14);
+    const ending = orgs.filter((o) => o.ends && (o.state === 'grace' || o.state === 'readonly' || o.ends <= soon)).sort((a, b) => a.ends.localeCompare(b.ends));
+    $('orgEnding').replaceChildren(...(ending.length ? ending.map((o) => el('li', {},
+      el('div', { className: 'grow' }, el('strong', { textContent: o.name }), el('div', { className: 'sizes', textContent: [t(PLAN_NAME[o.plan]), t('adm.orgs.ends_on', { date: dayText(o.ends) }), o.note].filter(Boolean).join(' · ') })),
+      stateBadge(o.state),
+      el('button', { type: 'button', onclick: (e) => openPlan(o, e.currentTarget) }, t('adm.orgs.plan_edit')))) :
+      [el('li', { className: 'li-empty' }, emptyState({ ic: 'check', title: t('adm.orgs.ending_empty'), text: t('adm.orgs.ending_empty_text') }))]));
     if (!demo.items.length) emptyRow($('demoRows'), 5, { ic: 'user', title: t('adm.demo.empty'), text: t('adm.demo.empty_text') });
     else $('demoRows').replaceChildren(...demo.items.map((d) => el('tr', { className: d.handled_at ? 'done' : '' },
       el('td', { className: 'hide-sm num', textContent: fmt.dateTime(d.created_at) }),
       el('td', {}, el('strong', { textContent: d.company }), el('div', { className: 'sizes', textContent: [d.city, d.stores && t('adm.demo.stores', { n: d.stores }), d.lang.toUpperCase()].filter(Boolean).join(' · ') })),
       el('td', {}, el('div', { textContent: d.name }), el('a', { href: `tel:${d.phone}`, className: 'num', textContent: d.phone })),
       el('td', { className: 'hide-sm msg', textContent: d.message || '—' }),
-      el('td', { className: 'row-actions' }, el('button', { type: 'button', className: d.handled_at ? 'ghost' : '', onclick: (e) => setHandled(d, !d.handled_at, e.currentTarget) },
-        t(d.handled_at ? 'adm.demo.reopen' : 'adm.demo.handle'))))));
+      el('td', { className: 'row-actions' }, d.handled_at ? null : el('button', { type: 'button', onclick: (e) => openOrg('demo', e.currentTarget, d) }, t('adm.demo.create')),
+        el('button', { type: 'button', className: d.handled_at ? 'ghost' : '', onclick: (e) => setHandled(d, !d.handled_at, e.currentTarget) },
+          t(d.handled_at ? 'adm.demo.reopen' : 'adm.demo.handle'))))));
     pager($('demoPager'), demo, (page) => setParams({ ...route.params, page }));
   } catch (err) {
     stop.forEach((f) => f());
     if (seq === loads.orgs) { $('orgRows').replaceChildren(); $('demoRows').replaceChildren(); stateBox($('orgError'), err, () => loadOrgs()); }
   }
 }
+const addDaysKey = (n) => new Date(Date.now() + n * 86400000).toLocaleDateString('en-CA', { timeZone: TZ });
+
+// Task 45: super sets an organisation's plan and paid-until day (the invoice is sent outside the app), with a note
+// that goes to the audit log. Empty date = no paid period (the trial's end, if any, counts).
+const pf2 = $('planForm');
+let planOrg = null;
+pf2.plan.replaceChildren(...Object.keys(PLAN_NAME).map((k) => el('option', { value: k, textContent: t(PLAN_NAME[k]) })));
+function openPlan(o, opener) {
+  planOrg = o;
+  pf2.reset();
+  $('planDlgError').textContent = '';
+  $('planDlgTitle').textContent = t('adm.orgs.plan_title', { name: o.name });
+  $('planDlgNow').textContent = [t(PLAN_STATE[o.state]), o.trial_until && t('adm.orgs.trial_on', { date: dayText(o.trial_until) }), o.ends && t('adm.orgs.ends_on', { date: dayText(o.ends) })].filter(Boolean).join(' · ');
+  pf2.plan.value = o.plan;
+  pf2.paid_until.value = o.paid_until ?? '';
+  $('planDlg').opener = opener;
+  $('planDlg').showModal();
+}
+$('planCancel').onclick = () => $('planDlg').close();
+$('planDlg').addEventListener('close', () => $('planDlg').opener?.focus());
+pf2.onsubmit = async (e) => {
+  e.preventDefault();
+  $('planDlgError').textContent = '';
+  if (!pf2.reportValidity()) return;
+  try {
+    await call(`/orgs/${planOrg.id}/plan`, { method: 'PATCH', body: { plan: pf2.plan.value, paid_until: pf2.paid_until.value || null, note: pf2.note.value.trim() } });
+    $('planDlg').close();
+    toast(t('adm.orgs.plan_saved'), { tone: 'ok' });
+    loadOrgs();
+  } catch (err) { $('planDlgError').textContent = err.message; }
+};
+
 async function setHandled(d, handled, btn) {
   btn.disabled = true;
   try {
@@ -2098,14 +2229,17 @@ function orgStep(done) {
   $('orgCancel').textContent = t(done ? 'common.close' : 'common.cancel');
 }
 // Task 37: the same dialog invites a shop into the mall for a mall admin (POST /mall/shops).
-let orgFor = 'orgs';
-function openOrg(kind, opener) {
+// Task 45: and turns a demo request into its organisation and owner invite (kind 'demo', the request's company filled in).
+let orgFor = 'orgs', orgDemo = null;
+function openOrg(kind, opener, demo = null) {
   orgFor = kind;
+  orgDemo = demo;
   of2.reset();
   orgStep(false);
   $('orgDlgError').textContent = '';
-  $('orgTitle').textContent = t(kind === 'shops' ? 'adm.mall.invite' : 'adm.orgs.add');
-  $('orgAsk').querySelector('p').textContent = t(kind === 'shops' ? 'adm.mall.invite_text' : 'adm.orgs.add_text');
+  $('orgTitle').textContent = t(kind === 'shops' ? 'adm.mall.invite' : kind === 'demo' ? 'adm.demo.create' : 'adm.orgs.add');
+  $('orgAsk').querySelector('p').textContent = t(kind === 'shops' ? 'adm.mall.invite_text' : kind === 'demo' ? 'adm.demo.create_text' : 'adm.orgs.add_text');
+  if (demo) of2.name.value = demo.company;
   of2.name.previousElementSibling.textContent = t(kind === 'shops' ? 'field.shop_name' : 'field.org_name');
   $('orgDlg').opener = opener;
   $('orgDlg').showModal();
@@ -2122,7 +2256,7 @@ of2.onsubmit = async (e) => {
   e.preventDefault();
   $('orgDlgError').textContent = '';
   try {
-    const r = await call(orgFor === 'shops' ? '/mall/shops' : '/orgs', { method: 'POST', body: { name: of2.name.value.trim(), owner_email: of2.owner_email.value.trim() } });
+    const r = await call(orgFor === 'shops' ? '/mall/shops' : orgFor === 'demo' ? `/demo-requests/${orgDemo.id}/org` : '/orgs', { method: 'POST', body: { name: of2.name.value.trim(), owner_email: of2.owner_email.value.trim() } });
     $('orgUrl').value = r.invite.url;
     $('orgExpiry').textContent = t('adm.team.link_expiry', { at: fmt.dateTime(r.invite.expires_at) });
     orgStep(true);

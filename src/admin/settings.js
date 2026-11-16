@@ -10,6 +10,7 @@ import { stamp } from '../cart/cart.js';
 import { parseJson } from '../cart/promo.js';
 import { validTerms } from '../cart/instalment.js';
 import { tryonUsage } from '../tryon.js';
+import { mayDo } from '../plans.js';
 
 export const ROLES = ['super', 'owner', 'manager', 'staff', 'mall'];
 const STORE_ROLES = ['manager', 'staff']; // bound to one store; an owner invites and manages these
@@ -124,7 +125,7 @@ function validStore(b) {
   return s;
 }
 
-export function settingsRoutes(r, db, { secret, lock, resolveStore, tryon = false }) {
+export function settingsRoutes(r, db, { secret, lock, resolveStore, tryon = false, now = Date.now }) {
   async function findStore(req) {
     const id = Number(req.params.id);
     if (!canSee(req.admin, id)) throw fail(404, 'err.store_not_found');
@@ -176,6 +177,7 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore, tryon = fals
     if (!orgId) throw fail(400, 'err.invalid', { field: 'field.org' });
     const s = validStore({ ...Object.fromEntries(STORE_COLS.map((k) => [k, b[k]])), delivery_fee: b.delivery_fee ?? 0, low_stock_threshold: b.low_stock_threshold ?? 1, bundle_percent: b.bundle_percent ?? 0 });
     if (Number((await db('stores').where({ organization_id: orgId }).count({ n: '*' }))[0].n) >= STORES_MAX) throw fail(409, 'err.stores_max', { max: STORES_MAX });
+    await mayDo(db, orgId, 'stores', { now: now(), admin: req.admin }); // task 45: the plan's store limit
     // Task 37: a shop a mall invited puts its first store in that mall (later stores may be anywhere).
     const org = await db('organizations as g').leftJoin('malls as m', 'm.id', 'g.mall_id').where('g.id', orgId).first('m.id as mall_id');
     const first = !(await db('stores').where({ organization_id: orgId }).first('id'));
@@ -230,6 +232,9 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore, tryon = fals
     const orgId = ownerOrg ? (await db('organizations').where({ id: Number(b.organization_id) || 0 }).first('id'))?.id
       : (await db('stores').where({ id: storeId }).first('organization_id')).organization_id;
     if (!orgId) throw fail(400, 'err.invalid', { field: 'field.org' });
+    // Task 45: the plan's team limit counts members and open invites; a fresh link for someone already invited adds no one.
+    const again = await db('admin_invites').where({ email, organization_id: orgId }).whereNull('used_at').where('expires_at', '>', iso(now())).first('id');
+    if (!again) await mayDo(db, orgId, 'team', { now: now(), admin: req.admin });
     res.status(201).json(await createInvite(req, db, { email, role, storeId, orgId }));
   });
 
@@ -253,6 +258,7 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore, tryon = fals
     if (!target || !manages(req.admin, target)) throw fail(404, 'err.not_found');
     const disabled = req.body?.disabled;
     if (typeof disabled !== 'boolean') throw fail(400, 'err.invalid', { field: 'field.status' });
+    if (!disabled && target.disabled_at) await mayDo(db, target.organization_id, 'team', { now: now(), admin: req.admin }); // task 45: back in = one more
     if (disabled !== (target.disabled_at != null)) {
       await db.transaction(async (trx) => {
         await trx('admins').where({ id: target.id }).update(disabled

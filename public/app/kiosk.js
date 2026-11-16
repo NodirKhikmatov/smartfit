@@ -9,7 +9,7 @@ const $ = (id) => document.getElementById(id);
 
 // Task 37: a mall kiosk (mallId) installs as the mall's, sends no heartbeat (it is no shop's kiosk, even while it shows a
 // shop) and has no staff PIN exit (the PIN is a shop's).
-export function kioskShell({ storeId, mallId = 0, api }) {
+export function kioskShell({ storeId, mallId = 0, api, onRefused = () => {} }) {
   let staff = false; // after a correct PIN: no fullscreen or wake lock until the page is reloaded
   let lock = null;
 
@@ -35,7 +35,8 @@ export function kioskShell({ storeId, mallId = 0, api }) {
   document.addEventListener('keydown', () => attract(false), { capture: true });
 
   const device = kioskDevice();
-  const ping = () => storeId > 0 && !mallId && device && api('/kiosk/ping', { store_id: storeId, device }).catch(() => {});
+  // Task 45: a kiosk the shop's plan has no room for (or a paused shop's new kiosk) is refused: the start screen says why.
+  const ping = () => storeId > 0 && !mallId && device && api('/kiosk/ping', { store_id: storeId, device }).catch((err) => err.status === 403 && onRefused(err.message));
   ping();
   setInterval(ping, PING_MS);
 

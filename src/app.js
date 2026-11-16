@@ -74,7 +74,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
     res.json({ ok: true });
   });
   api.post('/admin/login', bucket('login')); // on top of the wrong-password lockout
-  api.use('/admin', createAdminRouter(db, { uploadDir, tryon: !!tryon }));
+  api.use('/admin', createAdminRouter(db, { uploadDir, tryon: !!tryon, now }));
   api.use('/sync', createSyncRouter(db)); // POS / ERP stock push, per-store API key
   api.use('/recommend', bucket('recommend'), createRecommendRouter(db, { weather, stylist, stylistTimeoutMs }));
   api.use('/stores', createStoreRouter(db, { weather, profiles: !!telegram, tryon }));

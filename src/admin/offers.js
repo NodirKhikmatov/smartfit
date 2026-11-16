@@ -13,6 +13,7 @@ import { audit, diff } from './audit.js';
 import { stamp } from '../cart/cart.js';
 import { visible } from '../recommend/engine.js';
 import { inStock } from '../catalog.js';
+import { mayDo, closedOrgs, openOrgs } from '../plans.js';
 
 const TZ_OFFSET = '+05:00'; // Asia/Tashkent, no DST: an offer runs from the start of its first day to the end of its last
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -29,9 +30,11 @@ const tashDay = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'As
 const idOf = (v) => (/^\d{1,9}$/.test(String(v)) ? Number(v) : 0); // fits an integer column
 const live = (q, now = Date.now()) => q.where('o.starts_at', '<=', iso(now)).where('o.ends_at', '>', iso(now));
 
-// The one "may this shop post offers" check (task 45 will put plans behind it): the shop's owner, or super.
-export function canPostOffers(admin) {
+// The one "may this shop post offers" check: the shop's owner, or super; task 45: and the organisation's plan has offers
+// (a plan without them keeps the offers in the table, hidden from every screen, and they come back with the plan).
+export async function canPostOffers(db, admin) {
   if (!['owner', 'super'].includes(admin.role)) throw fail(403, 'err.forbidden');
+  await mayDo(db, admin.organization_id, 'offers', { admin });
 }
 
 function validOffer(b) {
@@ -114,7 +117,7 @@ export function offerRoutes(r, db, { uploadDir = 'uploads' } = {}) {
   // ---------- The shop (owner of the organisation, or super)
 
   async function findOffer(req) {
-    canPostOffers(req.admin);
+    await canPostOffers(db, req.admin);
     const id = idOf(req.params.id);
     const o = id ? await inStores(req.admin, list().where('o.id', id), 'o.store_id').first() : undefined;
     if (!o) throw fail(404, 'err.not_found');
@@ -124,7 +127,7 @@ export function offerRoutes(r, db, { uploadDir = 'uploads' } = {}) {
 
   // ?store_id narrows → [offer] newest first, with 30-day counts.
   r.get('/offers', async (req, res) => {
-    canPostOffers(req.admin);
+    await canPostOffers(db, req.admin);
     const q = inStores(req.admin, list(), 'o.store_id').orderBy('o.id', 'desc').limit(OFFERS_MAX);
     if (req.query.store_id) q.where('o.store_id', idOf(req.query.store_id));
     res.json(await views(db, await q));
@@ -132,7 +135,7 @@ export function offerRoutes(r, db, { uploadDir = 'uploads' } = {}) {
 
   // { store_id, title, title_ru, body?, body_ru?, starts_on, ends_on, promo_code_id? | product_id? } → a draft.
   r.post('/offers', async (req, res) => {
-    canPostOffers(req.admin);
+    await canPostOffers(db, req.admin);
     const b = req.body && typeof req.body === 'object' ? req.body : {};
     const sid = idOf(b.store_id);
     const store = sid && canSee(req.admin, sid) ? await db('stores').where({ id: sid }).first('id', 'name', 'organization_id') : undefined;
@@ -313,12 +316,13 @@ const publicList = (db) => db('offers as o').join('stores as st', 'st.id', 'o.st
 
 // The mall screen's "Aksiyalar" and the idle slides: approved, inside their dates, of shown shops still in this mall.
 export async function mallOffers(db, mallId) {
-  const rows = await live(publicList(db)).where({ 'o.mall_id': mallId, 'o.status': 'approved', 'st.mall_id': mallId, 'st.mall_hidden': false }).orderBy(['o.sort', 'o.id']);
+  const rows = await live(openOrgs(publicList(db), 'st.organization_id', await closedOrgs(db, 'offers'))) // task 45: plan with offers, not paused
+    .where({ 'o.mall_id': mallId, 'o.status': 'approved', 'st.mall_id': mallId, 'st.mall_hidden': false }).orderBy(['o.sort', 'o.id']);
   return publicOffers(db, rows);
 }
 // A shop's own start screen: its offers inside their dates, waiting for the mall or approved (no approval needed here).
 export async function storeOffers(db, storeId) {
-  const rows = await live(publicList(db)).where('o.store_id', storeId).whereIn('o.status', SHOP_LIVE).orderBy('o.id', 'desc').limit(10);
+  const rows = await live(openOrgs(publicList(db), 'st.organization_id', await closedOrgs(db, 'offers'))).where('o.store_id', storeId).whereIn('o.status', SHOP_LIVE).orderBy('o.id', 'desc').limit(10);
   return publicOffers(db, rows);
 }
 

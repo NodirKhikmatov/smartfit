@@ -17,6 +17,7 @@ import { visible } from '../recommend/engine.js';
 import { COLS, inStock, genders, withSizes, audienceOf } from '../catalog.js';
 import { ONLINE_MS } from '../kiosk.js';
 import { mallOffers } from './offers.js';
+import { trialRow, closedOrgs, openOrgs } from '../plans.js';
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MALL_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'logo_url'];
@@ -258,7 +259,7 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
     const email = emailOf(req.body?.owner_email);
     if (Number((await db('organizations').where({ mall_id: mall.id }).count({ n: '*' }))[0].n) >= MALL_SHOPS_MAX) throw fail(409, 'err.mall_shops_max', { max: MALL_SHOPS_MAX });
     const out = await db.transaction(async (trx) => {
-      const [{ id }] = await trx('organizations').insert({ name, mall_id: mall.id }).returning('id');
+      const [{ id }] = await trx('organizations').insert({ name, mall_id: mall.id, ...trialRow() }).returning('id');
       await trx('categories').insert(builtinRows(id)); // task 36: every shop starts with the five built-in categories
       await audit(trx, req.admin, { action: 'org.create', entityId: id, label: name, after: { name, mall: mall.name } });
       return { organization_id: id, name, invite: await createInvite(req, trx, { email, role: 'owner', storeId: null, orgId: id }) };
@@ -484,7 +485,8 @@ export function createMallRouter(db) {
     if (!m) throw fail(404, 'err.mall_not_found');
     return m;
   };
-  const shown = (q, mallId) => q.where('st.mall_id', mallId).where('st.mall_hidden', false);
+  // Task 45: a read-only shop is left out of the mall's directory and search (its kiosk and phone pages say it is paused).
+  const shown = (q, mallId, closed) => openOrgs(q.where('st.mall_id', mallId).where('st.mall_hidden', false), 'st.organization_id', closed);
 
   // → { id, name, city, address, logo_url, shops: [{ id, name, floor, unit, logo_url, opens_at, closes_at, pin,
   // categories: [{ id, name, name_ru, image_url }] }], floors: [{ id, name, plan_url, plan_w, plan_h }], spots }.
@@ -492,12 +494,13 @@ export function createMallRouter(db) {
   // kiosks' "Siz shu yerdasiz" pins (a kiosk shows its own one; a phone none). Hours are Tashkent time.
   r.get('/:id', async (req, res) => {
     const m = await mallOf(req.params.id);
-    const shops = await shown(db('stores as st'), m.id).orderBy(['st.name', 'st.id'])
+    const closed = await closedOrgs(db);
+    const shops = await shown(db('stores as st'), m.id, closed).orderBy(['st.name', 'st.id'])
       .select('st.id', 'st.name', 'st.mall_floor as floor', 'st.mall_unit as unit', 'st.logo_url', 'st.organization_id', 'st.opens_at', 'st.closes_at', 'st.map_x', 'st.map_y');
     const floors = (await db('mall_floors').where({ mall_id: m.id }).whereNotNull('plan_url').select('id', 'name', 'plan_url', 'plan_w', 'plan_h')).sort(floorSort);
     const spots = floors.length ? await db('mall_spots').whereIn('floor_id', floors.map((f) => f.id)).orderBy('id').select('id', 'floor_id', 'x', 'y') : []; // the label is the admin's
     const planned = new Set(floors.map((f) => f.name));
-    const cats = await shown(db('categories as c').join('stores as st', 'st.organization_id', 'c.organization_id'), m.id).where('c.hidden', false)
+    const cats = await shown(db('categories as c').join('stores as st', 'st.organization_id', 'c.organization_id'), m.id, closed).where('c.hidden', false)
       .orderBy(['c.sort', 'c.id']).select('st.id as store_id', 'c.id', 'c.name', 'c.name_ru', 'c.image_url');
     res.json({
       ...m, floors, spots: spots.map(({ x, y, ...k }) => ({ ...k, pin: pinOut(x, y) })),
@@ -525,7 +528,7 @@ export function createMallRouter(db) {
     if (term.length < 2 || term.length > 60) return res.json({ items: [] });
     // shortcut: SQLite (dev) LIKE ignores case for ASCII only, so a Cyrillic search is case-sensitive there; Postgres ILIKE is fine.
     const like = `%${term}%`;
-    const rows = shown(visible(db('products as p')).join('stores as st', 'st.id', 'p.store_id'), m.id).whereExists(inStock(db))
+    const rows = shown(visible(db('products as p')).join('stores as st', 'st.id', 'p.store_id'), m.id, await closedOrgs(db)).whereExists(inStock(db))
       .where((w) => w.whereILike('p.name', like).orWhereILike('p.name_ru', like).orWhereILike('c.name', like).orWhereILike('c.name_ru', like))
       .orderBy([{ column: 'st.name' }, { column: 'p.id', order: 'desc' }]).limit(SEARCH_MAX)
       .select(...COLS, 'p.store_id', 'st.name as store_name', 'st.mall_floor as floor', 'st.mall_unit as unit');

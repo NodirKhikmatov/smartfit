@@ -15,6 +15,7 @@ import { price, findPromo, promoProblem, claimPromo, releasePromo, setKey, parse
 import { fmt } from '../../public/shared/i18n.js';
 import { pointsConfig, balanceOf, maxSpend, checkSpend, spend, refundSpent, earnPoints } from './points.js';
 import { termsOf, plan, monthly } from './instalment.js';
+import { allows, shopOpen } from '../plans.js';
 
 export const HOLD_MS = 15 * 60 * 1000;
 export const HANDOFF_MS = 5 * 60 * 1000; // how long the kiosk's "continue on your phone" QR works
@@ -156,7 +157,12 @@ export async function markPaid(db, orderId, now = Date.now()) {
 // SQLite CURRENT_TIMESTAMP is 'YYYY-MM-DD HH:MM:SS' in UTC, which Date would read as local time.
 export const stamp = (v) => (v == null ? null : new Date(typeof v === 'string' && !v.includes('T') ? `${v.replace(' ', 'T')}Z` : v).toISOString());
 const msLeft = (v) => (v == null ? null : Math.max(0, Date.parse(stamp(v)) - Date.now()));
-export const storeOf = (db, id) => db('stores').where({ id }).first('id', 'organization_id', 'name', 'city', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'bundle_percent', 'instalment_on', 'instalment_terms');
+export const storeOf = async (db, id) => planInstalments(db, await db('stores').where({ id }).first('id', 'organization_id', 'name', 'city', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'bundle_percent', 'instalment_on', 'instalment_terms'));
+// Task 45: instalments count as off (termsOf → null) when the organisation's plan lacks them; the shop's own switch stays as set.
+export async function planInstalments(q, store) {
+  if (store?.instalment_on && !(await allows(q, store.organization_id, 'instalments'))) store.instalment_on = false;
+  return store;
+}
 
 // Task 26: the cart's discounts. → { ...price(), promo: { code, value, kind, error, sum } | null }. A promo that no longer
 // applies (switched off, used up, under its minimum after a removal) stays on the cart with its error and takes nothing off.
@@ -275,6 +281,7 @@ export function parseItems(items) {
 // points (task 34) = so'm of points spent and the profile they come from; split over the lines after the discounts.
 // Per-store display number: the UPDATE locks the store row, so parallel orders get 1, 2, 3… with no gaps or repeats.
 export async function insertOrder(trx, store, c, lines, { method = 'cashier', notifyToken, recommendationId = null, holdMs = HOLD_MS, client = null, pr = null, promo = null, points = 0, profileId = null, instalment = null, group = {} }) {
+  await shopOpen(trx, store.id); // task 45: a read-only shop takes no order (every order of every route is made here)
   const subtotal = lines.reduce((s, l) => s + l.unit_price * l.quantity, 0);
   const d = pr ? { bundle_discount: pr.bundle_discount, promo_discount: pr.promo_discount, promo_code_id: promo?.id ?? null, promo_code: promo?.code ?? null } : {};
   const off = lines.map((l, i) => pr?.discounts[i] ?? 0);
@@ -312,6 +319,7 @@ export async function openCart(trx, req, storeId, maxOpenCarts, extra = {}) {
 // Adds parsed items to a locked cart, all or nothing (the caller's transaction rolls back on a throw).
 // b.rec / b.outfit (task 26): the results screen the items came from and the outfit card's product ids.
 export async function addLines(trx, cart, items, b) {
+  await shopOpen(trx, cart.store_id); // task 45: nor holds stock for one (store cart, mall cart)
   const [{ n }] = await trx('cart_items').where({ cart_id: cart.id }).sum({ n: 'quantity' });
   if (Number(n ?? 0) + items.length > MAX_UNITS) throw fail(409, 'err.cart_full', { max: MAX_UNITS });
   for (const { product_id, size } of items) {
