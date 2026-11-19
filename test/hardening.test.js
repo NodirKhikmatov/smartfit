@@ -320,6 +320,7 @@ test('migration 011 down and up', async () => {
   try {
     await m.migrate.latest();
     await seed(m);
+    await m.migrate.down(); // 041
     await m.migrate.down(); // 040
     await m.migrate.down(); // 039
     await m.migrate.down(); // 038

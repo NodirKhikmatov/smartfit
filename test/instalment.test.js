@@ -220,13 +220,13 @@ test('the flag reaches the admin list and drawer, the CSV, the staff app, the st
     // The other organisation never sees it.
     assert.equal((await admin('GET', `/orders/${o.id}`, undefined, ownerB)).status, 404);
 
-    for (const x of [plain, o]) assert.equal((await admin('POST', `/orders/${x.id}/pay`, {})).status, 200);
+    for (const x of [plain, o]) assert.equal((await admin('POST', `/orders/${x.id}/pay`, { method: x === o ? 'instalment' : 'cash' })).status, 200);
     const csv = await call('GET', `/api/admin/orders/export?q=${o.number}`, undefined, owner);
     const [head, row] = csv.body.replace('﻿', '').trim().split('\r\n');
     assert.match(head, /"Muddatli, oy";"Oyiga, so'm"/);
     assert.match(row, /"12";"31250"/);
     const plainRow = (await call('GET', `/api/admin/orders/export?q=${plain.number}`, undefined, owner)).body.trim().split('\r\n')[1];
-    assert.match(plainRow, /"Kassada";"";"";/i);
+    assert.match(plainRow, /"Kassada · naqd";"";"";/i);
 
     const queue = (await admin('GET', '/staff', undefined, staff)).body.orders;
     assert.equal(queue.find((x) => x.id === o.id).instalment_months, 12);

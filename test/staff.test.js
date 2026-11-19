@@ -37,7 +37,7 @@ async function order(store, { paid = true, token = managerA1 } = {}) {
   const cart = await call('POST', '/api/cart/items', { store_id: store, items: [{ product_id: p.id, size: 'M' }] });
   const r = await call('POST', `/api/cart/${cart.body.token}/checkout`, { fulfillment: 'pickup', name: 'Dilnoza', phone: '+998907776655' });
   assert.equal(r.status, 201, JSON.stringify(r.body));
-  if (paid) assert.equal((await admin('POST', `/orders/${r.body.order.id}/pay`, {}, token)).status, 200);
+  if (paid) assert.equal((await admin('POST', `/orders/${r.body.order.id}/pay`, { method: 'cash' }, token)).status, 200);
   return { order: r.body.order, track: new URL(r.body.track.url).pathname.split('/').pop() };
 }
 // created_at as each database writes CURRENT_TIMESTAMP (SQLite: 'YYYY-MM-DD HH:MM:SS' in UTC).
@@ -123,6 +123,11 @@ test('route walk: the staff role can call only the staff routes', async () => {
     'GET /me': async () => assert.equal((await admin('GET', '/me', undefined, staff1)).body.role, 'staff'),
     'GET /me/sales': async () => assert.equal((await admin('GET', '/me/sales', undefined, staff1)).status, 200), // task 50: their own numbers
     'GET /staff': async () => assert.equal((await admin('GET', '/staff', undefined, staff1)).status, 200),
+    'POST /orders/:id/pay': async () => { // task 51: staff take payments at the till
+      const { order: u } = await order(a1, { paid: false });
+      const r = await admin('POST', `/orders/${u.id}/pay`, { method: 'card' }, staff1);
+      assert.deepEqual([r.status, r.body.payment_status, r.body.paid_with, 'phone' in r.body], [200, 'paid', 'card', false]);
+    },
     'POST /fitting/:id/accept': async () => assert.equal((await admin('POST', `/fitting/${f}/accept`, {}, staff1)).status, 204),
     'POST /fitting/:id/done': async () => assert.equal((await admin('POST', `/fitting/${f}/done`, {}, staff1)).status, 204),
     'POST /orders/:id/status': async () => {

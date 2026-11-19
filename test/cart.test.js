@@ -115,7 +115,7 @@ test('the last unit cannot be held or sold twice, even with parallel requests', 
 
   const winner = tries.find((t) => t.status === 200).body.token;
   const { body } = await call('POST', `/api/cart/${winner}/checkout`, pickup);
-  const pays = await Promise.all([1, 2, 3].map(() => call('POST', `/api/admin/orders/${body.order.id}/pay`, {}, tashToken)));
+  const pays = await Promise.all([1, 2, 3].map(() => call('POST', `/api/admin/orders/${body.order.id}/pay`, { method: 'cash' }, tashToken)));
   assert.deepEqual(pays.map((p) => p.status).sort(), [200, 409, 409]);
   assert.deepEqual(await stock(last.id, 'M'), { quantity: 0, reserved: 0 }, 'stock drops once, on payment');
   const paid = pays.find((p) => p.status === 200).body;
@@ -146,7 +146,7 @@ test('expired cart and unpaid order holds are released', async () => {
 
   const { body } = await call('POST', `/api/cart/${c3.body.token}/checkout`, pickup);
   await db('orders').where({ id: body.order.id }).update({ expires_at: new Date(Date.now() - 1000).toISOString() });
-  const pay = await call('POST', `/api/admin/orders/${body.order.id}/pay`, {}, tashToken);
+  const pay = await call('POST', `/api/admin/orders/${body.order.id}/pay`, { method: 'cash' }, tashToken);
   assert.equal(pay.status, 409);
   assert.match(pay.body.error, /bekor/);
   const o = await db('orders').where({ id: body.order.id }).first();
@@ -245,13 +245,13 @@ test("a store manager cannot see or pay another store's order", async () => {
   const cart = (await add(tashkent, [{ product_id: p.id, size: 'M' }])).body;
   const { body } = await call('POST', `/api/cart/${cart.token}/checkout`, pickup);
   assert.equal((await call('GET', `/api/admin/orders/${body.order.id}`, undefined, samToken)).status, 404);
-  assert.equal((await call('POST', `/api/admin/orders/${body.order.id}/pay`, {}, samToken)).status, 404);
-  assert.equal((await call('POST', `/api/admin/orders/${body.order.id}/pay`, {})).status, 401);
+  assert.equal((await call('POST', `/api/admin/orders/${body.order.id}/pay`, { method: 'cash' }, samToken)).status, 404);
+  assert.equal((await call('POST', `/api/admin/orders/${body.order.id}/pay`, { method: 'cash' })).status, 401);
   assert.deepEqual(await stock(p.id, 'M'), { quantity: 2, reserved: 1 });
   const own = await call('GET', `/api/admin/orders/${body.order.id}`, undefined, tashToken);
   assert.equal(own.status, 200);
   assert.equal(own.body.items[0].name, p.name);
-  assert.equal((await call('POST', `/api/admin/orders/${body.order.id}/pay`, {}, tashToken)).status, 200);
+  assert.equal((await call('POST', `/api/admin/orders/${body.order.id}/pay`, { method: 'cash' }, tashToken)).status, 200);
   assert.deepEqual(await stock(p.id, 'M'), { quantity: 1, reserved: 0 });
 });
 

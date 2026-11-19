@@ -110,7 +110,7 @@ test('each restock path (admin edit, CSV import, stock sync API, a return) sends
   await setStock(d.id, 'M', 5);
   const cart = (await call('POST', '/api/cart/items', { store_id: tashkent, items: [{ product_id: d.id, size: 'M' }] })).body;
   const { order } = (await call('POST', `/api/cart/${cart.token}/checkout`, { fulfillment: 'pickup', name: 'Aziz', phone: '+998901234567' })).body;
-  for (const [step, body] of [['pay', {}], ['status', { status: 'packing' }], ['status', { status: 'delivered' }]]) {
+  for (const [step, body] of [['pay', { method: 'cash' }], ['status', { status: 'packing' }], ['status', { status: 'delivered' }]]) {
     assert.equal((await admin('POST', `/orders/${order.id}/${step}`, body, manager)).status, 200);
   }
   await wait(from.edit, a);

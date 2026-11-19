@@ -316,6 +316,7 @@ test('migration 030 down and up keeps children\'s products (as role-less) and th
     await seed(m);
     const kidsBefore = await m('products').where({ audience: 'child' }).select('id');
     const stockBefore = await m('product_stock').whereIn('product_id', kidsBefore.map((p) => p.id)).count({ n: '*' });
+    await m.migrate.down(); // 041
     await m.migrate.down(); // 040
     await m.migrate.down(); // 039
     await m.migrate.down(); // 038

@@ -86,3 +86,7 @@ main section[hidden] { display: none; }
 .lines .blocked { color: var(--danger); font-size: var(--text-sm); }
 .lines.plain-rows li { grid-template-columns: 1fr auto; }
 .match { justify-content: flex-start; text-align: left; overflow-wrap: anywhere; }
+
+/* Task 51: the till. The sum stands out. */
+.pay-sum { display: flex; justify-content: space-between; align-items: baseline; margin: var(--s-2) 0 0; }
+.pay-sum strong { font-size: 1.25rem; font-variant-numeric: tabular-nums; }

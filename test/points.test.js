@@ -74,7 +74,7 @@ async function order(store, extra = {}, unitPrice = 200000, n = 1) {
 }
 const step = (o, status, token = owner) => admin('POST', `/orders/${o.id}/status`, { status }, token);
 async function deliver(o, token = owner) {
-  assert.equal((await admin('POST', `/orders/${o.id}/pay`, {}, token)).status, 200);
+  assert.equal((await admin('POST', `/orders/${o.id}/pay`, { method: 'cash' }, token)).status, 200);
   assert.equal((await step(o, 'packing', token)).status, 200);
   if (o.fulfillment === 'delivery') assert.equal((await step(o, 'shipping', token)).status, 200);
   return step(o, 'delivered', token);
@@ -127,7 +127,7 @@ test('earn on hand-over: once, on the money paid for the goods, also with the st
   await setPoints(orgA, 5);
   const p = await profile(tash, 1002, '+998901110002');
   const o = await order(tash, { phone: '+998901110002' }, 199999);
-  await admin('POST', `/orders/${o.id}/pay`, {});
+  await admin('POST', `/orders/${o.id}/pay`, { method: 'cash' });
   assert.equal((await rows({ profile_id: p.id })).length, 0, 'paid is not enough: a paid order can still be cancelled');
   await step(o, 'packing');
   const both = await Promise.all([step(o, 'delivered'), step(o, 'delivered')]);
@@ -276,7 +276,7 @@ test('cancel, expiry and a Payme-style refund give the spent points back once', 
   assert.equal(await balance(p.id), 100000);
   // Paid, then cancelled before it left the store.
   const c = await spendOn();
-  await admin('POST', `/orders/${c.id}/pay`, {});
+  await admin('POST', `/orders/${c.id}/pay`, { method: 'cash' });
   assert.equal((await step(c, 'cancelled')).status, 200);
   assert.equal(await balance(p.id), 100000);
   assert.equal((await rows({ profile_id: p.id, kind: 'refund' })).length, 3);
@@ -421,6 +421,7 @@ test('migration 026: the orders CHECK holds points; down folds them into the sub
     const [{ id }] = await m('orders').insert({ store_id: store.id, number: 1, customer_name: 'A', phone: '+998901112233', fulfillment: 'pickup', subtotal: 100000, points_discount: 30000, delivery_fee: 0, total: 70000 }).returning('id');
     await assert.rejects(m('orders').insert({ store_id: store.id, number: 2, customer_name: 'A', phone: '+998901112233', fulfillment: 'pickup', subtotal: 100000, points_discount: 30000, delivery_fee: 0, total: 100000 }));
     await assert.rejects(m('orders').insert({ store_id: store.id, number: 3, customer_name: 'A', phone: '+998901112233', fulfillment: 'pickup', subtotal: 100000, points_discount: 100001, delivery_fee: 0, total: -1 }));
+    await m.migrate.down(); // 041
     await m.migrate.down(); // 040
     await m.migrate.down(); // 039
     await m.migrate.down(); // 038

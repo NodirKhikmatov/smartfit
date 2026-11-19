@@ -242,7 +242,7 @@ test('every stock path writes a movement; the product page shows the history, ne
   assert.equal(sync.status, 200);
   const cart = await call('POST', '/api/cart/items', { store_id: a1, items: [{ product_id: p.id, size: 'M' }] });
   const o = (await call('POST', `/api/cart/${cart.body.token}/checkout`, { fulfillment: 'pickup', name: 'Dilnoza', phone: '+998907776655' })).body.order;
-  assert.equal((await admin('POST', `/orders/${o.id}/pay`, {}, managerA1)).status, 200);
+  assert.equal((await admin('POST', `/orders/${o.id}/pay`, { method: 'cash' }, managerA1)).status, 200);
   assert.equal((await admin('POST', `/orders/${o.id}/status`, { status: 'cancelled' }, managerA1)).status, 200);
   const h = await admin('GET', `/products/${p.id}/movements`, undefined, managerA1);
   assert.equal(h.status, 200);
@@ -312,6 +312,7 @@ test('migration 037: down drops the stock tables, up brings them back', async ()
   try {
     await m.migrate.latest();
     assert.ok(await m.schema.hasTable('stock_movements'));
+    await m.migrate.down(); // 041
     await m.migrate.down(); // 040
     await m.migrate.down(); // 039
     await m.migrate.down(); // 038

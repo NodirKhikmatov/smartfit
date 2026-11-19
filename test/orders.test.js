@@ -33,7 +33,7 @@ async function order(storeId, { fulfillment = 'pickup', paid = true, at = base }
   const r = await call('POST', `/api/cart/${cart.body.token}/checkout`, body, undefined, at);
   assert.equal(r.status, 201);
   const token = storeId === tashkent ? tashToken : samToken;
-  if (paid) assert.equal((await call('POST', `/api/admin/orders/${r.body.order.id}/pay`, {}, token)).status, 200);
+  if (paid) assert.equal((await call('POST', `/api/admin/orders/${r.body.order.id}/pay`, { method: 'cash' }, token)).status, 200);
   return { id: r.body.order.id, product: p.id, notify: r.body.notify };
 }
 

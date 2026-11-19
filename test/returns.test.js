@@ -31,7 +31,7 @@ async function delivered(productId, size = 'M', qty = 1, { deliver = true } = {}
   let cart;
   for (let i = 0; i < qty; i++) cart = (await call('POST', '/api/cart/items', { token: cart?.token, store_id: store, items: [{ product_id: productId, size }] })).body;
   const { order, track } = (await call('POST', `/api/cart/${cart.token}/checkout`, { fulfillment: 'pickup', name: 'Aziz', phone: '+998901234567' })).body;
-  if (deliver) for (const [step, body] of [['pay', {}], ['status', { status: 'packing' }], ['status', { status: 'delivered' }]]) await admin('POST', `/orders/${order.id}/${step}`, body);
+  if (deliver) for (const [step, body] of [['pay', { method: 'cash' }], ['status', { status: 'packing' }], ['status', { status: 'delivered' }]]) await admin('POST', `/orders/${order.id}/${step}`, body);
   return { ...order, token: track.url.split('/').pop() };
 }
 

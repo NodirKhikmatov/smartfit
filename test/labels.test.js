@@ -150,7 +150,7 @@ test('report: scanned often but rarely bought, per store scope, in the Talab win
   for (const p of [a, b, b, b]) {
     const cart = (await call('POST', '/api/cart/items', { store_id: tashkent, items: [{ product_id: p.id, size: 'M' }] })).body;
     const { order } = (await call('POST', `/api/cart/${cart.token}/checkout`, { fulfillment: 'pickup', name: 'Aziz', phone: '+998901234567' })).body;
-    assert.equal((await call('POST', `/api/admin/orders/${order.id}/pay`, {}, { authorization: `Bearer ${manager}` })).status, 200);
+    assert.equal((await call('POST', `/api/admin/orders/${order.id}/pay`, { method: 'cash' }, { authorization: `Bearer ${manager}` })).status, 200);
   }
   const list = async (token, q = '') => (await admin(`/demand?days=30${q}`, token)).body.scans;
   const mine = await list(owner);

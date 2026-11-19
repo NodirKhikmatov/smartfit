@@ -33,6 +33,8 @@ before(async () => {
   await createAdmin(db, { email: 'mgr@smartfit.uz', password: 'mgr-pass-1', storeId: tashkent, role: 'manager' });
   await createAdmin(db, { email: 'sam@smartfit.uz', password: 'sam-pass-1', storeId: samarkand });
   server = createApp(db, { telegram: null, weather: async () => ({ temperature: 5, raining: false, source: 'live' }) }).listen(0);
+  // The migration test blocks the event loop for seconds (sync SQLite); a 5 s keep-alive close firing then races the next request.
+  server.keepAliveTimeout = 0;
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}`;
   [superToken, ownerToken, managerToken, samToken] = await Promise.all([
@@ -48,6 +50,7 @@ test('migration 010: unique SKU per store, threshold default 1, existing lows pr
   try {
     await m.migrate.latest();
     await seed(m);
+    await m.migrate.down(); // 041
     await m.migrate.down(); // 040
     await m.migrate.down(); // 039
     await m.migrate.down(); // 038

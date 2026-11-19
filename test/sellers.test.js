@@ -49,7 +49,7 @@ async function order(storeId, lines, { delivery = false, promo = 0, points = 0, 
       { method, notifyToken: hex(), recommendationId: rec, pr: { bundle_discount: 0, promo_discount: promo, discounts: lines.map((_, i) => (i === 0 ? promo : 0)) }, points, group });
   });
 }
-const pay = (id, token) => admin('POST', `/orders/${id}/pay`, {}, token);
+const pay = (id, token) => admin('POST', `/orders/${id}/pay`, { method: 'cash' }, token);
 const step = (id, status, token) => admin('POST', `/orders/${id}/status`, { status }, token);
 async function handOver(id, token) {
   for (const s of ['packing', 'delivered']) assert.equal((await step(id, s, token)).status, 200);
@@ -310,7 +310,8 @@ test('migration 040: down drops the seller and commission columns, up brings the
   const m = testDb();
   try {
     await m.migrate.latest();
-    await m.migrate.down();
+    await m.migrate.down(); // 041
+    await m.migrate.down(); // 040
     for (const [t, c] of [['orders', 'seller_id'], ['orders', 'seller_at'], ['orders', 'seller_percent'], ['stores', 'commission_percent'], ['admins', 'commission_percent']]) {
       assert.equal(await m.schema.hasColumn(t, c), false, `${t}.${c}`);
     }

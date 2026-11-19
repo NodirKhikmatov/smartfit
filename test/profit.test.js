@@ -188,7 +188,7 @@ test('the cost is copied onto the order line at the sale; a later change leaves 
     [{ product_id: p.id, size: 'M', quantity: 1, unit_price: p.price }], { notifyToken: randomBytes(16).toString('hex') })));
   assert.equal((await db('order_items').where({ order_id: id }).first()).unit_cost, null, 'not sold yet');
   await db('products').where({ id: p.id }).update({ cost: 75000 });
-  assert.equal((await admin('POST', `/orders/${id}/pay`, {}, managerA1)).status, 200);
+  assert.equal((await admin('POST', `/orders/${id}/pay`, { method: 'cash' }, managerA1)).status, 200);
   assert.equal((await db('order_items').where({ order_id: id }).first()).unit_cost, 75000, 'the cost at the sale');
   await admin('PATCH', `/products/${p.id}`, { cost: 99000 }, ownerA);
   assert.equal((await db('order_items').where({ order_id: id }).first()).unit_cost, 75000, 'kept');
@@ -285,8 +285,8 @@ test('no cost in any customer, staff, mall or sync response (every response of t
   const out = await pub('POST', `/api/cart/${cart.token}/checkout`, { fulfillment: 'pickup', name: 'Aziz', phone: '+998901234567' });
   assert.equal(out.status, 201, JSON.stringify(out.body));
   const status = new URL(out.body.track.url).pathname.replace('/order/', '/api/orders/');
-  assert.equal((await admin('POST', `/orders/${out.body.order.id}/pay`, {}, staff1)).status, 403, 'staff do not take payments');
-  await admin('POST', `/orders/${out.body.order.id}/pay`, {}, managerA1);
+  const paid = await admin('POST', `/orders/${out.body.order.id}/pay`, { method: 'cash' }, staff1); // task 51: staff take payments
+  assert.equal(paid.status, 200);
   assert.ok((await db('order_items').where({ order_id: out.body.order.id }).first()).unit_cost > 1000000, 'the sold line carries a cost now');
   await pub('GET', status);
   const mc = (await pub('POST', '/api/mall-cart/items', { mall_id: mall, store_id: a1, items: [{ product_id: p.id, size: 'M' }] })).body;
@@ -327,6 +327,7 @@ test('migration 039: down drops the cost columns, up brings them back', async ()
   const m = testDb();
   try {
     await m.migrate.latest();
+    await m.migrate.down(); // 041
     await m.migrate.down(); // 040
     await m.migrate.down();
     assert.equal(await m.schema.hasColumn('products', 'cost'), false);

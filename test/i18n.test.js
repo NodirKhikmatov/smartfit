@@ -81,6 +81,7 @@ test('every key used in code exists, and every dictionary key is used', () => {
     'kiosk.style': STYLES,
     'kiosk.points.kind': ['earn', 'spend', 'refund', 'clawback', 'return', 'expire', 'adjust'],
     'adm.sizes.kind': ['clothes', 'shoes', 'kids', 'kids_shoes'], 'common.chart': ['chest', 'waist', 'hips', 'foot', 'height'], // task 48
+    'adm.method': ['cash', 'card', 'click', 'payme', 'instalment', 'unknown'], 'adm.paid_with': ['cash', 'card', 'instalment'], // task 51
   };
   const all = Object.values(sources).join('\n');
   for (const [prefix, members] of Object.entries(FAMILIES)) {

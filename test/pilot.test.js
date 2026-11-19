@@ -31,7 +31,7 @@ async function order({ rec, fulfillment = 'pickup', paid = true } = {}) {
   const body = { fulfillment, name: 'Aziz', phone: '+998901234567', ...(fulfillment === 'delivery' && { address: "Amir Temur ko'chasi 1" }) };
   const r = await call('POST', `/api/cart/${cart.body.token}/checkout`, body);
   assert.equal(r.status, 201);
-  if (paid) assert.equal((await call('POST', `/api/admin/orders/${r.body.order.id}/pay`, {}, superToken)).status, 200);
+  if (paid) assert.equal((await call('POST', `/api/admin/orders/${r.body.order.id}/pay`, { method: 'cash' }, superToken)).status, 200);
   return r.body.order;
 }
 

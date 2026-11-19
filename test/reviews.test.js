@@ -37,7 +37,7 @@ async function order(products, { size = 'M', pay = true, deliver = true, phone =
   }
   const { order: o, track } = (await call('POST', `/api/cart/${cart.token}/checkout`, { fulfillment: 'pickup', name: 'Aziz', phone })).body;
   const tok = storeId === store ? manager : owner2;
-  const steps = [...(pay ? [['pay', {}]] : []), ...(pay && deliver ? [['status', { status: 'packing' }], ['status', { status: 'delivered' }]] : [])];
+  const steps = [...(pay ? [['pay', { method: 'cash' }]] : []), ...(pay && deliver ? [['status', { status: 'packing' }], ['status', { status: 'delivered' }]] : [])];
   for (const [step, body] of steps) assert.ok([200, 201].includes((await admin('POST', `/orders/${o.id}/${step}`, body, tok)).status));
   return { ...o, token: track.url.split('/').pop() };
 }
@@ -340,6 +340,7 @@ test('demo seed: the demo item pages show an average, a fit summary and a shop a
     } finally {
       app.close();
     }
+    await m.migrate.down(); // 041
     await m.migrate.down(); // 040
     await m.migrate.down(); // 039
     await m.migrate.down(); // 038

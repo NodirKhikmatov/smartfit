@@ -100,7 +100,7 @@ export async function cancelPending(trx, orderId, now = Date.now(), { expiredOnl
 // order, so the stock comes back exactly once. payment_status stays 'paid' until the money is refunded.
 async function cancelPaid(trx, orderId) {
   const n = await trx('orders').where({ id: orderId, payment_status: 'paid' }).whereIn('status', ['new', 'packing'])
-    .update({ status: 'cancelled', updated_at: trx.fn.now() });
+    .update({ status: 'cancelled', cancelled_at: iso(Date.now()), updated_at: trx.fn.now() }); // task 51: the refund's day
   if (!n) return false;
   for (const i of await trx('order_items').where({ order_id: orderId })) {
     await trx('product_stock').where({ product_id: i.product_id, size: i.size }).increment('quantity', i.quantity);
@@ -173,10 +173,11 @@ export async function setSeller(trx, orderId, who = null, now = Date.now()) {
 }
 
 // `who` = the team member taking the money at the cashier (Click/Payme pass none: an online order gets its seller at hand-over).
-export async function markPaid(db, orderId, now = Date.now(), who = null) {
+// Task 51: `paidWith` = how the cashier took it (cash | card | instalment); Click/Payme leave it null.
+export async function markPaid(db, orderId, now = Date.now(), who = null, paidWith = null) {
   return db.transaction(async (trx) => {
     const n = await trx('orders').where({ id: orderId, payment_status: 'pending' }).where('expires_at', '>', iso(now))
-      .update({ payment_status: 'paid', paid_at: iso(now), expires_at: null, updated_at: trx.fn.now() });
+      .update({ payment_status: 'paid', paid_at: iso(now), paid_with: paidWith, expires_at: null, updated_at: trx.fn.now() });
     if (!n) return false;
     await freezeCost(trx, orderId);
     if (who != null) await setSeller(trx, orderId, who, now);
@@ -262,9 +263,9 @@ export async function orderView(db, order) {
   const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').where('i.order_id', order.id).orderBy('i.id')
     .select('i.id', 'i.product_id', 'p.name', 'p.name_ru', 'p.category', 'p.sizes', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity', 'i.unit_price', 'i.discount', 'i.returned', 'i.fit');
   const { id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total, promo_code, promo_discount, bundle_discount, points_discount,
-    instalment_months, instalment_percent, instalment_monthly, group_number } = order;
+    instalment_months, instalment_percent, instalment_monthly, group_number, paid_with } = order;
   return {
-    id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, subtotal, delivery_fee, total,
+    id, number, store_id, customer_name, phone, fulfillment, address, lat, lon, status, payment_status, payment_method, paid_with: paid_with ?? null, subtotal, delivery_fee, total,
     promo_code, promo_discount, bundle_discount, points_discount, instalment_months, instalment_percent, instalment_monthly,
     group_number: group_number ?? null, // task 38: the mall order this shop's order is part of
     expires_at: stamp(order.expires_at), paid_at: stamp(order.paid_at), created_at: stamp(order.created_at), items,

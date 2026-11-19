@@ -31,7 +31,7 @@ async function order(storeId, { name = 'Aziz', phone = '901234567', paid = true 
   const cart = await call('/api/cart/items', { method: 'POST', body: { store_id: storeId, items: [{ product_id: p.id, size: 'M' }] } });
   const r = await call(`/api/cart/${cart.body.token}/checkout`, { method: 'POST', body: { fulfillment: 'pickup', name, phone } });
   assert.equal(r.status, 201, JSON.stringify(r.body));
-  if (paid) assert.equal((await call(`/api/admin/orders/${r.body.order.id}/pay`, { method: 'POST', token: storeId === tashkent ? tashToken : samToken })).status, 200);
+  if (paid) assert.equal((await call(`/api/admin/orders/${r.body.order.id}/pay`, { method: 'POST', body: { method: 'cash' }, token: storeId === tashkent ? tashToken : samToken })).status, 200);
   return { ...r.body.order, product_id: p.id };
 }
 

@@ -207,7 +207,7 @@ test('after checkout the shops are independent: one cancelled or expired leaves 
   const { a, b, cart } = await twoShops();
   const r = await checkout(cart.token);
   const [o1, o2] = await db('orders').where({ group_number: r.body.number }).orderBy('id');
-  assert.equal((await admin('POST', `/orders/${o1.id}/pay`, {}, owner1)).status, 200);
+  assert.equal((await admin('POST', `/orders/${o1.id}/pay`, { method: 'cash' }, owner1)).status, 200);
   assert.ok(await changeStatus(db, o1.id, 'cancelled'));
   assert.deepEqual([(await db('orders').where({ id: o2.id }).first()).status, await reserved(b)], ['new', 1], 'shop 2 untouched by shop 1\'s cancel');
   await db('orders').where({ id: o2.id }).update({ expires_at: new Date(Date.now() - 1000).toISOString() });
@@ -263,7 +263,7 @@ test('each shop sees only its own order with the mall order mark; the mall admin
   assert.ok(!list.some((o) => o.id === o2.id));
   assert.equal((await admin('GET', `/orders/${o1.id}`, undefined, owner1)).body.group_number, r.body.number);
   assert.equal((await admin('GET', `/orders/${o2.id}`, undefined, owner1)).status, 404);
-  assert.equal((await admin('POST', `/orders/${o2.id}/pay`, {}, owner1)).status, 404);
+  assert.equal((await admin('POST', `/orders/${o2.id}/pay`, { method: 'cash' }, owner1)).status, 404);
   assert.equal((await admin('GET', `/orders?number=${o2.number}&store_id=${s2}`, undefined, owner1)).body.items.length, 0);
   const csv = await fetch(`${base}/api/admin/orders/export`, { headers: { authorization: `Bearer ${owner1}` } }).then((x) => x.text());
   const shop2 = (await db('stores').where({ id: s2 }).first()).name;
@@ -272,8 +272,8 @@ test('each shop sees only its own order with the mall order mark; the mall admin
   const csv2 = await fetch(`${base}/api/admin/orders/export`, { headers: { authorization: `Bearer ${owner2}` } }).then((x) => x.text());
   assert.ok(!csv2.includes((await db('stores').where({ id: s1 }).first()).name));
   // Staff app of shop 1: its paid order only, marked; no sums.
-  assert.equal((await admin('POST', `/orders/${o1.id}/pay`, {}, owner1)).status, 200);
-  assert.equal((await admin('POST', `/orders/${o2.id}/pay`, {}, owner2)).status, 200);
+  assert.equal((await admin('POST', `/orders/${o1.id}/pay`, { method: 'cash' }, owner1)).status, 200);
+  assert.equal((await admin('POST', `/orders/${o2.id}/pay`, { method: 'cash' }, owner2)).status, 200);
   const floor = (await admin('GET', '/staff', undefined, staff1)).body.orders;
   assert.ok(floor.some((o) => o.id === o1.id && o.group_number === r.body.number));
   assert.ok(!floor.some((o) => o.id === o2.id));
@@ -291,6 +291,7 @@ test('migration 028 down and up', async () => {
     await m.migrate.latest();
     await seed(m);
     assert.ok('group_number' in (await m('orders').columnInfo()));
+    await m.migrate.down(); // 041
     await m.migrate.down(); // 040
     await m.migrate.down(); // 039
     await m.migrate.down(); // 038

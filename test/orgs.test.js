@@ -47,6 +47,8 @@ before(async () => {
   await createAdmin(db, { email: 'owner.b@smartfit.uz', password: 'owner-pass-2', storeId: b1 });
   uploadDir = await mkdtemp(path.join(tmpdir(), 'sf-orgs-'));
   server = createApp(db, { uploadDir, telegram: null, stylist: null, trustProxy: '1', weather: async () => ({ temperature: 15, raining: false, source: 'live' }) }).listen(0);
+  // The migration test blocks the event loop for seconds (sync SQLite); a 5 s keep-alive close firing then races the next request.
+  server.keepAliveTimeout = 0;
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}`;
   superToken = await login('boss@smartfit.uz', 'boss-pass-1');
@@ -147,7 +149,7 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       assert.notEqual(mine.latest, B.order.id);
     },
     'GET /orders/:id': async () => refused(await admin('GET', `/orders/${B.order.id}`, undefined, ownerA)),
-    'POST /orders/:id/pay': async () => refused(await admin('POST', `/orders/${B.order.id}/pay`, {}, ownerA)),
+    'POST /orders/:id/pay': async () => refused(await admin('POST', `/orders/${B.order.id}/pay`, { method: 'cash' }, ownerA)),
     'POST /orders/:id/status': async () => refused(await admin('POST', `/orders/${B.order.id}/status`, { status: 'cancelled' }, ownerA)),
     'POST /orders/:id/returns': async () => refused(await admin('POST', `/orders/${B.order.id}/returns`, { key: 'b'.repeat(32), item_id: B.order.items[0].id, kind: 'return', reason: 'too_small', quantity: 1, restock: true }, ownerA)),
     'GET /fitting': async () => noB(await admin('GET', '/fitting', undefined, ownerA)),
@@ -198,6 +200,22 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       assert.ok(!String(r.body).includes(B.member.email));
     },
     'GET /me/sales': async () => assert.equal((await admin('GET', '/me/sales', undefined, ownerA)).body.orders, 0), // only ever the caller's own
+    // Task 51: org B's store and its closed day are never org A's.
+    'GET /cash': async () => refused(await admin('GET', `/cash?store_id=${b1}`, undefined, ownerA)),
+    'POST /cash/close': async () => {
+      refused(await admin('POST', '/cash/close', { store_id: b1, counted: 0 }, ownerA));
+      assert.equal(await db('cash_closings').where({ store_id: b1 }).first(), undefined);
+    },
+    'GET /cash/closings': async () => {
+      const [{ id }] = await db('cash_closings').insert({ store_id: b1, day: '2020-01-02', closed_at: new Date().toISOString(), closed_by: B.member.id, expected_cash: 777, counted_cash: 777, difference: 0, note: 'org B', report: '{}' }).returning('id');
+      for (const q of ['', `?store_id=${b1}`]) {
+        const r = await admin('GET', `/cash/closings${q}`, undefined, ownerA);
+        assert.equal(r.status, 200);
+        assert.ok(!r.body.items.some((c) => c.store_id === b1) && !json(r).includes('org B'));
+      }
+      assert.ok((await admin('GET', '/cash/closings', undefined, ownerB)).body.items.some((c) => c.id === id), 'org B itself sees it');
+      await db('cash_closings').where({ id }).del();
+    },
     'GET /demand': async () => {
       noB(await admin('GET', '/demand?days=30', undefined, ownerA));
       const r = await admin('GET', `/demand?store_id=${b1}`, undefined, ownerA);
@@ -550,7 +568,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 40; i > 12; i--) await m.migrate.down(); // 040 … 013
+    for (let i = 41; i > 12; i--) await m.migrate.down(); // 041 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

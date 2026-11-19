@@ -193,7 +193,7 @@ test('total limit holds under concurrent checkouts; cancel and expiry give the u
   const c = await cart(tash);
   await apply(c, p.code);
   const o = (await checkout(c)).body.order;
-  await admin('POST', `/orders/${o.id}/pay`, {}, manager);
+  await admin('POST', `/orders/${o.id}/pay`, { method: 'cash' }, manager);
   assert.equal(await used(p.id), 1);
   await admin('POST', `/orders/${o.id}/status`, { status: 'cancelled' }, manager);
   assert.equal(await used(p.id), 0);
@@ -278,7 +278,7 @@ test('bundle: a whole recommended outfit (also after a swap) gets N % off its it
     assert.deepEqual([status.bundle_discount, status.promo_discount, status.promo_code, status.total], [order.bundle_discount, order.promo_discount, p.code, order.total]);
 
     // Returns refund what the customer paid for that line, not its list price.
-    for (const step of ['pay', 'packing', 'shipping', 'delivered']) await admin('POST', `/orders/${order.id}/${step === 'pay' ? 'pay' : 'status'}`, step === 'pay' ? {} : { status: step }, manager);
+    for (const step of ['pay', 'packing', 'shipping', 'delivered']) await admin('POST', `/orders/${order.id}/${step === 'pay' ? 'pay' : 'status'}`, step === 'pay' ? { method: 'cash' } : { status: step }, manager);
     const it = order.items[0];
     const tooMuch = await admin('POST', `/orders/${order.id}/returns`, { key: 'd'.repeat(32), item_id: it.id, kind: 'return', reason: 'too_big', quantity: 1, restock: true, refund: it.unit_price }, manager);
     assert.equal(tooMuch.status, 400, 'refund above what was paid');
@@ -356,6 +356,7 @@ test('migration 016: the orders CHECK holds discounts; down folds them in and ke
     await assert.rejects(m('orders').insert({ ...row, total: -20000, promo_discount: 120000 }), 'discounts never above the subtotal');
     const [{ id }] = await m('orders').insert({ ...row, total: 85000, promo_discount: 10000, bundle_discount: 5000 }).returning('id');
     await m('order_items').insert({ order_id: id, product_id: p.id, size: 'M', quantity: 1, unit_price: 100000, discount: 15000 });
+    await m.migrate.down(); // 041
     await m.migrate.down(); // 040
     await m.migrate.down(); // 039
     await m.migrate.down(); // 038

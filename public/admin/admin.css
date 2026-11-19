@@ -413,3 +413,28 @@ dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }
 .sizes-table { width: max-content; min-width: 100%; }
 #sizesRows input { flex: none; width: 4.75rem; min-width: 0; min-height: 2.5rem; padding-inline: var(--s-2); }
 #sizesSource:empty { display: none; }
+
+/* Task 51: Kassani yopish. The cash expected stands out; the form keeps to a readable width. */
+.close-report .table-wrap { margin-bottom: var(--s-4); }
+.close-table tfoot td { font-weight: var(--weight-strong); border-top: 1px solid var(--line); }
+.close-table tbody td:first-child > div:first-child::first-letter { text-transform: uppercase; } /* method names are lower case mid-sentence elsewhere */
+.close-totals { max-width: 28rem; margin-bottom: var(--s-4); }
+.close-expected { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: var(--s-2); max-width: 28rem; margin: 0; padding: var(--s-3) var(--s-4); border-radius: var(--r-md); background: var(--accent-soft); }
+.close-expected strong { font-size: var(--text-xl); }
+.close-report > .hint { margin: var(--s-2) 0 var(--s-4); max-width: 40rem; }
+.close-form { max-width: 28rem; }
+.close-form .field { margin-bottom: var(--s-2); }
+.close-facts { max-width: 28rem; }
+.close-facts .neg { color: var(--danger); }
+
+/* Print: only the page's own report (the closing page's "Chop etish"), on white paper. */
+@media print {
+  .sidebar, .topbar, .no-print, .plan-banner, .skip, .toast-region, dialog { display: none !important; }
+  .shell { display: block; min-height: 0; }
+  body { background: white; color: black; }
+  main { max-width: none; padding: 0; }
+  .card { box-shadow: none; border: 1px solid; break-inside: avoid; }
+  .table-wrap { overflow: visible; }
+  .close-expected { background: none; border: 1px solid; }
+  .badge { border: 1px solid currentColor; background: none; }
+}

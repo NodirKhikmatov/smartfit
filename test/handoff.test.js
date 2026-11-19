@@ -88,7 +88,7 @@ test('status page: by token only, no name, phone or address; unknown token → 4
   assert.equal((await call('GET', `/api/orders/${'0'.repeat(32)}`)).status, 404);
   assert.equal((await call('GET', '/api/orders/x')).status, 404);
   // Paid: the countdown goes away and the timeline moves on.
-  assert.equal((await call('POST', `/api/admin/orders/${r.body.order.id}/pay`, {}, tashToken)).status, 200);
+  assert.equal((await call('POST', `/api/admin/orders/${r.body.order.id}/pay`, { method: 'cash' }, tashToken)).status, 200);
   const paid = await call('GET', `/api/orders/${token}`);
   assert.deepEqual([paid.body.payment_status, paid.body.pay_ms], ['paid', null]);
   assert.ok(paid.body.paid_at);

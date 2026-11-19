@@ -326,7 +326,7 @@ test('sales split: outfit vs single vs other in /stats and the weekly report; ol
     const cart = await call('POST', '/api/cart/items', { store_id: store, items: [{ product_id: p.id, size: p.size ?? p.sizes[0] }], ...(rec && { rec }) });
     const r = await call('POST', `/api/cart/${cart.body.token}/checkout`, { fulfillment: 'pickup', name: 'Aziz', phone: '+998901234567' });
     assert.equal(r.status, 201);
-    assert.equal((await call('POST', `/api/admin/orders/${r.body.order.id}/pay`, {}, token)).status, 200);
+    assert.equal((await call('POST', `/api/admin/orders/${r.body.order.id}/pay`, { method: 'cash' }, token)).status, 200);
     return r.body.order.total;
   };
   const single = await recommend({ sizes: { top: 'M' }, want: ['top'] });

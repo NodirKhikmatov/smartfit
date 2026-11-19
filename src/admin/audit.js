@@ -14,8 +14,9 @@ export const AUDIT_ACTIONS = [
   'stock.open', 'stock.receive', 'stock.close', 'stock.count', // task 47
   'size_chart.save', 'size_chart.delete', // task 48
   'team.commission', // task 50
+  'cash.close', // task 51
 ];
-export const AUDIT_ENTITIES = ['product', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'org', 'demo', 'promo', 'category', 'mall', 'points', 'offer', 'review', 'size_chart'];
+export const AUDIT_ENTITIES = ['product', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'org', 'demo', 'promo', 'category', 'mall', 'points', 'offer', 'review', 'size_chart', 'cash'];
 
 const json = (v) => (v == null ? null : JSON.stringify(v));
 

@@ -277,6 +277,7 @@ const PAGES = {
   dashboard: { title: 'adm.route.dashboard', load: loadDashboard, poll: () => loadDashboard(true) },
   orders: { title: 'adm.route.orders', load: loadOrders, poll: () => loadOrders(true) },
   cashier: { title: 'adm.route.cashier', load: loadCashier, poll: () => loadPending(true) },
+  closing: { title: 'adm.route.closing', load: loadClosing }, // task 51
   products: { title: 'adm.route.products', load: loadProducts },
   categories: { title: 'adm.route.categories', load: loadCategories },
   sizes: { title: 'adm.route.sizes', load: loadSizes }, // task 48
@@ -300,6 +301,7 @@ const ACTIONS = {
     el('button', { type: 'button', onclick: () => openImport() }, icon('upload'), el('span', { className: 'label', textContent: t('adm.products.import') })),
     el('button', { type: 'button', className: 'primary', onclick: () => openForm(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.products.add') })),
   ],
+  closing: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.close.print'), ariaLabel: t('adm.close.print'), onclick: () => print() }, icon('print'))], // print styles: admin.css
   categories: [el('button', { type: 'button', className: 'primary', onclick: () => openCat(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.cats.add') }))],
   offers: [el('button', { type: 'button', className: 'primary', onclick: () => openOffer(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.offers.add') }))],
   stats: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => exportStats() }, icon('download'))],
@@ -681,11 +683,16 @@ function totalsBlock(o) {
     el('dt', { textContent: t('adm.receipt.fee') }), el('dd', { className: 'num', textContent: money(o.delivery_fee) }),
     el('dt', { className: 'total', textContent: t('adm.receipt.total') }), el('dd', { className: 'num total', textContent: money(o.total) }));
 }
-const method = (o) => (o.payment_method === 'cashier' ? t('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] || o.payment_method);
+const method = (o) => [o.payment_method === 'cashier' ? t('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] || o.payment_method,
+  o.paid_with && t(`adm.method.${o.paid_with}`)].filter(Boolean).join(' · '); // task 51: how the cashier took it
+// Task 51: "paid" always says how: cash or card, or instalment for an order whose term was chosen at checkout.
+const PAY_ICON = { cash: 'cash', card: 'wallet', instalment: 'clock' };
+const payButtons = (o, out) => (o.instalment_months ? ['instalment'] : ['cash', 'card']).map((m, i) =>
+  el('button', { type: 'button', className: i ? '' : 'primary', onclick: (e) => markPaid(o, m, e.currentTarget, out) }, icon(PAY_ICON[m]), t(`adm.paid_with.${m}`)));
 // Task 35: an instalment order. The total stays the price; the term and monthly amount are what was shown at checkout.
 const instText = (o) => t('adm.order.instalment', { n: o.instalment_months, sum: money(o.instalment_monthly), pct: o.instalment_percent });
 // Task 38: this shop's order is one part of a mall order (the other shops' parts are theirs and never shown here).
-const groupMark = (o) => (o.group_number ? el('div', { className: 'sizes', textContent: t('adm.order.mall_group', { n: o.group_number }) }) : null);
+const groupMark = (o) => (o.group_number ? el('div', { className: 'sizes', textContent: t('adm.order.mall_group', { n: o.group_number }) }) : ''); // '' not null: replaceChildren prints null as text
 const instNotice = (o) => (o.instalment_months ? [el('div', { className: 'notice inst' }, icon('info'),
   el('p', {}, el('strong', { textContent: instText(o) }), ' ', ...(o.payment_status === 'pending' ? [t('adm.order.instalment_note')] : [])))] : []);
 function renderOrder(o) {
@@ -703,7 +710,7 @@ function renderOrder(o) {
       ...fact('adm.order.tg', t(o.telegram ? 'adm.order.tg_on' : 'adm.order.tg_off'))),
     groupMark(o), ...instNotice(o), el('h3', { textContent: t('adm.order.items') }), itemsList(o, true), totalsBlock(o), ...returnsList(o));
   $('orderActions').replaceChildren(
-    ...(o.payment_status === 'pending' ? [el('button', { type: 'button', className: 'primary', onclick: (e) => markPaid(o, e.currentTarget) }, icon('cash'), t('adm.paydlg.confirm'))] : []),
+    ...(o.payment_status === 'pending' ? payButtons(o, $('orderError')) : []),
     ...o.next.map((s) => el('button', { type: 'button', className: s === 'cancelled' ? 'danger' : 'primary', textContent: stepName(o, s), onclick: (e) => setStatus(o, s, e.currentTarget) })),
     ...(o.payment_status === 'paid' ? [el('button', { type: 'button', onclick: () => printReceipt(o) }, icon('print'), t('adm.receipt.print'))] : []));
 }
@@ -722,18 +729,18 @@ async function setStatus(o, s, btn) {
     btn.disabled = false;
   }
 }
-async function markPaid(o, btn, out = $('orderError')) {
+async function markPaid(o, m, btn, out) {
   out.textContent = '';
-  btn.disabled = true;
+  for (const b of btn.parentElement.querySelectorAll('button')) b.disabled = true; // one method, one click
   try {
-    const next = await call(`/orders/${o.id}/pay`, { method: 'POST' });
-    toast(t('adm.paydlg.done', { id: o.number }));
+    const next = await call(`/orders/${o.id}/pay`, { method: 'POST', body: { method: m } });
+    toast(t('adm.paydlg.done', { id: o.number }) + ` · ${t(`adm.method.${m}`)}`);
     if (openId === o.id) { renderOrder(next); keepFocus(); }
     if (route.route === 'cashier') renderPay(next);
     refreshAfterOrder();
   } catch (err) {
     out.textContent = err.message;
-    btn.disabled = false;
+    for (const b of btn.parentElement.querySelectorAll('button')) b.disabled = false;
   }
 }
 const refreshAfterOrder = () => (route.route === 'orders' ? loadOrders(true) : route.route === 'cashier' ? loadPending(true) : null);
@@ -806,7 +813,7 @@ function renderPay(o) {
     groupMark(o),
     ...instNotice(o), itemsList(o), totalsBlock(o), err,
     el('div', { className: 'actions' },
-      o.payment_status === 'pending' ? el('button', { type: 'button', className: 'primary', onclick: (e) => markPaid(o, e.currentTarget, err) }, icon('cash'), t('adm.paydlg.confirm')) : null,
+      ...(o.payment_status === 'pending' ? payButtons(o, err) : []),
       o.payment_status === 'paid' ? el('button', { type: 'button', className: 'primary', onclick: () => printReceipt(o) }, icon('print'), t('adm.receipt.print')) : null,
       el('button', { type: 'button', onclick: () => openOrder(o.id) }, t('adm.cash.details'))));
 }
@@ -1430,6 +1437,124 @@ function exportStats() {
   document.body.append(a);
   a.click();
   a.remove();
+}
+
+// ---------- Kassani yopish (task 51): one store's day by payment method, the cash expected in the drawer, and closing it
+// with the counted cash and a note. A closed day shows the numbers as they were closed. The history lists every closing.
+const CLOSE_METHODS = ['cash', 'card', 'click', 'payme', 'instalment', 'unknown'];
+const CLOSE_LIMIT = 20;
+const closeF = $('closeFilters');
+closeF.day.onchange = () => setParams({ day: closeF.day.value });
+closeF.onsubmit = (e) => e.preventDefault();
+async function loadClosing() {
+  const seq = (loads.closing = (loads.closing || 0) + 1);
+  const p = route.params;
+  stateBox($('closeError'));
+  loadClosings(seq);
+  if (many() && !scope) {
+    closeF.day.value = p.day || '';
+    return $('closeBody').replaceChildren(el('div', { className: 'card panel' }, emptyState({ ic: 'store', title: t('adm.close.pick_store'), text: t('adm.close.pick_store_text') })));
+  }
+  const stop = showAfter(200, () => $('closeBody').replaceChildren(el('div', { className: 'card panel', ariaHidden: 'true' }, el('span', { className: 'skeleton block' }))));
+  let r;
+  try { r = await call('/cash?' + qs(scoped({ day: p.day }))); } catch (err) {
+    stop();
+    if (seq === loads.closing) stateBox($('closeError'), err, () => loadClosing());
+    return;
+  }
+  stop();
+  if (seq !== loads.closing) return;
+  if (!p.day) closeF.day.max = r.day; // today in Tashkent, from the server
+  closeF.day.value = r.day;
+  renderClosing(r);
+}
+async function loadClosings(seq) {
+  const p = route.params;
+  const stop = skeletonRows($('closeRows'), 4, 3);
+  let r;
+  try { r = await call('/cash/closings?' + qs(scoped({ limit: CLOSE_LIMIT, offset: offsetOf(p.page, CLOSE_LIMIT) }))); } catch (err) {
+    stop();
+    if (seq === loads.closing) emptyRow($('closeRows'), 4, { ic: 'alert', title: err.message });
+    return;
+  }
+  stop();
+  if (seq !== loads.closing) return;
+  pager($('closePager'), r, (page) => setParams({ ...p, page }));
+  if (!r.items.length) return emptyRow($('closeRows'), 4, { ic: 'check', title: t('adm.close.none'), text: t('adm.close.none_text') });
+  $('closeRows').replaceChildren(...r.items.map((c) => el('tr', {},
+    el('td', {}, showStore() ? el('strong', { textContent: fmt.date(c.day) }) : el('a', { href: buildHash('closing', { day: c.day }), textContent: fmt.date(c.day) }),
+      el('div', { className: 'sizes', textContent: [showStore() && c.store_name, t('adm.close.by', { at: fmt.dateTime(c.closed_at), who: c.closed_email ?? '—' })].filter(Boolean).join(' · ') }),
+      c.note && el('div', { className: 'sizes', textContent: c.note }),
+      el('div', { className: 'sizes show-sm', textContent: `${t('adm.close.expected')}: ${money(c.expected_cash)} · ${t('adm.close.counted')}: ${money(c.counted_cash)}` })),
+    el('td', { className: 'num hide-sm', textContent: som(c.expected_cash) }),
+    el('td', { className: 'num hide-sm', textContent: som(c.counted_cash) }),
+    el('td', { className: `num${c.difference < 0 ? ' neg' : ''}` }, el('strong', { textContent: diffText(c.difference) })))));
+}
+const diffText = (n) => (n > 0 ? `+${som(n)}` : signed(n));
+function renderClosing(r) {
+  const shown = CLOSE_METHODS.filter((m) => m !== 'unknown' || r.sales.unknown.orders || r.refunds.unknown);
+  const orders = shown.reduce((n, m) => n + r.sales[m].orders, 0);
+  const c = r.closed;
+  const fact = (k, ...v) => [el('dt', { textContent: t(k) }), el('dd', { className: 'num' }, ...v)];
+  const body = [
+    el('div', { className: 'panel-head' }, el('div', {},
+      el('h2', {}, `${storeName(r.store_id) || t('common.store')} · ${fmt.date(r.day)} `, el('span', { className: `badge ${c ? 'ok' : 'warn'}`, textContent: t(c ? 'adm.close.closed' : 'adm.close.open') })),
+      el('p', { className: 'panel-sub', textContent: t('adm.close.window', { from: fmt.dateTime(r.from), to: fmt.dateTime(r.to) }) }))),
+    el('div', { className: 'table-wrap' }, el('table', { className: 'table close-table' },
+      el('thead', {}, el('tr', {}, ...['adm.close.method', 'adm.close.orders', 'adm.close.sales', 'adm.close.refunds'].map((k, i) => el('th', { className: i === 1 ? 'num hide-sm' : i ? 'num' : '', textContent: t(k) })))),
+      el('tbody', {}, ...shown.map((m) => el('tr', {},
+        el('td', {}, el('div', { textContent: t(`adm.method.${m}`) }), el('div', { className: 'sizes show-sm', textContent: t('adm.close.n_orders', { n: r.sales[m].orders }) })), el('td', { className: 'num hide-sm', textContent: r.sales[m].orders }),
+        el('td', { className: 'num', textContent: som(r.sales[m].sum) }), el('td', { className: `num${r.refunds[m] ? ' neg' : ''}`, textContent: r.refunds[m] ? `−${som(r.refunds[m])}` : '—' })))),
+      el('tfoot', {}, el('tr', {}, el('td', {}, el('strong', { textContent: t('common.total') })), el('td', { className: 'num hide-sm', textContent: orders }),
+        el('td', { className: 'num', textContent: som(r.sales_total) }), el('td', { className: 'num', textContent: r.refunds_total ? `−${som(r.refunds_total)}` : '—' }))))),
+    ...(shown.includes('unknown') ? [el('p', { className: 'notice' }, icon('info'), el('span', { textContent: t('adm.close.unknown_note') }))] : []),
+    el('dl', { className: 'totals close-totals' }, ...fact('adm.close.net', money(r.net)), ...fact('adm.close.points', money(r.points)), ...fact('adm.close.discounts', money(r.discounts))),
+    el('p', { className: 'close-expected' }, el('span', { textContent: t('adm.close.expected_cash') }), el('strong', { className: 'num', textContent: money(r.expected_cash) })),
+    el('p', { className: 'hint', textContent: t('adm.close.expected_hint') }),
+  ];
+  if (c) {
+    body.push(el('dl', { className: 'facts close-facts' },
+      ...fact('adm.close.counted', money(c.counted_cash)),
+      ...fact('adm.close.diff', el('strong', { className: c.difference < 0 ? 'neg' : '', textContent: c.difference ? `${diffText(c.difference)} ${t('common.som')}` : t('adm.close.no_diff') })),
+      ...fact('adm.close.closed_by', t('adm.close.by', { at: fmt.dateTime(c.closed_at), who: c.closed_email ?? '—' })),
+      ...(c.note ? fact('field.note', c.note) : [])));
+  } else body.push(closeForm(r));
+  $('closeBody').replaceChildren(el('section', { className: 'card panel close-report' }, ...body));
+}
+function closeForm(r) {
+  const diff = el('p', { className: 'hint', role: 'status' });
+  const counted = el('input', { name: 'counted', type: 'number', min: 0, step: 1, inputMode: 'numeric', required: true });
+  const note = el('textarea', { name: 'note', maxLength: 500, rows: 2 });
+  const err = el('p', { className: 'error', role: 'alert' });
+  const btn = el('button', { className: 'primary' }, icon('check'), t('adm.close.submit'));
+  counted.oninput = () => {
+    const d = Number(counted.value) - r.expected_cash;
+    diff.textContent = counted.value === '' ? '' : d ? t(d < 0 ? 'adm.close.short' : 'adm.close.over', { sum: money(Math.abs(d)) }) : t('adm.close.no_diff');
+    diff.classList.toggle('error', counted.value !== '' && d < 0);
+  };
+  const f = el('form', { className: 'close-form no-print', noValidate: true },
+    el('label', { className: 'field' }, el('span', { textContent: t('adm.close.counted_label') }), counted), diff,
+    el('label', { className: 'field' }, el('span', { textContent: t('field.note') }), note), err, el('div', { className: 'actions start' }, btn));
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    err.textContent = '';
+    const n = Number(counted.value);
+    if (counted.value === '' || !Number.isInteger(n) || n < 0) {
+      err.textContent = t('adm.close.counted_bad');
+      return counted.focus();
+    }
+    if (!(await confirmDialog({ title: t('adm.close.confirm_title', { day: fmt.date(r.day) }), text: t('adm.close.confirm_text', { sum: money(n) }), ok: t('adm.close.submit'), cancel: t('common.back') }))) return;
+    btn.disabled = true;
+    try {
+      renderClosing(await call('/cash/close', { method: 'POST', body: { store_id: r.store_id, day: r.day, counted: n, note: note.value } }));
+      toast(t('adm.close.done', { day: fmt.date(r.day) }));
+      loadClosings(loads.closing);
+    } catch (e2) {
+      err.textContent = e2.message;
+      btn.disabled = false;
+    }
+  };
+  return f;
 }
 
 // ---------- Sotuvchilar (task 50): per seller the orders, the sum, units returned and the commission for a period

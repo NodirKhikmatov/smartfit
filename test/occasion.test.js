@@ -216,7 +216,7 @@ test('logged on the results screen without personal data; the Talab page counts 
     const cart = await call('POST', '/api/cart/items', { store_id: stores[0], items: [{ product_id: p.id, size: p.size ?? p.sizes[0] }], rec: rec.rec });
     const r = await call('POST', `/api/cart/${cart.body.token}/checkout`, { fulfillment: 'pickup', name: 'Aziz', phone: '+998901234567' });
     assert.equal(r.status, 201);
-    if (paid) assert.equal((await call('POST', `/api/admin/orders/${r.body.order.id}/pay`, {}, token)).status, 200);
+    if (paid) assert.equal((await call('POST', `/api/admin/orders/${r.body.order.id}/pay`, { method: 'cash' }, token)).status, 200);
   };
   await order(recs[0], true);
   await order(recs[2], false); // unpaid: not counted

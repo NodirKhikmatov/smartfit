@@ -231,7 +231,7 @@ test('read-only: every admin write is refused in one place, except finishing ord
   const routes = createAdminRouter(db).stack.filter((l) => l.route)
     .flatMap((l) => Object.keys(l.route.methods).filter((m) => !['_all', 'get', 'head'].includes(m)).map((m) => [m.toUpperCase(), l.route.path]));
   const PUBLIC = ['POST /login', 'POST /invite/check', 'POST /invite/accept'];
-  const ALLOWED = ['POST /me/password', 'POST /orders/:id/status', 'POST /orders/:id/pay', 'POST /orders/:id/returns', 'POST /fitting/:id/accept', 'POST /fitting/:id/done'];
+  const ALLOWED = ['POST /cash/close', 'POST /me/password', 'POST /orders/:id/status', 'POST /orders/:id/pay', 'POST /orders/:id/returns', 'POST /fitting/:id/accept', 'POST /fitting/:id/done'];
   assert.deepEqual(routes.map(([m, p]) => `${m} ${p}`).filter((r) => READONLY_ROUTES.some((re) => re.test(r.replace(/:id/g, '1')))).sort(), [...ALLOWED].sort(), 'the allow-list is exactly these');
   const snapshot = async () => JSON.stringify([await db('products').where({ store_id: shop.storeId }).select('id', 'price', 'updated_at'), await db('stores').where({ id: shop.storeId }).first(),
     await db('admin_invites').where({ organization_id: shop.orgId }).count({ n: '*' }), await db('organizations').where({ id: shop.orgId }).first()]);
@@ -259,12 +259,12 @@ test('read-only: every admin write is refused in one place, except finishing ord
   assert.ok(productsCsv.status === 200 && productsCsv.body.includes('Futbolka'));
   assert.equal((await admin('GET', '/points/export', undefined, shop.token)).status, 200);
   // Orders already placed are finished: paid, handed over, returned; a staff member moves them too.
-  assert.equal((await admin('POST', `/orders/${o1.id}/pay`, {}, shop.token)).status, 200);
+  assert.equal((await admin('POST', `/orders/${o1.id}/pay`, { method: 'cash' }, shop.token)).status, 200);
   assert.equal((await admin('POST', `/orders/${o1.id}/status`, { status: 'packing' }, shop.token)).status, 200);
   assert.equal((await admin('POST', `/orders/${o1.id}/status`, { status: 'delivered' }, shop.token)).status, 200);
   const line = (await admin('GET', `/orders/${o1.id}`, undefined, shop.token)).body.items[0];
   assert.equal((await admin('POST', `/orders/${o1.id}/returns`, { key: 'f'.repeat(32), item_id: line.id, kind: 'return', reason: 'too_small', quantity: 1, restock: true }, shop.token)).status, 201);
-  assert.equal((await admin('POST', `/orders/${o2.id}/pay`, {}, shop.token)).status, 200);
+  assert.equal((await admin('POST', `/orders/${o2.id}/pay`, { method: 'cash' }, shop.token)).status, 200);
   assert.equal((await admin('POST', `/orders/${o2.id}/status`, { status: 'packing' }, staff)).status, 200);
   const pw = await admin('POST', '/me/password', { current: 'shop-pass-1', password: 'shop-pass-2' }, shop.token);
   assert.equal(pw.status, 200, 'its own password');
@@ -357,7 +357,7 @@ test('feature switches: a plan without a feature hides it and blocks it on the s
     // An order placed on this plan earns nothing on hand-over, and takes nothing.
     const cart = await call('POST', '/api/cart/items', { store_id: shop.storeId, items: [{ product_id: product.id, size: 'M' }] });
     const o = (await call('POST', `/api/cart/${cart.body.token}/checkout`, { fulfillment: 'pickup', name: 'Aziz', phone: '+998901234567' })).body.order;
-    await admin('POST', `/orders/${o.id}/pay`, {}, shop.token);
+    await admin('POST', `/orders/${o.id}/pay`, { method: 'cash' }, shop.token);
     await admin('POST', `/orders/${o.id}/status`, { status: 'packing' }, shop.token);
     assert.equal((await admin('POST', `/orders/${o.id}/status`, { status: 'delivered' }, shop.token)).status, 200);
     assert.equal(Number((await db('points_ledger').where({ profile_id: profileId }).sum({ n: 'amount' }))[0].n), 7000, 'no cashback, nothing taken');

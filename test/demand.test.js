@@ -136,7 +136,7 @@ test('restock suggestion: missed + sold in the window − free stock, never belo
   await setStock(top.id, 'L', 1);
   const cart = (await call('POST', '/api/cart/items', { store_id: store, items: [{ product_id: top.id, size: 'L' }] })).body;
   const { order } = (await call('POST', `/api/cart/${cart.token}/checkout`, { fulfillment: 'pickup', name: NAME, phone: PHONE })).body;
-  assert.equal((await admin('POST', `/orders/${order.id}/pay`, {})).status, 200);
+  assert.equal((await admin('POST', `/orders/${order.id}/pay`, { method: 'cash' })).status, 200);
 
   const { items, days } = (await admin('GET', '/demand')).body;
   assert.equal(days, 14);

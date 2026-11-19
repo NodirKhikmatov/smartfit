@@ -33,6 +33,7 @@
   </header>
   <div class="tabs" role="group" data-i18n-aria-label="staff.sections" id="tabs">
     <button type="button" class="chip" data-tab="fitting"><span data-i18n="staff.tab.fitting"></span> <span class="count-pill" id="nFitting" hidden></span></button>
+    <button type="button" class="chip" data-tab="pay"><span data-i18n="staff.tab.pay"></span> <span class="count-pill" id="nPay" hidden></span></button>
     <button type="button" class="chip" data-tab="orders"><span data-i18n="staff.tab.orders"></span> <span class="count-pill" id="nOrders" hidden></span></button>
     <button type="button" class="chip" data-tab="low"><span data-i18n="staff.tab.low"></span> <span class="count-pill" id="nLow" hidden></span></button>
     <button type="button" class="chip" data-tab="sales"><span data-i18n="staff.tab.sales"></span></button>
@@ -45,6 +46,11 @@
       <h2 class="visually-hidden" data-i18n="staff.tab.fitting"></h2>
       <div class="list" id="fitList"></div>
       <section class="card stats" id="stats" aria-labelledby="statsTitle"><h3 id="statsTitle" data-i18n="staff.stats.title"></h3><div id="statsBody"></div></section>
+    </section>
+    <!-- Task 51: orders waiting at the till; staff say how the customer paid -->
+    <section id="pay" data-section hidden>
+      <h2 class="visually-hidden" data-i18n="staff.tab.pay"></h2>
+      <div class="list" id="payList"></div>
     </section>
     <section id="orders" data-section hidden>
       <h2 class="visually-hidden" data-i18n="staff.tab.orders"></h2>

@@ -29,6 +29,7 @@ import { reviewRoutes, report } from '../reviews.js';
 import { moved } from '../movements.js';
 import { stockRoutes } from './stock.js';
 import { sellerRoutes } from './sellers.js';
+import { cashRoutes, PAID_WITH } from './cash.js';
 import { profitRoutes } from './profit.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
@@ -201,7 +202,7 @@ const IMAGE_TYPES = [
   ['webp', (b) => b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP'],
 ];
 // What the staff role may call (task 28): its own account, the floor queue, fitting accept/done and order steps.
-export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/me\/sales$/, /^GET \/staff$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/orders\/\d+\/status$/,
+export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/me\/sales$/, /^GET \/staff$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/orders\/\d+\/(status|pay)$/, // task 51: staff take payments
   // Task 47: receiving and counting. Confirming a count's corrections is not here: a manager or owner does that.
   /^GET \/stock\/(catalog|sessions)$/, /^GET \/stock\/sessions\/\d+$/, /^POST \/stock\/(sessions|scans)$/, /^POST \/stock\/sessions\/\d+\/close$/];
 // What the mall role may call (task 37): its own account and its mall (profile, logo, QR, the shops' directory entries,
@@ -212,7 +213,7 @@ export const MALL_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^(GET|PATCH)
   /^GET \/mall\/map$/, /^(POST|DELETE) \/mall\/floors\/\d+\/plan$/, /^POST \/mall\/spots$/, /^(PATCH|DELETE) \/mall\/spots\/\d+$/]; // task 44: the map
 // Task 45: what a read-only organisation may still write: its own password, and finishing orders already placed
 // (paid, handed over, cancelled, returned; a fitting request answered), so a customer who paid gets the goods.
-export const READONLY_ROUTES = [/^POST \/me\/password$/, /^POST \/orders\/\d+\/(status|pay|returns)$/, /^POST \/fitting\/\d+\/(accept|done)$/];
+export const READONLY_ROUTES = [/^POST \/me\/password$/, /^POST \/orders\/\d+\/(status|pay|returns)$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/cash\/close$/];
 // Admin routes that belong to a plan feature (offers have their own one check, canPostOffers).
 const FEATURE_ROUTES = [[/^(POST \/points\/adjust|PATCH \/points)$/, 'points']];
 const STATS_TZ = 'Asia/Tashkent'; // every store is in Uzbekistan (UTC+5, no DST)
@@ -648,7 +649,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
     return dateRange(q, 'o.created_at', f);
   }
   const ORDER_COLS = ['o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.phone', 'o.fulfillment', 'o.address', 'o.status',
-    'o.payment_status', 'o.payment_method', 'o.subtotal', 'o.bundle_discount', 'o.promo_discount', 'o.promo_code', 'o.points_discount', 'o.delivery_fee', 'o.total', 'o.created_at', 'o.expires_at', 'o.telegram_chat_id',
+    'o.payment_status', 'o.payment_method', 'o.paid_with', 'o.subtotal', 'o.bundle_discount', 'o.promo_discount', 'o.promo_code', 'o.points_discount', 'o.delivery_fee', 'o.total', 'o.created_at', 'o.expires_at', 'o.telegram_chat_id',
     'o.instalment_months', 'o.instalment_monthly', 'o.group_number']; // task 35; task 38: the mall order it is part of
 
   // → { items, total, limit, offset }, newest first (dir=asc: oldest first, so the cashier sees the soonest to expire on top).
@@ -681,7 +682,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
       ['№', tr('adm.orders.time'), tr('common.store'), tr('adm.orders.customer'), tr('adm.csv.phone'), tr('adm.orders.fulfillment'), tr('field.address'),
         tr('adm.csv.subtotal'), tr('adm.csv.discount'), tr('field.promo_code'), tr('adm.csv.fee'), tr('adm.csv.total'), tr('field.payment'), tr('adm.csv.instalment_months'), tr('adm.csv.instalment_monthly'), tr('adm.orders.payment'), tr('adm.orders.status'), tr('adm.csv.mall_order')],
       ...rows.map((o) => [o.number, tashkent(o.created_at), o.store_name, o.customer_name, phoneText(o.phone), tr(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), o.address,
-        o.subtotal, o.bundle_discount + o.promo_discount + o.points_discount, o.promo_code, o.delivery_fee, o.total, o.payment_method === 'cashier' ? tr('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] ?? o.payment_method,
+        o.subtotal, o.bundle_discount + o.promo_discount + o.points_discount, o.promo_code, o.delivery_fee, o.total, [o.payment_method === 'cashier' ? tr('adm.order.cashier') : { click: 'Click', payme: 'Payme' }[o.payment_method] ?? o.payment_method, o.paid_with && tr(`adm.method.${o.paid_with}`)].filter(Boolean).join(' · '),
         o.instalment_months, o.instalment_monthly, tr(`adm.pay.${o.payment_status}`),
         tr(o.status === 'delivered' && o.fulfillment === 'pickup' ? 'adm.status.handed' : `adm.status.${o.status}`), o.group_number]),
     ]);
@@ -730,13 +731,18 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
     const now = await db('orders').where({ id: o.id }).first();
     res.json(req.admin.role === 'staff' ? { id: now.id, status: now.status } : await adminView(now)); // staff never get the phone or address
   });
+  // Task 51: { method: cash | card | instalment }, always. An instalment order (its term chosen at checkout) is paid only
+  // by instalment, and only such an order can be.
   r.post('/orders/:id/pay', async (req, res) => {
     const o = await findOrder(req);
-    if (!(await orderStep(req, o, 'order.pay', (trx) => markPaid(trx, o.id, Date.now(), req.admin.id)))) {
+    const m = req.body?.method;
+    if (!PAID_WITH.includes(m) || (m === 'instalment') !== (o.instalment_months != null)) throw fail(400, 'err.invalid', { field: 'field.paid_with' });
+    if (!(await orderStep(req, o, 'order.pay', (trx) => markPaid(trx, o.id, Date.now(), req.admin.id, m)))) {
       const now = await db('orders').where({ id: o.id }).first('payment_status');
       throw fail(409, now.payment_status === 'paid' ? 'err.already_paid' : 'err.order_expired');
     }
-    res.json(await adminView(await db('orders').where({ id: o.id }).first()));
+    const now = await db('orders').where({ id: o.id }).first();
+    res.json(req.admin.role === 'staff' ? { id: now.id, number: now.number, status: now.status, payment_status: now.payment_status, paid_with: now.paid_with } : await adminView(now));
   });
   // Task 23: a return or a size exchange on one line of a delivered order.
   // { key, item_id, kind: return|exchange, reason, quantity, restock, refund? (return; default the full line share), new_size? (exchange) }.
@@ -838,7 +844,11 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
     const orders = await inStores(req.admin, db('orders as o').join('stores as s', 's.id', 'o.store_id').where('o.payment_status', 'paid')
       .whereIn('o.status', ['new', 'packing', 'shipping']).orderBy('o.paid_at').limit(50)
       .select('o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.fulfillment', 'o.status', 'o.payment_status', 'o.paid_at', 'o.instalment_months', 'o.group_number'), 'o.store_id');
-    const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').whereIn('i.order_id', orders.map((o) => o.id))
+    // Task 51: orders waiting to be paid at the till, soonest to lapse first (no phone or address).
+    const pending = await inStores(req.admin, db('orders as o').join('stores as s', 's.id', 'o.store_id').where({ 'o.payment_status': 'pending', 'o.status': 'new' })
+      .where('o.expires_at', '>', iso(now)).orderBy('o.expires_at').limit(50)
+      .select('o.id', 'o.number', 'o.store_id', 's.name as store_name', 'o.customer_name', 'o.fulfillment', 'o.total', 'o.payment_method', 'o.expires_at', 'o.instalment_months', 'o.instalment_monthly', 'o.group_number'), 'o.store_id');
+    const items = await db('order_items as i').join('products as p', 'p.id', 'i.product_id').whereIn('i.order_id', [...orders, ...pending].map((o) => o.id))
       .select('i.order_id', 'p.name', 'p.name_ru', 'p.category', 'p.color', 'p.shelf_location', 'i.size', 'i.quantity')
       .orderByRaw('p.shelf_location is null, p.shelf_location, p.category, p.name');
     const low = inStores(req.admin, db('product_stock as ps').join('products as p', 'p.id', 'ps.product_id').join('stores as st', 'st.id', 'p.store_id')
@@ -851,6 +861,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
       fitting: (await fittingView(db, await openFitting(req.admin))).map(({ accepted_by, ...f }) => ({ ...f, accepted_at: stamp(f.accepted_at), mine: accepted_by === req.admin.id })),
       orders: orders.map((o) => ({ ...o, paid_at: stamp(o.paid_at), next: nextStatuses(o).filter((s) => s !== 'cancelled'),
         items: items.filter((i) => i.order_id === o.id).map(({ order_id, ...i }) => i) })),
+      pending: pending.map(({ expires_at, ...o }) => ({ ...o, pay_ms: Math.max(0, msOf(expires_at) - now), items: items.filter((i) => i.order_id === o.id).map(({ order_id, ...i }) => i) })),
       low: { total: Number(lowTotal), items: await low.select('p.id as product_id', 'p.store_id', 'p.name', 'p.name_ru', 'p.category', 'p.sku', 'p.shelf_location', 'ps.size',
         db.raw('ps.quantity - ps.reserved as free')).orderByRaw('ps.quantity - ps.reserved, p.name, p.id').limit(50) },
       // Quiet kiosks seen in the last day: a tablet retired for good stops alerting after 24 h.
@@ -871,6 +882,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
   stockRoutes(r, db, { findProduct }); // task 47
   profitRoutes(r, db); // task 49
   sellerRoutes(r, db); // task 50
+  cashRoutes(r, db); // task 51
 
   // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.
   const inScope = (req, q, col = 'store_id') => {

@@ -142,10 +142,12 @@ function render() {
   for (const s of document.querySelectorAll('[data-section]')) s.hidden = s.id !== tab;
   count('nFitting', data.fitting.length);
   count('nOrders', data.orders.length);
+  count('nPay', data.pending.length);
   count('nLow', data.low.total);
   $('kiosks').replaceChildren(...data.kiosks.map((k) => el('p', { className: 'notice danger' }, icon('alert'),
     el('span', { textContent: t('staff.kiosk_off', { name: t('adm.dash.kiosk_name', { id: k.id }), at: fmt.dateTime(k.last_seen_at) }) }))));
   $('fitList').replaceChildren(...(data.fitting.length ? data.fitting.map(fittingCard) : [empty('staff.fit.empty', 'staff.fit.empty_text')]));
+  $('payList').replaceChildren(...(data.pending.length ? data.pending.map(payCard) : [empty('staff.pay.empty', 'staff.pay.empty_text')]));
   $('orderList').replaceChildren(...(data.orders.length ? data.orders.map(orderCard) : [empty('staff.orders.empty', 'staff.orders.empty_text')]));
   $('lowList').replaceChildren(data.low.items.length ? lowList(data.low) : empty('staff.low.empty', 'staff.low.empty_text'));
   $('statsBody').replaceChildren(...stats(data.stats));
@@ -183,6 +185,19 @@ function orderCard(o) {
     el('ul', { className: 'picks' }, ...o.items.map(pick)),
     el('div', { className: 'actions' }, ...o.next.map((s, i) => act(`o${o.id}${s}`, stepLabel(o, s),
       () => call(`/orders/${o.id}/status`, { method: 'POST', body: { status: s } }), t('staff.order_toast', { n: o.number, status: statusLabel(o, s) }), i > 0))));
+}
+
+// Task 51: an order waiting at the till. The customer pays; staff say how (an instalment order only by instalment).
+function payCard(o) {
+  const pay = (m, secondary) => act(`p${o.id}${m}`, t(`adm.paid_with.${m}`), () => call(`/orders/${o.id}/pay`, { method: 'POST', body: { method: m } }),
+    t('staff.pay.done', { n: o.number, method: t(`adm.method.${m}`) }), secondary);
+  return el('article', { className: 'card req' },
+    el('header', {}, el('h3', { textContent: `№ ${o.number}` }), el('span', { className: 'badge warn', textContent: t('staff.pay.left', { t: fmt.countdown(o.pay_ms) }) })),
+    el('p', { className: 'muted', textContent: [o.customer_name, t(o.fulfillment === 'pickup' ? 'adm.orders.pickup' : 'adm.orders.delivery'), o.payment_method !== 'cashier' && t('staff.pay.online', { m: t(`adm.method.${o.payment_method}`) }), o.group_number && t('adm.order.mall_group', { n: o.group_number }), storeOf(o)].filter(Boolean).join(' · ') }),
+    el('ul', { className: 'picks' }, ...o.items.map(pick)),
+    el('p', { className: 'pay-sum' }, el('span', { textContent: t('adm.receipt.total') }), el('strong', { textContent: fmt.som(o.total) })),
+    o.instalment_months && el('p', { className: 'muted', textContent: t('staff.pay.instalment', { n: o.instalment_months, sum: fmt.som(o.instalment_monthly) }) }),
+    el('div', { className: 'actions' }, ...(o.instalment_months ? [pay('instalment')] : [pay('cash'), pay('card', true)])));
 }
 
 // One action button: disabled while it runs, then a toast and a fresh poll (also after a 409, to show who won).
