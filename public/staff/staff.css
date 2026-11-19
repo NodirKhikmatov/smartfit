@@ -43,6 +43,19 @@ main section[hidden] { display: none; }
 .stats { display: grid; gap: var(--s-2); padding: var(--s-4); }
 .stats p, .stats h4 { margin: 0; }
 .stats h4 { font-size: var(--text-sm); color: var(--ink-2); margin-top: var(--s-2); }
+/* Task 50: "Mening sotuvlarim". Four tabs don't fit a narrow phone in one row: they wrap, every tab stays in sight. */
+.tabs { flex-wrap: wrap; }
+.tabs .chip { flex: 1 1 auto; }
+#salesPeriod { display: flex; flex-wrap: wrap; }
+#salesPeriod .chip { white-space: nowrap; }
+#sales h2 { margin: 0; font-size: var(--text-lg); }
+#sales .hint, #salesError { margin: 0; }
+#salesError:empty { display: none; }
+.sales { display: grid; grid-template-columns: 1fr auto; gap: var(--s-2) var(--s-4); margin: 0; padding: var(--s-4); }
+.sales dt { color: var(--ink-2); }
+.sales dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.sales dd small { display: block; color: var(--ink-2); }
+.sales .total { font-weight: 600; color: var(--ink); }
 .plain { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); }
 
 /* Task 47: receiving and counts in the Ombor tab. */

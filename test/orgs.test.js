@@ -179,6 +179,25 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       await db('orders').where({ id: B.order.id }).update(was);
       await db('order_items').where({ order_id: B.order.id }).update({ unit_cost: null });
     },
+    // Task 50: org B's order as if paid and sold by org B's manager; org A's owner sees neither the seller nor the sum.
+    'GET /sellers': async () => {
+      const was = await db('orders').where({ id: B.order.id }).first('payment_status', 'paid_at', 'seller_id', 'seller_at', 'seller_percent');
+      const now = new Date().toISOString();
+      await db('orders').where({ id: B.order.id }).update({ payment_status: 'paid', paid_at: now, seller_id: B.member.id, seller_at: now, seller_percent: 5 });
+      const all = await admin('GET', '/sellers', undefined, ownerA);
+      noB(all);
+      assert.ok(!all.body.sellers.some((x) => x.seller_id === B.member.id) && !json(all).includes(B.member.email));
+      const r = await admin('GET', `/sellers?store_id=${b1}`, undefined, ownerA);
+      assert.deepEqual([r.status, r.body.sellers.length, r.body.no_seller.orders], [200, 0, 0], '?store_id cannot widen the scope');
+      assert.equal((await admin('GET', '/sellers', undefined, ownerB)).body.sellers[0].seller_id, B.member.id, 'org B itself sees it');
+      await db('orders').where({ id: B.order.id }).update(was);
+    },
+    'GET /sellers/export': async () => {
+      const r = await admin('GET', `/sellers/export?store_id=${b1}`, undefined, ownerA);
+      assert.equal(r.status, 200);
+      assert.ok(!String(r.body).includes(B.member.email));
+    },
+    'GET /me/sales': async () => assert.equal((await admin('GET', '/me/sales', undefined, ownerA)).body.orders, 0), // only ever the caller's own
     'GET /demand': async () => {
       noB(await admin('GET', '/demand?days=30', undefined, ownerA));
       const r = await admin('GET', `/demand?store_id=${b1}`, undefined, ownerA);
@@ -531,7 +550,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 39; i > 12; i--) await m.migrate.down(); // 039 … 013
+    for (let i = 40; i > 12; i--) await m.migrate.down(); // 040 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

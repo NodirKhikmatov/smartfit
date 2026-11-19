@@ -121,6 +121,7 @@ test('route walk: the staff role can call only the staff routes', async () => {
     'POST /stock/scans': async () => assert.equal((await admin('POST', '/stock/scans', { key: uid(), session: recv.key, product_id: product.id, size: (await db('product_stock').where({ product_id: product.id }).first()).size, quantity: 1 }, staff1)).status, 201),
     'POST /stock/sessions/:id/close': async () => assert.equal((await admin('POST', `/stock/sessions/${recv.id}/close`, {}, staff1)).body.status, 'closed'),
     'GET /me': async () => assert.equal((await admin('GET', '/me', undefined, staff1)).body.role, 'staff'),
+    'GET /me/sales': async () => assert.equal((await admin('GET', '/me/sales', undefined, staff1)).status, 200), // task 50: their own numbers
     'GET /staff': async () => assert.equal((await admin('GET', '/staff', undefined, staff1)).status, 200),
     'POST /fitting/:id/accept': async () => assert.equal((await admin('POST', `/fitting/${f}/accept`, {}, staff1)).status, 204),
     'POST /fitting/:id/done': async () => assert.equal((await admin('POST', `/fitting/${f}/done`, {}, staff1)).status, 204),

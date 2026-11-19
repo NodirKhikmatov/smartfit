@@ -291,6 +291,7 @@ a.kpi:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); col
 .map-hint .icon { margin-right: var(--s-1); }
 .map-hint a[hidden] { display: none; }
 .cell-email { overflow-wrap: anywhere; margin-right: var(--s-2); }
+.pct-input { width: 4.25rem; text-align: right; } /* task 50: a member's personal commission, edited in the team table */
 .team-table .row-actions button, .demo-table .row-actions button, .org-table .row-actions button { width: auto; padding: 0 var(--s-3); }
 .invite-list { display: grid; gap: var(--s-2); list-style: none; margin: 0; padding: 0; }
 .invite-row { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-3) var(--s-4); }

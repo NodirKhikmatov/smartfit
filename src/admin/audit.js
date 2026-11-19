@@ -13,6 +13,7 @@ export const AUDIT_ACTIONS = [
   'review.hide', 'review.show', 'review.reply', // task 46
   'stock.open', 'stock.receive', 'stock.close', 'stock.count', // task 47
   'size_chart.save', 'size_chart.delete', // task 48
+  'team.commission', // task 50
 ];
 export const AUDIT_ENTITIES = ['product', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'org', 'demo', 'promo', 'category', 'mall', 'points', 'offer', 'review', 'size_chart'];
 

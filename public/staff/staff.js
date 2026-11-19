@@ -48,6 +48,8 @@ async function show() {
   $('stockHome').hidden = false;
   if (!me) return $('login').email.focus();
   renderStock();
+  $('salesBody').replaceChildren(); // another person may have signed in
+  if (tab === 'sales') loadSales();
   poll();
 }
 
@@ -123,6 +125,7 @@ $('tabs').addEventListener('click', (e) => {
   tab = b.dataset.tab;
   if (tab === 'low') loadSessions();
   else stopCam();
+  if (tab === 'sales') loadSales();
   render();
 });
 
@@ -217,6 +220,33 @@ function stats(s) {
     s.recent.length > 0 && el('ul', { className: 'plain muted' }, ...s.recent.map((r) => el('li', { textContent: t('staff.stats.recent_row', {
       cabin: r.cabin, who: r.email?.split('@')[0] ?? '—', done: dur(r.done_s), at: fmt.time(r.done_at) }) }))),
   ].filter(Boolean);
+}
+
+// ---------- Task 50: "Mening sotuvlarim". Loaded when the tab opens or the period changes (not on every poll).
+const PERIODS = { today: 'staff.sales.today', month: 'staff.sales.month', last_month: 'staff.sales.last_month' };
+let salesPeriod = 'month', salesSeq = 0;
+async function loadSales() {
+  const seq = ++salesSeq;
+  $('salesPeriod').replaceChildren(...Object.entries(PERIODS).map(([p, key]) => {
+    const b = el('button', { type: 'button', className: 'chip', textContent: t(key), onclick: () => { salesPeriod = p; loadSales(); } });
+    b.setAttribute('aria-pressed', String(p === salesPeriod));
+    return b;
+  }));
+  $('salesError').textContent = '';
+  let r;
+  try { r = await call(`/me/sales?period=${salesPeriod}`); } catch (err) {
+    if (seq === salesSeq) $('salesError').textContent = err.message;
+    return;
+  }
+  if (seq !== salesSeq) return;
+  const row = (label, value, sub, cls) => [el('dt', { textContent: label, className: cls || '' }), el('dd', { className: cls || '' }, value, sub && el('small', { textContent: sub }))];
+  const range = r.from === r.to ? fmt.date(`${r.from}T12:00:00+05:00`) : `${fmt.date(`${r.from}T12:00:00+05:00`)} – ${fmt.date(`${r.to}T12:00:00+05:00`)}`;
+  $('salesBody').replaceChildren(
+    ...row(t('staff.sales.range'), range),
+    ...row(t('staff.sales.orders'), String(r.orders)),
+    ...row(t('staff.sales.sum'), fmt.som(r.sum)),
+    ...row(t('staff.sales.returns'), t('staff.sales.units', { n: r.returns }), r.refunded ? `−${fmt.som(r.refunded)}` : null),
+    ...row(t('staff.sales.commission'), fmt.som(r.commission), r.percent ? t('staff.sales.pct', { n: r.percent }) : t('staff.sales.off'), 'total'));
 }
 
 // ---------- Task 47: "Qabul qilish" (receiving) and "Inventarizatsiya" (a count), in the Ombor tab.
@@ -581,7 +611,7 @@ function diffView(d) {
 initLang();
 document.title = `${t('staff.title')} · Smart Fit`;
 const switches = [langSwitch(() => relabel(), { short: true }), langSwitch(() => relabel())];
-const relabel = () => { document.title = `${t('staff.title')} · Smart Fit`; switches.forEach((s) => s.sync()); render(); renderStock(); };
+const relabel = () => { document.title = `${t('staff.title')} · Smart Fit`; switches.forEach((s) => s.sync()); render(); renderStock(); if (tab === 'sales') loadSales(); };
 $('lang').replaceChildren(switches[0]);
 $('loginLang').replaceChildren(switches[1]);
 navigator.serviceWorker?.register('/staff/sw.js', { scope: '/staff/' }).catch(() => {}); // installable + offline shell; never a blocker

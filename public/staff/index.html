@@ -35,6 +35,7 @@
     <button type="button" class="chip" data-tab="fitting"><span data-i18n="staff.tab.fitting"></span> <span class="count-pill" id="nFitting" hidden></span></button>
     <button type="button" class="chip" data-tab="orders"><span data-i18n="staff.tab.orders"></span> <span class="count-pill" id="nOrders" hidden></span></button>
     <button type="button" class="chip" data-tab="low"><span data-i18n="staff.tab.low"></span> <span class="count-pill" id="nLow" hidden></span></button>
+    <button type="button" class="chip" data-tab="sales"><span data-i18n="staff.tab.sales"></span></button>
   </div>
   <main id="main">
     <p class="notice" id="sound"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#info"></use></svg><span><span data-i18n="staff.sound_text"></span> <button type="button" id="soundOn" data-i18n="staff.sound_on"></button></span></p>
@@ -106,6 +107,14 @@
         <div id="ssBody"></div>
         <div class="actions" id="ssActions"></div>
       </div>
+    </section>
+    <!-- Task 50: "Mening sotuvlarim": the signed-in member's own sales and commission, nobody else's -->
+    <section id="sales" data-section hidden>
+      <h2 data-i18n="staff.sales.title"></h2>
+      <div class="chips" role="group" data-i18n-aria-label="staff.sales.period" id="salesPeriod"></div>
+      <p class="error" id="salesError" role="alert"></p>
+      <dl class="card sales" id="salesBody"></dl>
+      <p class="hint" data-i18n="staff.sales.hint"></p>
     </section>
   </main>
 </div>

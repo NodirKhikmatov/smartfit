@@ -53,6 +53,7 @@
           <li id="navSizes" hidden><a href="#/sizes" data-route="sizes"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#ruler"></use></svg><span data-i18n="adm.route.sizes"></span></a></li>
           <li><a href="#/stats" data-route="stats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.route.stats"></span></a></li>
           <li><a href="#/profit" data-route="profit"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#wallet"></use></svg><span data-i18n="adm.route.profit"></span></a></li>
+          <li><a href="#/sellers" data-route="sellers"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#user"></use></svg><span data-i18n="adm.route.sellers"></span></a></li>
           <li><a href="#/demand" data-route="demand"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trend-up"></use></svg><span data-i18n="adm.route.demand"></span></a></li>
           <li><a href="#/reviews" data-route="reviews"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#star"></use></svg><span data-i18n="adm.route.reviews"></span></a></li>
           <li><a href="#/qr" data-route="qr"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg><span data-i18n="adm.route.qr"></span></a></li>
@@ -355,6 +356,26 @@
         </div>
       </section>
 
+      <!-- Sotuvchilar (task 50): per seller the orders, the sum, returns and commission for a period -->
+      <section data-page="sellers" hidden>
+        <form class="toolbar" id="sellersFilters">
+          <label><span data-i18n="adm.orders.from"></span> <input name="from" type="date"></label>
+          <label><span data-i18n="adm.orders.to"></span> <input name="to" type="date"></label>
+        </form>
+        <div id="sellersError"></div>
+        <div class="kpis" id="sellersKpis"></div>
+        <p class="notice" id="sellersNone" hidden></p>
+        <section class="card panel" aria-labelledby="sellersTitle">
+          <div class="panel-head"><div><h2 id="sellersTitle" data-i18n="adm.sellers.title"></h2><p class="panel-sub" data-i18n="adm.sellers.sub"></p></div></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th data-i18n="adm.sellers.seller"></th><th class="num" data-i18n="adm.sellers.orders"></th><th class="num hide-sm" data-i18n="adm.sellers.sum"></th><th class="num hide-sm" data-i18n="adm.sellers.returns"></th><th class="num" data-i18n="adm.sellers.commission"></th></tr></thead>
+              <tbody id="sellersRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
       <!-- Talab (task 24): missed demand with restock suggestions, and the customer funnel by step -->
       <section data-page="demand" hidden>
         <div class="page-head">
@@ -651,6 +672,7 @@
                 <label class="field span-all"><span data-i18n="field.report_chat"></span> <input name="report_chat_id" inputmode="numeric" pattern="-?[0-9]{1,15}" maxlength="16" autocomplete="off"><span class="hint" data-i18n="adm.set.report_hint"></span></label>
                 <label class="field"><span data-i18n="field.low_stock"></span> <input name="low_stock_threshold" type="number" min="0" max="1000" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.low_hint"></span></label>
                 <label class="field"><span data-i18n="field.bundle_percent"></span> <input name="bundle_percent" type="number" min="0" max="90" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.bundle_hint"></span></label>
+                <label class="field"><span data-i18n="field.commission_percent"></span> <input name="commission_percent" type="number" min="0" max="50" step="1" required inputmode="numeric"><span class="hint" data-i18n="adm.set.commission_hint"></span></label>
                 <div class="span-all inst-set" role="group" aria-labelledby="instTitle">
                   <h3 id="instTitle" data-i18n="adm.set.instalment_title"></h3>
                   <p class="notice warn" id="instPlanOff" hidden data-i18n="adm.plan.off_notice"></p>
@@ -685,7 +707,7 @@
           <div class="table-wrap">
             <table class="table team-table">
               <caption class="visually-hidden" data-i18n="adm.set.team"></caption>
-              <thead><tr><th data-i18n="field.email"></th><th class="hide-sm" data-i18n="field.role"></th><th class="hide-sm" id="teamStoreCol" data-i18n="common.store"></th><th data-i18n="adm.team.status"></th><th><span class="visually-hidden" data-i18n="adm.team.actions"></span></th></tr></thead>
+              <thead><tr><th data-i18n="field.email"></th><th class="hide-sm" data-i18n="field.role"></th><th class="hide-sm" id="teamStoreCol" data-i18n="common.store"></th><th class="num" data-i18n="adm.team.commission"></th><th class="hide-sm" data-i18n="adm.team.status"></th><th><span class="visually-hidden" data-i18n="adm.team.actions"></span></th></tr></thead>
               <tbody id="teamRows"></tbody>
             </table>
           </div>

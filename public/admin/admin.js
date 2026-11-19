@@ -283,6 +283,7 @@ const PAGES = {
   offers: { title: 'adm.route.offers', load: loadOffers }, // task 43
   stats: { title: 'adm.route.stats', load: loadStats },
   profit: { title: 'adm.route.profit', load: loadProfit }, // task 49
+  sellers: { title: 'adm.route.sellers', load: loadSellers }, // task 50
   demand: { title: 'adm.route.demand', load: loadDemand },
   reviews: { title: 'adm.route.reviews', load: loadReviews }, // task 46
   qr: { title: 'adm.route.qr', load: loadQr },
@@ -302,6 +303,7 @@ const ACTIONS = {
   categories: [el('button', { type: 'button', className: 'primary', onclick: () => openCat(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.cats.add') }))],
   offers: [el('button', { type: 'button', className: 'primary', onclick: () => openOffer(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.offers.add') }))],
   stats: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => exportStats() }, icon('download'))],
+  sellers: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => download('/sellers/export?' + qs(sellersQuery()), 'sellers.csv') }, icon('download'))],
   demand: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => download('/demand/export?' + qs(scoped({ days: demandDays() })), `talab-${demandDays()}d.csv`) }, icon('download'))],
 };
 
@@ -1430,6 +1432,45 @@ function exportStats() {
   a.remove();
 }
 
+// ---------- Sotuvchilar (task 50): per seller the orders, the sum, units returned and the commission for a period
+// (default this month so far). Paid orders nobody has sold yet (online, not handed over) are noted apart.
+const sel = $('sellersFilters');
+const sellersQuery = () => scoped({ from: route.params.from, to: route.params.to });
+sel.from.onchange = sel.to.onchange = () => setParams({ from: sel.from.value, to: sel.to.value });
+sel.onsubmit = (e) => e.preventDefault();
+async function loadSellers() {
+  const seq = (loads.sellers = (loads.sellers || 0) + 1);
+  const stops = [showAfter(200, () => $('sellersKpis').replaceChildren(...kpiSkeleton(4))), skeletonRows($('sellersRows'), 5, 3)];
+  const stop = () => stops.forEach((f) => f());
+  let r;
+  try { r = await call('/sellers?' + qs(sellersQuery())); } catch (err) {
+    stop();
+    if (seq === loads.sellers) stateBox($('sellersError'), err, () => loadSellers());
+    return;
+  }
+  stop();
+  if (seq !== loads.sellers) return;
+  stateBox($('sellersError'));
+  sel.from.value = r.from;
+  sel.to.value = r.to;
+  const s = r.totals;
+  const k = (label, v, sub) => kpi({ label: t(label), value: short(v), suffix: t('common.som'), exact: money(v), sub });
+  $('sellersKpis').replaceChildren(kpi({ label: t('adm.sellers.orders'), value: String(s.orders) }), k('adm.sellers.sum', s.sum),
+    kpi({ label: t('adm.sellers.returns'), value: String(s.returns), sub: s.refunded ? money(s.refunded) : null }), k('adm.sellers.commission', s.commission));
+  $('sellersNone').hidden = !r.no_seller.orders;
+  $('sellersNone').replaceChildren(icon('info'), el('span', { textContent: t('adm.sellers.none_note', { n: r.no_seller.orders, sum: money(r.no_seller.sum) }) }));
+  if (!r.sellers.length) return emptyRow($('sellersRows'), 5, { ic: 'user', title: t('adm.sellers.empty'), text: t('adm.sellers.empty_text') });
+  $('sellersRows').replaceChildren(...r.sellers.map((x) => el('tr', {},
+    el('td', {}, el('span', { className: 'cell-email', textContent: x.email ?? `#${x.seller_id}` }), x.disabled && el('span', { className: 'badge off', textContent: t('adm.team.disabled') }),
+      el('div', { className: 'sizes', textContent: [x.role && roleName(x.role), x.percent != null && t('adm.sellers.pct', { n: x.percent }), withStoreName(x.store_id)].filter(Boolean).join(' · ') }),
+      el('div', { className: 'sizes show-sm', textContent: [money(x.sum), x.returns && t('adm.sellers.returned_n', { n: x.returns })].filter(Boolean).join(' · ') })),
+    el('td', { className: 'num', textContent: x.orders }),
+    el('td', { className: 'num hide-sm', textContent: som(x.sum) }),
+    el('td', { className: 'num hide-sm' }, el('span', { textContent: x.returns }), x.refunded > 0 && el('div', { className: 'sizes', textContent: `−${som(x.refunded)}` })),
+    el('td', { className: `num${x.commission < 0 ? ' neg' : ''}` }, el('strong', { textContent: signed(x.commission) })))));
+}
+const withStoreName = (id) => (showStore() && id ? stores.find((x) => x.id === id)?.name : null);
+
 // ---------- Foyda (task 49): profit and margin by day, category and product, what discounts cost, stock at cost and
 // the lines sold below cost. Sales of products without a cost are shown apart, never counted as profit.
 
@@ -1743,7 +1784,7 @@ paf.onsubmit = async (e) => {
 };
 
 // Store profile. A super-admin picks the store here (defaults to the sidebar's); everyone else has one.
-const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id', 'bundle_percent', 'tryon_daily_limit'];
+const STORE_FIELDS = ['name', 'city', 'address', 'lat', 'lon', 'opens_at', 'closes_at', 'delivery_fee', 'free_delivery_threshold', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id', 'bundle_percent', 'tryon_daily_limit', 'commission_percent'];
 const sf = $('storeForm');
 // Task 35: one row per possible term (the server's TERM_MONTHS): offered or not, and its markup percent.
 const TERM_MONTHS = [3, 6, 9, 12, 18, 24];
@@ -1819,7 +1860,7 @@ sf.onsubmit = async (e) => {
     opens_at: v('opens_at') || null, closes_at: v('closes_at') || null,
     delivery_fee: Number(v('delivery_fee')), free_delivery_threshold: v('free_delivery_threshold') ? Number(v('free_delivery_threshold')) : null,
     telegram_chat_id: v('telegram_chat_id') || null, report_chat_id: v('report_chat_id') || null, low_stock_threshold: Number(v('low_stock_threshold')),
-    bundle_percent: Number(v('bundle_percent')),
+    bundle_percent: Number(v('bundle_percent')), commission_percent: Number(v('commission_percent')),
     instalment_on: sf.instalment_on.checked,
     instalment_terms: TERM_MONTHS.filter((n) => sf[`inst_${n}`].checked).map((n) => ({ months: n, percent: Number(v(`inst_pct_${n}`)) })),
     tryon_on: sf.tryon_on.checked, tryon_daily_limit: Number(v('tryon_daily_limit')),
@@ -1852,10 +1893,11 @@ async function loadTeam() {
     stateBox($('teamError'));
     $('teamRows').replaceChildren(...r.members.map((m) => el('tr', {},
       el('td', {}, el('span', { className: 'cell-email', textContent: m.email }), m.id === me.id && el('span', { className: 'badge', textContent: t('adm.team.you') }),
-        el('div', { className: 'sizes show-sm', textContent: [roleName(m.role), sup && m.store_name].filter(Boolean).join(' · ') })),
+        el('div', { className: 'sizes show-sm', textContent: [roleName(m.role), sup && m.store_name, m.disabled && t('adm.team.disabled')].filter(Boolean).join(' · ') })),
       el('td', { className: 'hide-sm', textContent: roleName(m.role) }),
       sup ? el('td', { className: 'hide-sm', textContent: m.store_name || t('adm.all_stores') }) : null,
-      el('td', {}, el('span', { className: `badge ${m.disabled ? 'off' : 'ok'}`, textContent: t(m.disabled ? 'adm.team.disabled' : 'adm.team.active') })),
+      el('td', { className: 'num' }, commissionCell(m)),
+      el('td', { className: 'hide-sm' }, el('span', { className: `badge ${m.disabled ? 'off' : 'ok'}`, textContent: t(m.disabled ? 'adm.team.disabled' : 'adm.team.active') })), // phones: in the first cell
       el('td', { className: 'row-actions' }, m.can_manage && el('button', { type: 'button', className: m.disabled ? '' : 'danger ghost', onclick: (e) => setDisabled(m, !m.disabled, e.currentTarget) },
         t(m.disabled ? 'adm.team.enable' : 'adm.team.disable'))))));
     $('inviteList').replaceChildren(...(r.invites.length ? r.invites.map((i) => el('li', { className: 'card invite-row' },
@@ -1867,6 +1909,26 @@ async function loadTeam() {
     stop();
     if (seq === loads.team) { $('teamRows').replaceChildren(); stateBox($('teamError'), err, () => loadTeam()); }
   }
+}
+// Task 50: a member's personal commission percent, edited in place (empty = the store's percent, shown as the hint).
+function commissionCell(m) {
+  const store = m.store_percent ?? 0;
+  if (!m.can_manage || m.role === 'mall') return el('span', { textContent: `${m.commission_percent ?? store}%` });
+  const input = el('input', { type: 'number', min: 0, max: 50, step: 1, inputMode: 'numeric', className: 'pct-input', value: m.commission_percent ?? '',
+    placeholder: String(store), ariaLabel: t('adm.team.commission_of', { email: m.email, n: store }), title: t('adm.team.commission_hint', { n: store }) });
+  input.onchange = async () => {
+    if (!input.reportValidity()) return;
+    const v = input.value.trim();
+    try {
+      const r = await call(`/team/${m.id}`, { method: 'PATCH', body: { commission_percent: v === '' ? null : Number(v) } });
+      m.commission_percent = r.commission_percent;
+      toast(t('adm.team.commission_done', { email: m.email, n: r.commission_percent ?? store }), { tone: 'ok' });
+    } catch (err) {
+      input.value = m.commission_percent ?? '';
+      toast(err.message, { tone: 'danger' });
+    }
+  };
+  return input;
 }
 async function setDisabled(m, disabled, btn) {
   if (disabled && !(await confirmDialog({ title: t('adm.team.disable_q', { email: m.email }), text: t('adm.team.disable_text'), ok: t('adm.team.disable'), danger: true }))) return btn.focus();
@@ -2213,7 +2275,7 @@ const AUDIT_FIELDS = {
   delivery_fee: 'field.delivery_fee', free_delivery_threshold: 'field.free_threshold', telegram_chat_id: 'field.telegram_chat', report_chat_id: 'field.report_chat',
   sku: 'field.sku', barcode: 'field.barcode', low_stock_threshold: 'field.low_stock', prefix: 'adm.sync.key',
   email: 'field.email', role: 'field.role', disabled: 'adm.team.status',
-  bundle_percent: 'field.bundle_percent', instalment_on: 'adm.set.instalment_on', tryon_on: 'adm.set.tryon_on', tryon_daily_limit: 'field.tryon_limit', instalment_terms: 'field.instalment_terms', store_id: 'common.store', kind: 'field.promo_kind', value: 'field.promo_value', min_order: 'field.promo_min',
+  commission_percent: 'field.commission_percent', bundle_percent: 'field.bundle_percent', instalment_on: 'adm.set.instalment_on', tryon_on: 'adm.set.tryon_on', tryon_daily_limit: 'field.tryon_limit', instalment_terms: 'field.instalment_terms', store_id: 'common.store', kind: 'field.promo_kind', value: 'field.promo_value', min_order: 'field.promo_min',
   description: 'field.description', description_ru: 'field.description_ru', details: 'field.details', size_kind: 'field.size_kind', sizes: 'field.cat_sizes', audience: 'field.audience',
   hidden: 'adm.cats.hide', sort: 'adm.cats.order',
   title: 'field.offer_title', title_ru: 'field.offer_title_ru', body: 'field.offer_body', body_ru: 'field.offer_body_ru', reject_reason: 'field.offer_reason', // task 43

@@ -28,6 +28,7 @@ import { mayDo, FEATURES } from '../plans.js';
 import { reviewRoutes, report } from '../reviews.js';
 import { moved } from '../movements.js';
 import { stockRoutes } from './stock.js';
+import { sellerRoutes } from './sellers.js';
 import { profitRoutes } from './profit.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
@@ -200,7 +201,7 @@ const IMAGE_TYPES = [
   ['webp', (b) => b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP'],
 ];
 // What the staff role may call (task 28): its own account, the floor queue, fitting accept/done and order steps.
-export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/staff$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/orders\/\d+\/status$/,
+export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/me\/sales$/, /^GET \/staff$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/orders\/\d+\/status$/,
   // Task 47: receiving and counting. Confirming a count's corrections is not here: a manager or owner does that.
   /^GET \/stock\/(catalog|sessions)$/, /^GET \/stock\/sessions\/\d+$/, /^POST \/stock\/(sessions|scans)$/, /^POST \/stock\/sessions\/\d+\/close$/];
 // What the mall role may call (task 37): its own account and its mall (profile, logo, QR, the shops' directory entries,
@@ -723,7 +724,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
     if (!ORDER_STATUSES.includes(to)) throw fail(400, 'err.invalid', { field: 'field.status' });
     // Staff move orders forward only: a cancel means a refund, which stays with a manager.
     if (req.admin.role === 'staff' && to === 'cancelled') throw fail(403, 'err.forbidden');
-    if (!(await orderStep(req, o, 'order.status', (trx) => changeStatus(trx, o.id, to)))) {
+    if (!(await orderStep(req, o, 'order.status', (trx) => changeStatus(trx, o.id, to, req.admin.id)))) {
       throw fail(409, o.payment_status === 'pending' && to !== 'cancelled' ? 'err.pay_first' : 'err.status_conflict');
     }
     const now = await db('orders').where({ id: o.id }).first();
@@ -731,7 +732,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
   });
   r.post('/orders/:id/pay', async (req, res) => {
     const o = await findOrder(req);
-    if (!(await orderStep(req, o, 'order.pay', (trx) => markPaid(trx, o.id)))) {
+    if (!(await orderStep(req, o, 'order.pay', (trx) => markPaid(trx, o.id, Date.now(), req.admin.id)))) {
       const now = await db('orders').where({ id: o.id }).first('payment_status');
       throw fail(409, now.payment_status === 'paid' ? 'err.already_paid' : 'err.order_expired');
     }
@@ -869,6 +870,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
   reviewRoutes(r, db); // task 46
   stockRoutes(r, db, { findProduct }); // task 47
   profitRoutes(r, db); // task 49
+  sellerRoutes(r, db); // task 50
 
   // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.
   const inScope = (req, q, col = 'store_id') => {

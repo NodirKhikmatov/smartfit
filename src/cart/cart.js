@@ -131,13 +131,17 @@ export function nextStatuses(o) {
 }
 
 // Each step is a conditional UPDATE on the status read here, so two staff clicking at once can't both move it.
-export function changeStatus(db, orderId, to) {
+// Task 50: `who` = the team member making the step; the one who hands it over becomes its seller if it has none yet.
+export function changeStatus(db, orderId, to, who = null) {
   return db.transaction(async (trx) => {
     const o = await trx('orders').where({ id: orderId }).first();
     if (!nextStatuses(o).includes(to)) return false;
     if (to === 'cancelled') return o.payment_status === 'pending' ? cancelPending(trx, o.id) : cancelPaid(trx, o.id);
     if (!(await trx('orders').where({ id: o.id, status: o.status, payment_status: 'paid' }).update({ status: to, updated_at: trx.fn.now() }))) return false;
-    if (to === 'delivered') await earnPoints(trx, o.id); // task 34: only the step that moved it here earns
+    if (to === 'delivered') {
+      await earnPoints(trx, o.id); // task 34: only the step that moved it here earns
+      await setSeller(trx, o.id, who);
+    }
     return true;
   });
 }
@@ -148,12 +152,34 @@ export function changeStatus(db, orderId, to) {
 export const freezeCost = (trx, orderId) => trx('order_items').where({ order_id: orderId })
   .update({ unit_cost: trx.raw('(select p.cost from products p where p.id = order_items.product_id)') });
 
-export async function markPaid(db, orderId, now = Date.now()) {
+// Task 50: an order's seller, set once and never overwritten. The one who served its fitting-room request (same store,
+// same recommendation; who accepted it, else who closed it) comes first, then `who` (the cashier, or whoever hands it
+// over). Only a team member of the order's organisation (owner, manager, staff) can be one: a super-admin never is.
+// The percent in force now (personal, else the store's) is frozen on the order with it.
+export const SELLER_ROLES = ['owner', 'manager', 'staff'];
+export async function setSeller(trx, orderId, who = null, now = Date.now()) {
+  const o = await trx('orders').where({ id: orderId }).first('store_id', 'recommendation_id', 'seller_id');
+  if (o.seller_id != null) return;
+  const fit = o.recommendation_id && await trx('fitting_requests').where({ store_id: o.store_id, recommendation_id: o.recommendation_id })
+    .where((q) => q.whereNotNull('accepted_by').orWhereNotNull('done_by')).orderBy('id', 'desc').first('accepted_by', 'done_by');
+  for (const id of [fit?.accepted_by, fit?.done_by, who]) {
+    if (id == null) continue;
+    const a = await trx('admins as a').join('stores as s', 's.organization_id', 'a.organization_id').where({ 'a.id': id, 's.id': o.store_id })
+      .whereIn('a.role', SELLER_ROLES).first('a.commission_percent', 's.commission_percent as store_percent');
+    if (!a) continue;
+    await trx('orders').where({ id: orderId }).whereNull('seller_id').update({ seller_id: id, seller_at: iso(now), seller_percent: a.commission_percent ?? a.store_percent });
+    return;
+  }
+}
+
+// `who` = the team member taking the money at the cashier (Click/Payme pass none: an online order gets its seller at hand-over).
+export async function markPaid(db, orderId, now = Date.now(), who = null) {
   return db.transaction(async (trx) => {
     const n = await trx('orders').where({ id: orderId, payment_status: 'pending' }).where('expires_at', '>', iso(now))
       .update({ payment_status: 'paid', paid_at: iso(now), expires_at: null, updated_at: trx.fn.now() });
     if (!n) return false;
     await freezeCost(trx, orderId);
+    if (who != null) await setSeller(trx, orderId, who, now);
     for (const i of await trx('order_items').where({ order_id: orderId })) {
       await trx('product_stock').where({ product_id: i.product_id, size: i.size })
         .update({ quantity: trx.raw('quantity - ?', [i.quantity]), reserved: trx.raw('reserved - ?', [i.quantity]) });

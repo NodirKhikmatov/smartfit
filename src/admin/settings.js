@@ -77,9 +77,10 @@ export async function createInvite(req, q, { email, role, storeId, orgId, mallId
   return { id, email, role, store_id: storeId, organization_id: orgId, ...(mallId && { mall_id: mallId }), expires_at: iso(expires), url: `${publicBase(req)}/admin/#/invite?token=${token}` };
 }
 
+export const COMMISSION_MAX = 50; // task 50: a seller's commission in percent, store-wide or personal
 // Store profile as the settings form edits it.
 const STORE_COLS = ['id', 'name', 'city', 'address', 'lat', 'lon', 'delivery_fee', 'free_delivery_threshold', 'opens_at', 'closes_at', 'telegram_chat_id', 'low_stock_threshold', 'report_chat_id', 'bundle_percent',
-  'instalment_on', 'instalment_terms', 'tryon_on', 'tryon_daily_limit'];
+  'instalment_on', 'instalment_terms', 'tryon_on', 'tryon_daily_limit', 'commission_percent'];
 // Task 35: the terms are JSON in the DB and an array everywhere else.
 const fromRow = (s) => s && { ...s, instalment_on: Boolean(s.instalment_on), instalment_terms: parseJson(s.instalment_terms, []), tryon_on: Boolean(s.tryon_on) };
 const toRow = (s) => ({ ...s, instalment_terms: JSON.stringify(s.instalment_terms) });
@@ -118,6 +119,7 @@ function validStore(b) {
     instalment_terms: validTerms(b.instalment_terms),
     tryon_on: b.tryon_on ?? false, // task 41: AI try-on (works only with the provider's key in .env)
     tryon_daily_limit: int(b.tryon_daily_limit ?? 30, 1, 1000, 'field.tryon_limit'), // paid pictures per day
+    commission_percent: int(b.commission_percent ?? 0, 0, COMMISSION_MAX, 'field.commission_percent'), // task 50: sellers' commission, 0 = off
   };
   if (typeof s.tryon_on !== 'boolean') throw fail(400, 'err.invalid', { field: 'field.tryon_on' });
   if (typeof s.instalment_on !== 'boolean' || (s.instalment_on && !s.instalment_terms.length)) throw fail(400, 'err.invalid', { field: 'field.instalment_terms' });
@@ -207,7 +209,8 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore, tryon = fals
   r.get('/team', async (req, res) => {
     ownerOrSuper(req.admin);
     const members = await teamScope(req, db('admins as a').leftJoin('stores as s', 's.id', 'a.store_id').leftJoin('organizations as g', 'g.id', 'a.organization_id').orderBy('a.id')
-      .select('a.id', 'a.email', 'a.role', 'a.store_id', 'a.organization_id', 's.name as store_name', 'g.name as org_name', 'a.disabled_at', 'a.created_at'), 'a');
+      .select('a.id', 'a.email', 'a.role', 'a.store_id', 'a.organization_id', 's.name as store_name', 'g.name as org_name', 'a.disabled_at', 'a.created_at',
+        'a.commission_percent', 's.commission_percent as store_percent'), 'a'); // task 50
     const invites = await teamScope(req, db('admin_invites as i').leftJoin('stores as s', 's.id', 'i.store_id').join('organizations as g', 'g.id', 'i.organization_id')
       .whereNull('i.used_at').where('i.expires_at', '>', iso(Date.now())).orderBy('i.id', 'desc')
       .select('i.id', 'i.email', 'i.role', 'i.store_id', 's.name as store_name', 'g.name as org_name', 'i.expires_at', 'i.created_at'), 'i');
@@ -252,10 +255,24 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore, tryon = fals
   });
 
   // { disabled: true|false }. Disabling ends the member's sessions at once and kills the invite links they sent.
+  // Task 50: or { commission_percent: 0…50 | null } = the member's personal percent (null = the store's).
   r.patch('/team/:id', async (req, res) => {
     ownerOrSuper(req.admin);
     const target = await db('admins').where({ id: Number(req.params.id) || 0 }).first();
     if (!target || !manages(req.admin, target)) throw fail(404, 'err.not_found');
+    if (req.body && Object.hasOwn(req.body, 'commission_percent')) {
+      if (!['owner', ...STORE_ROLES].includes(target.role)) throw fail(400, 'err.invalid', { field: 'field.commission_percent' }); // a mall admin never sells
+      const v = req.body.commission_percent;
+      const pct = v === null || v === '' ? null : int(v, 0, COMMISSION_MAX, 'field.commission_percent');
+      if (pct !== target.commission_percent) {
+        await db.transaction(async (trx) => {
+          await trx('admins').where({ id: target.id }).update({ commission_percent: pct, updated_at: trx.fn.now() });
+          await audit(trx, req.admin, { action: 'team.commission', storeId: target.store_id, entityId: target.id, label: target.email,
+            before: { commission_percent: target.commission_percent }, after: { commission_percent: pct } });
+        });
+      }
+      return res.json({ id: target.id, email: target.email, role: target.role, store_id: target.store_id, disabled: target.disabled_at != null, commission_percent: pct });
+    }
     const disabled = req.body?.disabled;
     if (typeof disabled !== 'boolean') throw fail(400, 'err.invalid', { field: 'field.status' });
     if (!disabled && target.disabled_at) await mayDo(db, target.organization_id, 'team', { now: now(), admin: req.admin }); // task 45: back in = one more

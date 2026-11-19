@@ -327,6 +327,7 @@ test('migration 039: down drops the cost columns, up brings them back', async ()
   const m = testDb();
   try {
     await m.migrate.latest();
+    await m.migrate.down(); // 040
     await m.migrate.down();
     assert.equal(await m.schema.hasColumn('products', 'cost'), false);
     assert.equal(await m.schema.hasColumn('order_items', 'unit_cost'), false);
