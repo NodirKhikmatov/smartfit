@@ -33,14 +33,16 @@ export function orgRoutes(r, db, { now = Date.now } = {}) {
   r.get('/orgs', async (req, res) => {
     superOnly(req.admin);
     const count = (table, extra = (q) => q) => extra(db(table).select('organization_id').count({ n: '*' }).groupBy('organization_id'));
-    const [orgs, stores, admins, invites] = await Promise.all([
+    const [orgs, stores, admins, invites, owners] = await Promise.all([
       db('organizations').orderBy('id', 'desc').select('id', 'name', 'created_at', 'plan', 'trial_until', 'paid_until', 'plan_note'),
       count('stores'), count('admins'),
       count('admin_invites', (q) => q.whereNull('used_at').where('expires_at', '>', new Date().toISOString())),
+      db('admin_invites').where({ role: 'owner' }).whereNotNull('organization_id').orderBy('id', 'desc').select('organization_id', 'email'),
     ]);
     const n = (rows, id) => Number(rows.find((x) => x.organization_id === id)?.n ?? 0);
     const t = now();
     res.json(orgs.map(({ plan, trial_until, paid_until, plan_note, ...o }) => ({ ...o, created_at: stamp(o.created_at), stores: n(stores, o.id), admins: n(admins, o.id), invites: n(invites, o.id),
+      owner_email: owners.find((x) => x.organization_id === o.id)?.email ?? null, // the last owner invite: prefills "Yangi havola"
       ...planOut(planState({ plan, trial_until, paid_until }, t)), note: plan_note ?? null })));
   });
 

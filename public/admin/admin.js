@@ -2163,7 +2163,8 @@ async function loadOrgs() {
       el('td', {}, el('div', { textContent: t(PLAN_NAME[o.plan]) }), stateBadge(o.state)),
       el('td', { className: 'hide-sm num', textContent: o.ends ? dayText(o.ends) : t('adm.plan.no_end') }),
       num(o.stores), num(o.admins, 'hide-sm'), num(o.invites, 'hide-sm'), el('td', { className: 'hide-sm', textContent: fmt.dateTime(o.created_at) }),
-      el('td', { className: 'row-actions' }, el('button', { type: 'button', onclick: (e) => openPlan(o, e.currentTarget) }, t('adm.orgs.plan_edit'))))));
+      el('td', { className: 'row-actions' }, el('button', { type: 'button', onclick: (e) => openPlan(o, e.currentTarget) }, t('adm.orgs.plan_edit')),
+        el('button', { type: 'button', onclick: (e) => openOrg('link', e.currentTarget, null, o) }, t('adm.orgs.relink'))))));
     // Task 45: ending soon = read-only, in grace, or the last paid / trial day within 14 days; the soonest first.
     const soon = addDaysKey(14);
     const ending = orgs.filter((o) => o.ends && (o.state === 'grace' || o.state === 'readonly' || o.ends <= soon)).sort((a, b) => a.ends.localeCompare(b.ends));
@@ -2237,15 +2238,21 @@ function orgStep(done) {
 }
 // Task 37: the same dialog invites a shop into the mall for a mall admin (POST /mall/shops).
 // Task 45: and turns a demo request into its organisation and owner invite (kind 'demo', the request's company filled in).
-let orgFor = 'orgs', orgDemo = null;
-function openOrg(kind, opener, demo = null) {
+// Kind 'link': super gives an existing organisation's owner a fresh link (the first one lost or expired).
+let orgFor = 'orgs', orgDemo = null, orgRelink = null;
+function openOrg(kind, opener, demo = null, org = null) {
   orgFor = kind;
   orgDemo = demo;
+  orgRelink = org;
   of2.reset();
   orgStep(false);
   $('orgDlgError').textContent = '';
-  $('orgTitle').textContent = t(kind === 'shops' ? 'adm.mall.invite' : kind === 'demo' ? 'adm.demo.create' : 'adm.orgs.add');
-  $('orgAsk').querySelector('p').textContent = t(kind === 'shops' ? 'adm.mall.invite_text' : kind === 'demo' ? 'adm.demo.create_text' : 'adm.orgs.add_text');
+  $('orgTitle').textContent = kind === 'link' ? t('adm.orgs.relink_title', { name: org.name }) : t(kind === 'shops' ? 'adm.mall.invite' : kind === 'demo' ? 'adm.demo.create' : 'adm.orgs.add');
+  $('orgAsk').querySelector('p').textContent = t(kind === 'shops' ? 'adm.mall.invite_text' : kind === 'demo' ? 'adm.demo.create_text' : kind === 'link' ? 'adm.orgs.relink_text' : 'adm.orgs.add_text');
+  of2.name.parentElement.hidden = kind === 'link';
+  of2.name.required = kind !== 'link';
+  $('orgCreate').textContent = t(kind === 'link' ? 'adm.orgs.relink' : 'adm.orgs.create');
+  if (org) of2.owner_email.value = org.owner_email ?? '';
   if (demo) of2.name.value = demo.company;
   of2.name.previousElementSibling.textContent = t(kind === 'shops' ? 'field.shop_name' : 'field.org_name');
   $('orgDlg').opener = opener;
@@ -2263,7 +2270,9 @@ of2.onsubmit = async (e) => {
   e.preventDefault();
   $('orgDlgError').textContent = '';
   try {
-    const r = await call(orgFor === 'shops' ? '/mall/shops' : orgFor === 'demo' ? `/demo-requests/${orgDemo.id}/org` : '/orgs', { method: 'POST', body: { name: of2.name.value.trim(), owner_email: of2.owner_email.value.trim() } });
+    const r = orgFor === 'link'
+      ? { invite: await call('/team/invites', { method: 'POST', body: { email: of2.owner_email.value.trim(), role: 'owner', organization_id: orgRelink.id } }) }
+      : await call(orgFor === 'shops' ? '/mall/shops' : orgFor === 'demo' ? `/demo-requests/${orgDemo.id}/org` : '/orgs', { method: 'POST', body: { name: of2.name.value.trim(), owner_email: of2.owner_email.value.trim() } });
     $('orgUrl').value = r.invite.url;
     $('orgExpiry').textContent = t('adm.team.link_expiry', { at: fmt.dateTime(r.invite.expires_at) });
     orgStep(true);

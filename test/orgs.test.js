@@ -568,6 +568,24 @@ test('onboarding: super-admin creates an organisation and owner invite; the wiza
   assert.equal((await admin('GET', `/stores/${a1}`, undefined, owner)).status, 404);
 });
 
+// "Yangi havola": the owner's first link is lost or expired. Super gets a fresh one (the old link dies); an owner can't.
+test('super gives an organisation owner a fresh invite link; an owner cannot', async () => {
+  const org = (await admin('POST', '/orgs', { name: 'Relink Moda', owner_email: 'relink@moda.uz' }, superToken)).body;
+  const first = tokenOf(org.invite.url);
+  assert.equal((await admin('GET', '/orgs', undefined, superToken)).body.find((o) => o.id === org.id).owner_email, 'relink@moda.uz', 'prefills the dialog');
+  const body = { email: 'relink@moda.uz', role: 'owner', organization_id: org.id };
+  const r = await admin('POST', '/team/invites', body, ownerA);
+  assert.equal(r.status, 403, 'an owner never invites owners');
+  const fresh = await admin('POST', '/team/invites', body, superToken);
+  assert.equal(fresh.status, 201);
+  assert.deepEqual([fresh.body.role, fresh.body.organization_id, fresh.body.store_id], ['owner', org.id, null]);
+  assert.equal((await admin('POST', '/invite/check', { token: first })).status, 410, 'the old link is dead');
+  const acc = await admin('POST', '/invite/accept', { token: tokenOf(fresh.body.url), password: 'relink-pass-1' });
+  assert.equal(acc.status, 201);
+  assert.deepEqual([acc.body.admin.role, acc.body.admin.organization_id], ['owner', org.id]);
+  assert.equal((await admin('POST', '/team/invites', body, superToken)).status, 409, 'once joined, the email is taken');
+});
+
 test('landing page: served at / under the CSP, its outfit card comes from the real engine', async () => {
   const r = await fetch(`${base}/`);
   assert.equal(r.status, 200);
