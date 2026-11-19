@@ -523,7 +523,7 @@ Notes: **Model (migration `037_stock`):** `stock_movements` (store, product, siz
 
 # Phase 8 — a shop's money and control, and numbers for the mall (see `docs/AUDIT.md` › Phase 8)
 
-Do them in order. Each task keeps the project rules (CLAUDE.md) and the scoping of tasks 22, 36 and 37 (`canSee` / `inStores`, mall role = summary numbers only).
+Do them in order (task 55 was added on 2026-11-20 at the user's request). Each task keeps the project rules (CLAUDE.md) and the scoping of tasks 22, 36 and 37 (`canSee` / `inStores`, mall role = summary numbers only).
 
 ## [x] 48. A shop's own size chart
 One built-in table decides every size today (plus the per-product fit offset of task 23). Brands differ: one shop's M is another shop's L.
@@ -594,3 +594,13 @@ Done when:
 Done when:
 - Tests: change and reset (one-time, expiry, the old sessions end); TOTP with a time window and no code reuse; recovery codes used once; the organisation rule; revoked tokens are refused at once; the lock; nothing secret in logs or responses; who may reset whom.
 - Browser check: each flow in admin and the staff app login at 375, uz/ru.
+
+## [ ] 55. The landing page tells what Smart Fit is today
+The page at `/` was written in task 22 for one shop with a kiosk. Since then Smart Fit became a product for shopping malls and their shops, and none of that is on the page.
+- Rewrite the landing page (`public/landing`, `src/landing.js`, its i18n keys) around the two buyers: a **shopping mall** (one kiosk and QR for the whole mall, shop directory and search, a cart across shops, the map with floors, offers on the idle screen, an outfit from the whole mall, mall analytics) and a **shop** (outfits only from stock, size from a photo or a partial photo or without one, children's sizes, its own categories and size chart, item page and reviews, back-in-stock alerts, cashback points, instalments, AI try-on, staff app with receiving and stocktake, cost and profit, sellers and commission, day closing, transfers, plans and a trial).
+- Keep what works: the live outfit fragment from the real engine, the demo request form, the kiosk and phone demo links. Add a mall demo link (`/m?mall=…` of the seed) and show plans with their limits (prices only if `src/plans.js` has them; otherwise "narxni so'rang").
+- Say only what the code does today. Features off without a key (Telegram bot, Click/Payme, Claude, FASHN) are described as "ulanadi" (can be connected), not as working out of the box.
+- Same design system as the rest of the app, uz and ru, CSP (no inline script or style), fast on a phone.
+Done when:
+- Tests: the page renders in uz and ru; every link on it resolves; no feature is named that has no route; the demo form still works and keeps its rate limit.
+- Browser check at 1280 and 375 in uz and ru, every link clicked.
