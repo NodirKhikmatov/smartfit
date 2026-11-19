@@ -233,6 +233,13 @@ test('route walk: a mall admin reaches only their own mall; every shop data rout
       assert.equal((await db('malls').where({ id: mallB }).first()).slide_seconds, 8);
     },
     // Task 44: the map. Mall A's admin reaches only mall A's floors, spots and shops; mall B's are 404 both ways.
+    // Task 53: analytics of their own mall only (mall-stats.test.js has the numbers).
+    'GET /mall/stats': async () => {
+      await db('mall_stats').insert({ mall_id: mallB, day: new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10), hour: 1, kind: 'visit', channel: 'phone', word: '', n: 9 });
+      assert.equal((await admin('GET', '/mall/stats', undefined, mallTokenA)).body.totals.visits, 0);
+      assert.equal((await admin('GET', '/mall/stats', undefined, mallTokenB)).body.totals.visits, 9);
+    },
+    'GET /mall/stats/export': async () => assert.equal((await admin('GET', '/mall/stats/export', undefined, mallTokenA)).status, 200),
     'GET /mall/map': async () => {
       const r = (await admin('GET', '/mall/map', undefined, mallTokenA)).body;
       assert.ok(r.floors.every((f) => f.id !== floorB) && r.spots.every((k) => k.id !== spotB) && r.shops.every((s) => s.id !== s3));

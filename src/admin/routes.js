@@ -18,6 +18,7 @@ import { kioskStatus } from '../kiosk.js';
 import { publicTeamRoutes, settingsRoutes, ROLES } from './settings.js';
 import { orgRoutes } from './orgs.js';
 import { mallRoutes } from './malls.js';
+import { mallStatsRoutes } from '../mall-stats.js';
 import { pointsRoutes } from './points.js';
 import { returnPoints } from '../cart/points.js';
 import { promoRoutes } from './promos.js';
@@ -213,7 +214,8 @@ export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/me\/
 export const MALL_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^(GET|PATCH) \/mall$/, /^(POST|DELETE) \/mall\/logo$/, /^GET \/mall\/qr$/,
   /^POST \/mall\/shops$/, /^PATCH \/mall\/stores\/\d+$/, /^(POST|DELETE) \/mall\/stores\/\d+\/logo$/,
   /^GET \/mall\/offers$/, /^POST \/mall\/offers\/\d+\/(approve|reject)$/, /^PATCH \/mall\/slides$/, // task 43: what shops submitted to it
-  /^GET \/mall\/map$/, /^(POST|DELETE) \/mall\/floors\/\d+\/plan$/, /^POST \/mall\/spots$/, /^(PATCH|DELETE) \/mall\/spots\/\d+$/]; // task 44: the map
+  /^GET \/mall\/map$/, /^(POST|DELETE) \/mall\/floors\/\d+\/plan$/, /^POST \/mall\/spots$/, /^(PATCH|DELETE) \/mall\/spots\/\d+$/, // task 44: the map
+  /^GET \/mall\/stats(\/export)?$/]; // task 53: analytics
 // Task 45: what a read-only organisation may still write: its own password, and finishing orders already placed
 // (paid, handed over, cancelled, returned; a fitting request answered), so a customer who paid gets the goods.
 export const READONLY_ROUTES = [/^POST \/me\/password$/, /^POST \/orders\/\d+\/(status|pay|returns)$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/cash\/close$/];
@@ -880,6 +882,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
   categoryRoutes(r, db, { uploadDir }); // task 36
   sizeChartRoutes(r, db); // task 48
   mallRoutes(r, db, { uploadDir }); // task 37
+  mallStatsRoutes(r, db, { now }); // task 53
   offerRoutes(r, db, { uploadDir }); // task 43
   pointsRoutes(r, db, { resolveStore }); // task 34
   reviewRoutes(r, db); // task 46

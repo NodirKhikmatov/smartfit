@@ -310,6 +310,7 @@ test('migration 040: down drops the seller and commission columns, up brings the
   const m = testDb();
   try {
     await m.migrate.latest();
+    await m.migrate.down(); // 043
     await m.migrate.down(); // 042
     await m.migrate.down(); // 041
     await m.migrate.down(); // 040

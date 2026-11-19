@@ -340,6 +340,7 @@ test('demo seed: the demo item pages show an average, a fit summary and a shop a
     } finally {
       app.close();
     }
+    await m.migrate.down(); // 043
     await m.migrate.down(); // 042
     await m.migrate.down(); // 041
     await m.migrate.down(); // 040

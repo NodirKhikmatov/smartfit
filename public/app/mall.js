@@ -13,6 +13,7 @@ const SEARCH_MS = 350; // typing pause before the search runs
 
 const QR_SVG = /^<svg[\s>]/; // the status-page QR is built by our server from our own URL
 const OPEN_MS = 60_000; // task 44: the open / closed marks follow the clock while the screen stays up (a kiosk, all day)
+const WORD_MS = 2000; // task 53: a search word counts once it stays on screen this long (not every typed prefix)
 
 export function mallScreen({ mallId, api, kiosk, saved }) {
   let mall = null, found = null, seq = 0, timer = null, offers = []; // task 43: the mall's current approved offers
@@ -23,6 +24,33 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
   const filter = { floor: '', category: '' };
   let picked = Number(new URLSearchParams(location.search).get('pin')) || 0, openMarks = [], screen = '';
   const spot = spotOf();
+  // Task 53: counts for the mall admin's analytics. Nothing about the visitor or the device goes with them: the mall, what
+  // happened, kiosk or phone, and the shop or the search word. A visit counts once per browser session on a phone and
+  // once per customer on a kiosk (the first touch; the idle reset starts the next one).
+  const channel = kiosk ? 'kiosk' : 'phone', VISIT = `sfMallVisit${channel}${mallId}`;
+  let visited = false, wordTimer = null, lastWord = '';
+  const countMall = (kind, extra = {}) => fetch('/api/mall-events', { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mall_id: mallId, kind, channel, ...extra }) }).catch(() => {});
+  function countVisit() {
+    if (visited) return;
+    visited = true;
+    try {
+      if (sessionStorage.getItem(VISIT)) return;
+      sessionStorage.setItem(VISIT, '1');
+    } catch { /* storage off: counted once per page */ }
+    countMall('visit');
+  }
+  function forgetVisit() {
+    visited = false;
+    try { sessionStorage.removeItem(VISIT); } catch { /* storage off */ }
+  }
+  function countWord(q) {
+    clearTimeout(wordTimer);
+    if (q === lastWord || q.length > 60) return;
+    lastWord = q;
+    countMall('search', { word: q });
+  }
+  const countShop = (id) => countMall('shop', { store_id: id });
   const shopUrl = (storeId, item) => `${location.pathname}?store=${storeId}&mall=${mallId}${item ? `&item=${item}` : ''}`;
   const where = (s) => [s.floor && t('kiosk.mall.floor', { n: s.floor }), s.unit && t('kiosk.mall.unit', { n: s.unit })].filter(Boolean).join(' · ');
   const catName = (c) => (getLang() === 'ru' && c.name_ru) || c.name;
@@ -31,6 +59,9 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
 
   function show() {
     window.addEventListener('hashchange', route);
+    if (new URLSearchParams(location.search).get('idle') === '1') forgetVisit(); // a kiosk back from an idle shop: the next customer
+    if (kiosk) for (const type of ['pointerdown', 'keydown']) document.addEventListener(type, countVisit, true);
+    else countVisit();
     $('back').onclick = () => toDirectory();
     $('cartBtn').onclick = () => { location.hash = 'cart'; };
     $('mcForm').onsubmit = place;
@@ -44,6 +75,7 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
     };
     $('mallQ').oninput = () => {
       clearTimeout(timer);
+      clearTimeout(wordTimer);
       timer = setTimeout(search, SEARCH_MS);
     };
     $('mallSearch').onchange = (e) => e.target.name === 'audience' && search(); // task 40: adults' or children's items
@@ -300,7 +332,7 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
     openMarks.push([state, s]);
     markOpen(state, s);
     return el('li', { className: 'shop-item' },
-      el('a', { className: 'button store-link shop-link', href: shopUrl(s.id) }, logo(s.logo_url, 'store'),
+      el('a', { className: 'button store-link shop-link', href: shopUrl(s.id), onclick: () => countShop(s.id) }, logo(s.logo_url, 'store'),
         el('span', {}, el('strong', { textContent: s.name }), where(s) && el('span', { className: 'meta', textContent: where(s) }), state,
           s.categories.length ? el('span', { className: 'meta cats', textContent: s.categories.slice(0, 6).map(catName).join(' · ') }) : null),
         icon('chevron-right')),
@@ -350,6 +382,7 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
     $('mapCard').replaceChildren(...(sel ? [shopItem(sel, false)] : []));
   }
   function pick(s) {
+    countMall('pin', { store_id: s.id });
     picked = s.id;
     drawMap();
     $('mapPlan').querySelector('.pin.picked')?.focus();
@@ -370,6 +403,8 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
       if (mine !== seq) return;
       found = { q, items: r.items };
       drawFound();
+      clearTimeout(wordTimer);
+      wordTimer = setTimeout(() => countWord(q), WORD_MS);
     } catch (err) {
       if (mine !== seq) return;
       $('mallStatus').textContent = err.message;
@@ -383,7 +418,7 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
   function drawFound() {
     const { q, items } = found;
     $('mallStatus').textContent = items.length ? t('kiosk.mall.found', { n: items.length, q }) : t('kiosk.mall.nothing', { q });
-    $('mallResults').replaceChildren(...items.map((p) => el('a', { className: 'button tile', href: shopUrl(p.store_id, p.id) },
+    $('mallResults').replaceChildren(...items.map((p) => el('a', { className: 'button tile', href: shopUrl(p.store_id, p.id), onclick: () => { countWord(q); countShop(p.store_id); } },
       p.image_url ? el('img', { src: p.image_url, alt: '' }) : el('span', { className: 'ph' }, icon(p.category || 'hanger')),
       el('span', { className: 'name', textContent: productName(p) }), price(p), ratingLine(p.rating), // task 46: the catalogue's visible rating
       el('span', { className: 'meta', textContent: p.sizes.map((s) => (s === 'ONE' ? t('common.size_one') : s)).join(' ') }),
@@ -401,6 +436,9 @@ export function mallScreen({ mallId, api, kiosk, saved }) {
     setMallCart(null);
     toDirectory();
     clearTimeout(timer);
+    clearTimeout(wordTimer);
+    lastWord = '';
+    forgetVisit(); // the next customer's first touch is a new visit
     seq++;
     found = null;
     $('mallSearch').reset(); // the query and the adults/children choice

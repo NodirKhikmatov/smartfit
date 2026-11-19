@@ -224,7 +224,7 @@ async function show() {
   $('navOffers').hidden = !['owner', 'super'].includes(me.role) || !feat('offers'); // offers are the owner's, on a plan with them (task 45)
   planBanner();
   for (const li of $('nav').children) if (!li.id || li.id === 'navSettings') li.hidden = mallRole;
-  $('navMall').hidden = !mallRole;
+  $('navMall').hidden = $('navMallStats').hidden = !mallRole; // task 53: "Tahlil"
   $('userMenu').querySelector('a[href="#/settings"]').hidden = mallRole;
   document.querySelector('.side-inner > .wordmark').href = mallRole ? '#/mall' : '#/dashboard';
   if (!mallRole) await loadCats();
@@ -293,6 +293,7 @@ const PAGES = {
   orgs: { title: 'adm.route.orgs', load: loadOrgs },
   malls: { title: 'adm.route.malls', load: loadMalls },
   mall: { title: 'adm.route.mall', load: loadMall, poll: () => loadMall(true) },
+  mallstats: { title: 'adm.route.mallstats', load: loadMallStats }, // task 53
   welcome: { title: 'adm.route.welcome', load: loadWelcome },
 };
 const ACTIONS = {
@@ -308,6 +309,7 @@ const ACTIONS = {
   stats: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => exportStats() }, icon('download'))],
   sellers: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => download('/sellers/export?' + qs(sellersQuery()), 'sellers.csv') }, icon('download'))],
   transfers: [el('button', { type: 'button', className: 'primary', onclick: () => openTransfer(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.tr.new') }))],
+  mallstats: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => download('/mall/stats/export?' + qs(maQuery()), 'mall-stats.csv') }, icon('download'))], // task 53
   demand: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => download('/demand/export?' + qs(scoped({ days: demandDays() })), `talab-${demandDays()}d.csv`) }, icon('download'))],
 };
 
@@ -317,7 +319,7 @@ function render() {
   const welcome = me.role === 'owner' && !stores.length;
   const mallRole = me.role === 'mall';
   if ((welcome && !['welcome', 'settings'].includes(route.route)) || (route.route === 'welcome' && me.role !== 'owner') || (['orgs', 'malls'].includes(route.route) && me.role !== 'super')
-    || (['categories', 'offers'].includes(route.route) && !['owner', 'super'].includes(me.role)) || (route.route === 'sizes' && !['owner', 'manager', 'super'].includes(me.role)) || (route.route === 'offers' && !feat('offers')) || (mallRole !== (route.route === 'mall'))) {
+    || (['categories', 'offers'].includes(route.route) && !['owner', 'super'].includes(me.role)) || (route.route === 'sizes' && !['owner', 'manager', 'super'].includes(me.role)) || (route.route === 'offers' && !feat('offers')) || (mallRole !== ['mall', 'mallstats'].includes(route.route))) {
     route = parseHash(welcome ? '#/welcome' : mallRole ? '#/mall' : '#/dashboard');
     history.replaceState(null, '', buildHash(route.route));
   }
@@ -2982,7 +2984,7 @@ async function deleteMall(m) {
 // One dialog, four modes: create (super: profile + admin email → link), edit (super: profile + its stores),
 // invite (super: another admin link), self (mall admin: their profile + logo).
 const mf = $('mallForm');
-const MALL_PARTS = { create: ['profile', 'email'], edit: ['profile', 'stores'], invite: ['email'], self: ['profile', 'logo'] };
+const MALL_PARTS = { create: ['profile', 'email'], edit: ['profile', 'stores'], invite: ['email'], self: ['profile', 'digest', 'logo'] };
 function mallStep(done) {
   $('mallAsk').hidden = done;
   $('mallDone').hidden = !done;
@@ -3009,7 +3011,10 @@ function openMall(mode, m = null) {
       el('input', { type: 'checkbox', name: 'store', value: s.id, checked: m.stores.some((x) => x.id === s.id), disabled: elsewhere.has(s.id) }),
       el('span', { textContent: elsewhere.has(s.id) ? `${s.name} — ${elsewhere.get(s.id)}` : s.name }))));
   }
-  if (mode === 'self') showMallLogo(m.logo_url);
+  if (mode === 'self') {
+    showMallLogo(m.logo_url);
+    mf.report_chat_id.value = m.report_chat_id ?? ''; // task 53: the weekly digest
+  }
   $('mallDlg').showModal();
 }
 $('mallAddBtn').onclick = () => openMall('create');
@@ -3040,7 +3045,7 @@ mf.onsubmit = async (e) => {
       await call(`/malls/${editingMall.id}`, { method: 'PATCH', body: { ...profile, store_ids: ids } });
       loadMalls();
     } else {
-      await call('/mall', { method: 'PATCH', body: profile });
+      await call('/mall', { method: 'PATCH', body: { ...profile, report_chat_id: mf.report_chat_id.value.trim() || null } });
       loadMall();
     }
     $('mallDlg').close();
@@ -3457,3 +3462,75 @@ $('entryImgUpload').onclick = async () => {
   if (url) showEntryLogo(url);
 };
 $('entryImgRemove').onclick = async () => (await removeLogo($('entryImgError'), `/mall/stores/${editingEntry.id}/logo`)) && showEntryLogo(null);
+
+// ---------- Task 53: "Tahlil", the mall admin's analytics (#/mallstats?days=30 or ?from=&to=, &ch=kiosk|phone).
+// Counts only: visitors by day and hour, words searched and the ones no shop had, shop and map opens, offers, mall
+// outfits and mall orders, each against the previous period of the same length. Words and shop names are DB text.
+const MA_DAYS = ['7', '30', '90'];
+function maQuery() {
+  const p = route.params;
+  if (p.from || p.to) return { from: p.from, to: p.to };
+  return { days: MA_DAYS.includes(p.days) ? p.days : '7' };
+}
+let maSeq = 0;
+async function loadMallStats() {
+  const seq = ++maSeq;
+  const p = route.params, q = maQuery();
+  const ch = ['kiosk', 'phone'].includes(p.ch) ? p.ch : '';
+  seg($('maDays'), MA_DAYS.map((n) => [n, t('adm.stats.days', { n: Number(n) })]), q.days ?? '', (v) => setParams({ ch: p.ch, days: v === '7' ? '' : v }));
+  seg($('maChannel'), [['', t('adm.ma.all')], ['kiosk', t('adm.ma.kiosk')], ['phone', t('adm.ma.phone')]], ch, (v) => setParams({ ...p, ch: v }));
+  const stop = showAfter(200, () => $('maKpis').replaceChildren(...kpiSkeleton(6)));
+  let s;
+  try { s = await call('/mall/stats?' + qs(q)); } catch (err) {
+    stop();
+    if (seq === maSeq) stateBox($('maError'), err, () => loadMallStats());
+    return;
+  }
+  stop();
+  if (seq !== maSeq) return;
+  stateBox($('maError'));
+  const f = $('maFilters');
+  f.from.value = s.from;
+  f.to.value = s.to;
+  const dmy = (k) => k.split('-').reverse().join('.');
+  $('maRange').textContent = t('adm.ma.range', { from: dmy(s.from), to: dmy(s.to), pfrom: dmy(s.prev.from), pto: dmy(s.prev.to) });
+  const T = s.totals, P = s.prev_totals, n = (v) => fmt.num(v);
+  const k = (label, field, extra) => kpi({ label: t(label), value: n(T[field]), d: delta(T[field], P[field]), sub: [extra, t('adm.ma.prev_v', { v: n(P[field]) })].filter(Boolean).join(' · ') });
+  $('maKpis').replaceChildren(
+    k('adm.ma.visits', 'visits', t('adm.ma.split', { kiosk: n(T.kiosk_visits), phone: n(T.phone_visits) })),
+    k('adm.ma.searches', 'searches'), k('adm.ma.nothing', 'nothing'),
+    k('adm.ma.shop_opens', 'shop_opens'), k('adm.ma.pin_opens', 'pin_opens'),
+    k('adm.ma.offer_shown', 'offer_shown'), k('adm.ma.offer_tapped', 'offer_tapped'),
+    k('adm.ma.outfits', 'outfits', t('adm.ma.to_cart', { n: n(T.outfits_cart) })),
+    k('adm.ma.groups', 'groups'), k('adm.ma.orders', 'orders'));
+  const pick = (r) => (ch ? r[ch] : r.kiosk + r.phone);
+  const chart = (box, points, title) => {
+    if (!points.some((x) => x.value)) {
+      box.classList.remove('chart');
+      box.chartObserver?.disconnect();
+      return box.replaceChildren(emptyState({ ic: 'chart', title: t('adm.ma.empty'), text: t('adm.ma.empty_text') }));
+    }
+    lineChart(box, points, { label: title, format: (v) => t('adm.ma.visits_n', { n: v }), tick: short });
+  };
+  const hh = (h) => `${String(h).padStart(2, '0')}:00`;
+  chart($('maDayChart'), s.per_day.map((d) => ({ label: day(d.day), value: pick(d) })), t('adm.ma.per_day'));
+  chart($('maHourChart'), s.per_hour.map((h) => ({ label: hh(h.hour), value: pick(h) })), t('adm.ma.per_hour'));
+  const cells = (first, r) => el('tr', {}, el('td', { textContent: first }), el('td', { className: 'num', textContent: n(r.kiosk) }), el('td', { className: 'num', textContent: n(r.phone) }));
+  $('maDayRows').replaceChildren(...s.per_day.slice().reverse().map((d) => cells(d.day, d)));
+  $('maHourRows').replaceChildren(...s.per_hour.map((h) => cells(hh(h.hour), h)));
+  const rank = (box, rows, line, empty) => box.replaceChildren(...(rows.length ? rows.map((r) => el('li', {}, ...line(r)))
+    : [el('li', { className: 'li-empty' }, emptyState({ ic: 'search', title: t(empty) }))]));
+  const num = (v, sub) => el('span', { className: 'rank-num num' }, el('strong', { textContent: n(v) }), sub ? el('span', { className: 'muted', textContent: sub }) : null);
+  const word = (w) => [el('span', { className: 'rank-name' }, el('strong', { textContent: w.word })), num(w.n)];
+  rank($('maWords'), s.words, word, 'adm.ma.no_words');
+  rank($('maNothing'), s.nothing, word, 'adm.ma.no_nothing');
+  const shop = (x, v, sub) => [el('span', { className: 'rank-name' }, el('strong', { textContent: x.name }), placeOf(x) ? el('span', { className: 'muted', textContent: placeOf(x) }) : null), num(v, sub)];
+  rank($('maOpens'), s.shops.filter((x) => x.opens || x.pins).slice(0, 10), (x) => shop(x, x.opens, t('adm.ma.pins_n', { n: x.pins })), 'adm.ma.no_opens');
+  rank($('maOrders'), s.shops.filter((x) => x.orders).sort((a, b) => b.orders - a.orders || a.id - b.id).slice(0, 10), (x) => shop(x, x.orders), 'adm.ma.no_orders');
+}
+// A typed period wins over the presets; an emptied field falls back to the last 7 days.
+$('maFilters').onchange = () => {
+  const f = $('maFilters');
+  setParams({ ch: route.params.ch, from: f.from.value, to: f.to.value });
+};
+$('maFilters').onsubmit = (e) => e.preventDefault();

@@ -312,6 +312,7 @@ test('migration 037: down drops the stock tables, up brings them back', async ()
   try {
     await m.migrate.latest();
     assert.ok(await m.schema.hasTable('stock_movements'));
+    await m.migrate.down(); // 043
     await m.migrate.down(); // 042
     await m.migrate.down(); // 041
     await m.migrate.down(); // 040

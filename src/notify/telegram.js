@@ -5,8 +5,9 @@
 import { qrSvg } from '../qr.js';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { smsSender } from './sms.js';
-import { fittingView, dayStart, DAY_MS, salesByMode } from '../admin/routes.js';
+import { fittingView, dayStart, dayKey, DAY_MS, salesByMode } from '../admin/routes.js';
 import { demandItems, funnelStats } from '../demand.js';
+import { mallStats } from '../mall-stats.js';
 import { dbTime } from '../recommend/routes.js';
 import { handleProfileMessage } from '../profile.js';
 import { remindExpiring } from '../cart/points.js';
@@ -224,6 +225,46 @@ export async function flushWeeklyReport(db, telegram, now = Date.now()) {
   }
 }
 
+// Task 53: the mall admin's weekly digest, Monday 09:00 Tashkent, to malls.report_chat_id; the same outbox rules as the
+// shop report above (malls.report_week, retries, no backlog). Counts only, as on the analytics page.
+export async function mallDigest(db, mall, week) {
+  const to = dayStart(week) - DAY_MS, from = to - 6 * DAY_MS;
+  const keys = Array.from({ length: 7 }, (_, i) => dayKey(from + i * DAY_MS));
+  const prev = { from: dayKey(from - 7 * DAY_MS), to: dayKey(from - DAY_MS) };
+  const s = await mallStats(db, mall.id, { from: keys[0], to: keys[6], days: 7, keys, prev });
+  const T = s.totals, P = s.prev_totals;
+  const vs = (cur, old) => (old ? ` (${cur >= old ? '+' : '−'}${Math.round((Math.abs(cur - old) / old) * 100)}%)` : '');
+  const list = (rows, line) => (rows.length ? rows.map(line) : ["• yo'q"]);
+  const shops = s.shops.filter((x) => x.opens).slice(0, 3);
+  return [
+    `${mall.name}: haftalik tahlil, ${ddmm(from)}–${ddmm(to)}`,
+    `Tashriflar: ${T.visits}${vs(T.visits, P.visits)} — kiosk ${T.kiosk_visits}, telefon ${T.phone_visits}`,
+    `Qidiruvlar: ${T.searches}, markazda yo'q: ${T.nothing}`,
+    `Do'kon sahifasi ochildi: ${T.shop_opens}, xaritada: ${T.pin_opens}`,
+    `Aksiyalar: ${T.offer_shown} ko'rildi, ${T.offer_tapped} bosildi`,
+    `Butun markazdan obraz: ${T.outfits} (savatga: ${T.outfits_cart})`,
+    `SM buyurtmalari: ${T.groups}, do'konlar buyurtmalari: ${T.orders}${vs(T.orders, P.orders)}`,
+    '', "Ko'p qidirilgan:", ...list(s.words.slice(0, 5), (w) => `• ${w.word} — ${w.n}`),
+    '', "Markazda yo'q:", ...list(s.nothing.slice(0, 5), (w) => `• ${w.word} — ${w.n}`),
+    '', "Ko'p ochilgan do'konlar:", ...list(shops, (x) => `• ${x.name} — ${x.opens}`),
+  ].join('\n');
+}
+
+export async function flushMallReport(db, telegram, now = Date.now()) {
+  if (!telegram) return; // off without the bot
+  const week = reportWeek(now);
+  const due = await db('malls').whereNotNull('report_chat_id').where((w) => w.whereNull('report_week').orWhere('report_week', '<', week)).orderBy('id').select('id', 'name', 'report_chat_id');
+  for (const m of due) {
+    try {
+      await telegram(m.report_chat_id, await mallDigest(db, m, week));
+    } catch (err) {
+      console.error(`telegram: weekly digest for mall ${m.id} not sent:`, err.message);
+      if (err.code !== 403 && err.code !== 400) continue; // network, 429, 5xx, a failed query: try again next round
+    }
+    await db('malls').where({ id: m.id }).update({ report_week: week });
+  }
+}
+
 // "/start <token>" from the order link → the order's messages go to this chat. The first chat to link keeps it.
 // Profile deep links, shared contacts, /delete and /profile (task 27) go to src/profile.js first.
 export async function handleUpdate(db, update, send, opts) {
@@ -266,6 +307,7 @@ export function startNotifications(db, { telegram = telegramConfig(), sms = smsS
     await flushStockAlerts(db, send).catch((err) => console.error('stock alert notify failed:', err.message));
     await flushDemoRequests(db, send).catch((err) => console.error('demo request notify failed:', err.message));
     await flushWeeklyReport(db, send).catch((err) => console.error('weekly report failed:', err.message));
+    await flushMallReport(db, send).catch((err) => console.error('mall digest failed:', err.message)); // task 53
     if (Date.now() >= remindAt) { // task 39: the expiry reminder needs a ledger replay per customer, so every 10 min, not every round
       remindAt = Date.now() + 10 * 60_000;
       await remindExpiring(db, send).catch((err) => console.error('points reminder failed:', err.message));

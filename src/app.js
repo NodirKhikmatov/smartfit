@@ -18,6 +18,7 @@ import { createKioskRouter } from './kiosk.js';
 import { createDemoRouter } from './admin/orgs.js';
 import { createMallRouter } from './admin/malls.js';
 import { createOfferRouter } from './admin/offers.js';
+import { createMallEventRouter } from './mall-stats.js';
 import { createLandingRouter } from './landing.js';
 import { createFunnelRouter } from './demand.js';
 import { createCatalogRouter } from './catalog.js';
@@ -89,6 +90,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   api.use('/kiosk', bucket('kiosk'), createKioskRouter(db));
   api.use('/malls', bucket('mall'), createMallRouter(db)); // task 37: mall directory and search
   api.use('/offers', bucket('offer'), createOfferRouter(db, { now })); // task 43: offer counts
+  api.use('/mall-events', bucket('mallEvent'), createMallEventRouter(db, { now })); // task 53: mall analytics counts
   api.use('/catalog', bucket('catalog'), createCatalogRouter(db, { link, maxOpen: lim.openCarts })); // task 25
   api.use('/funnel', bucket('funnel'), createFunnelRouter(db)); // task 24: drop-off by step
   api.use('/orders', createReviewRouter(db, { limit: bucket('review') })); // task 46: reviews through the status token

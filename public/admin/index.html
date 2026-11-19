@@ -63,6 +63,7 @@
           <li id="navOrgs" hidden><a href="#/orgs" data-route="orgs"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#store"></use></svg><span data-i18n="adm.route.orgs"></span></a></li>
           <li id="navMalls" hidden><a href="#/malls" data-route="malls"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#map-pin"></use></svg><span data-i18n="adm.route.malls"></span></a></li>
           <li id="navMall" hidden><a href="#/mall" data-route="mall"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#map-pin"></use></svg><span data-i18n="adm.route.mall"></span></a></li>
+          <li id="navMallStats" hidden><a href="#/mallstats" data-route="mallstats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.route.mallstats"></span></a></li>
           <li class="nav-sep" id="navSettings"><a href="#/settings" data-route="settings"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#settings"></use></svg><span data-i18n="adm.route.settings"></span></a></li>
         </ul>
       </nav>
@@ -626,6 +627,57 @@
         </div>
       </section>
 
+      <!-- Tahlil (task 53): the mall admin's analytics. Counts only, the period against the one just before it -->
+      <section data-page="mallstats" hidden>
+        <div class="page-head">
+          <p class="muted" id="maRange"></p>
+          <div class="seg" role="group" data-i18n-aria-label="adm.stats.period" id="maDays"></div>
+        </div>
+        <form class="toolbar" id="maFilters">
+          <label><span data-i18n="adm.orders.from"></span> <input name="from" type="date"></label>
+          <label><span data-i18n="adm.orders.to"></span> <input name="to" type="date"></label>
+        </form>
+        <div id="maError"></div>
+        <div class="kpis" id="maKpis"></div>
+        <div class="dash-grid">
+          <section class="card panel span-2" aria-labelledby="maDayTitle">
+            <div class="panel-head">
+              <div><h2 id="maDayTitle" data-i18n="adm.ma.per_day"></h2><p class="panel-sub" data-i18n="adm.ma.per_day_sub"></p></div>
+              <div class="seg" role="group" data-i18n-aria-label="adm.ma.channel" id="maChannel"></div>
+            </div>
+            <div class="chart-box" id="maDayChart"></div>
+            <details class="table-view">
+              <summary data-i18n="adm.stats.table"></summary>
+              <div class="table-wrap"><table class="table"><thead><tr><th data-i18n="adm.stats.day"></th><th class="num" data-i18n="adm.ma.kiosk"></th><th class="num" data-i18n="adm.ma.phone"></th></tr></thead><tbody id="maDayRows"></tbody></table></div>
+            </details>
+          </section>
+          <section class="card panel span-2" aria-labelledby="maHourTitle">
+            <div class="panel-head"><div><h2 id="maHourTitle" data-i18n="adm.ma.per_hour"></h2><p class="panel-sub" data-i18n="adm.ma.per_hour_sub"></p></div></div>
+            <div class="chart-box" id="maHourChart"></div>
+            <details class="table-view">
+              <summary data-i18n="adm.stats.table"></summary>
+              <div class="table-wrap"><table class="table"><thead><tr><th data-i18n="adm.ma.hour"></th><th class="num" data-i18n="adm.ma.kiosk"></th><th class="num" data-i18n="adm.ma.phone"></th></tr></thead><tbody id="maHourRows"></tbody></table></div>
+            </details>
+          </section>
+          <section class="card panel" aria-labelledby="maWordsTitle">
+            <div class="panel-head"><div><h2 id="maWordsTitle" data-i18n="adm.ma.words"></h2><p class="panel-sub" data-i18n="adm.ma.words_sub"></p></div></div>
+            <ol class="rank" id="maWords"></ol>
+          </section>
+          <section class="card panel" aria-labelledby="maNothingTitle">
+            <div class="panel-head"><div><h2 id="maNothingTitle" data-i18n="adm.ma.nothing_title"></h2><p class="panel-sub" data-i18n="adm.ma.nothing_sub"></p></div></div>
+            <ol class="rank" id="maNothing"></ol>
+          </section>
+          <section class="card panel" aria-labelledby="maOpensTitle">
+            <div class="panel-head"><div><h2 id="maOpensTitle" data-i18n="adm.ma.by_opens"></h2><p class="panel-sub" data-i18n="adm.ma.by_opens_sub"></p></div></div>
+            <ol class="rank" id="maOpens"></ol>
+          </section>
+          <section class="card panel" aria-labelledby="maOrdersTitle">
+            <div class="panel-head"><div><h2 id="maOrdersTitle" data-i18n="adm.ma.by_orders"></h2><p class="panel-sub" data-i18n="adm.ma.by_orders_sub"></p></div></div>
+            <ol class="rank" id="maOrders"></ol>
+          </section>
+        </div>
+      </section>
+
       <!-- Onboarding wizard for a new owner: store profile → products from CSV → QR print (#/welcome?store=…&step=…) -->
       <section data-page="welcome" hidden>
         <div class="wizard">
@@ -1010,6 +1062,10 @@
         <label><span data-i18n="adm.mall.lon"></span> <input name="lon" inputmode="decimal" maxlength="20" autocomplete="off" aria-describedby="mallPointHint"></label>
       </div>
       <p class="hint" id="mallPointHint" data-mall="profile" data-i18n="adm.mall.point_hint"></p>
+      <div class="grid" data-mall="digest">
+        <label class="span-2"><span data-i18n="adm.ma.digest_chat"></span> <input name="report_chat_id" inputmode="numeric" maxlength="16" autocomplete="off" aria-describedby="mallDigestHint"></label>
+      </div>
+      <p class="hint" id="mallDigestHint" data-mall="digest" data-i18n="adm.ma.digest_hint"></p>
       <div class="grid" data-mall="email">
         <label class="span-2"><span data-i18n="adm.malls.admin_email"></span> <input name="email" type="email" maxlength="200" autocomplete="off"></label>
       </div>

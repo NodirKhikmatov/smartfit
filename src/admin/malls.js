@@ -60,6 +60,12 @@ const pinOf = (v) => {
   return { x: n(v.x), y: n(v.y) };
 };
 const pinOut = (x, y) => (x == null || y == null ? null : { x: x / 100, y: y / 100 });
+// A Telegram chat id: up to 15 digits, negative for groups (as the store settings take it); null = none.
+const chatOf = (v) => {
+  if (v == null || v === '') return null;
+  if (!/^-?\d{1,15}$/.test(String(v).trim())) throw fail(400, 'err.invalid', { field: 'field.report_chat' });
+  return Number(String(v).trim());
+};
 const floorSort = (a, b) => a.name.localeCompare(b.name, 'en', { numeric: true });
 // A path id that fits an integer column (a longer one would be a database error on Postgres, not a 404).
 const idOf = (v) => (/^\d{1,9}$/.test(String(v)) ? Number(v) : 0);
@@ -176,6 +182,7 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
       await trx('admins').where({ role: 'mall', mall_id: m.id }).del(); // audit rows keep the email (admin_id is set null)
       await trx('organizations').where({ mall_id: m.id }).update({ mall_id: null });
       await trx('mall_recs').where({ mall_id: m.id }).del(); // task 42: its outfit screens count (no foreign key)
+      await trx('mall_stats').where({ mall_id: m.id }).del(); // task 53: its analytics counters (no foreign key)
       plans = (await trx('mall_floors').where({ mall_id: m.id }).whereNotNull('plan_url').select('plan_url')).map((f) => f.plan_url);
       await trx('mall_floors').where({ mall_id: m.id }).del(); // task 44: its plans; the kiosk spots go with them (cascade)
       await trx('malls').where({ id: m.id }).del();
@@ -222,21 +229,25 @@ export function mallRoutes(r, db, { uploadDir = 'uploads' } = {}) {
         kiosks: { count: k.length, online: k.filter((x) => now - msOf(x.last_seen_at) < ONLINE_MS).length } };
     });
     const sum = (f) => rows.reduce((a, s) => a + f(s), 0);
+    const { report_chat_id } = await db('malls').where({ id: mall.id }).first('report_chat_id'); // task 53: the weekly digest
     res.json({
-      mall, days, shops: rows,
+      mall: { ...mall, report_chat_id: report_chat_id == null ? null : Number(report_chat_id) }, days, shops: rows,
       totals: { shops: rows.length, visits: sum((s) => s.visits.kiosk + s.visits.phone), kiosk_visits: sum((s) => s.visits.kiosk), orders: sum((s) => s.orders), kiosks_online: sum((s) => s.kiosks.online), mall_outfits: Number(outfits.n) },
       pending: pending.map((p) => ({ organization_id: p.organization_id, name: p.name, invite_open: Number(p.open) > 0 })),
     });
   });
 
+  // Task 53: report_chat_id (optional) = the Telegram chat of the weekly digest; null or '' = none.
   r.patch('/mall', async (req, res) => {
     mallOnly(req.admin);
-    const { id, logo_url, ...before } = await findMall(req.admin.mall_id);
-    const next = profileOf(req.body, before);
+    const { id, logo_url, ...profile } = await findMall(req.admin.mall_id);
+    const before = { ...profile, report_chat_id: chatOf((await db('malls').where({ id }).first('report_chat_id')).report_chat_id) };
+    const next = { ...profileOf(req.body, profile), report_chat_id: req.body?.report_chat_id === undefined ? before.report_chat_id : chatOf(req.body.report_chat_id) };
     const d = diff(before, next);
     if (d) {
       await db.transaction(async (trx) => {
-        await trx('malls').where({ id }).update({ ...next, updated_at: trx.fn.now() });
+        // a new chat gets the newest due digest at once, like a shop's weekly report (task 24)
+        await trx('malls').where({ id }).update({ ...next, ...(next.report_chat_id !== before.report_chat_id && { report_week: null }), updated_at: trx.fn.now() });
         await audit(trx, req.admin, { action: 'mall.update', entityId: id, label: next.name, ...d });
       });
     }
@@ -476,6 +487,16 @@ async function syncFloors(q, mallId) {
     .whereNotExists(q('mall_spots').whereRaw('mall_spots.floor_id = mall_floors.id')).del();
 }
 
+// In-stock items of a mall's shown shops whose name or category matches `term` (the mall search; task 53 asks it too,
+// to tell a word that found nothing in any shop). closed = closedOrgs(db) (plans.js). Not async: a knex builder is a
+// thenable, and returning one from an async function would run it.
+export function searchQuery(db, mallId, term, closed) {
+  const like = `%${term}%`;
+  return openOrgs(visible(db('products as p')).join('stores as st', 'st.id', 'p.store_id').where('st.mall_id', mallId).where('st.mall_hidden', false), 'st.organization_id', closed)
+    .whereExists(inStock(db))
+    .where((w) => w.whereILike('p.name', like).orWhereILike('p.name_ru', like).orWhereILike('c.name', like).orWhereILike('c.name_ru', like));
+}
+
 // ---------- Public: the mall screen (/kiosk?mall=, /m?mall=). Rate-limited in app.js like the catalogue.
 // Only what a shop's own public pages already show (name, shown categories, in-stock items), plus the mall's own
 // directory entry (floor, unit, logo). Shops the mall hides are not listed and not searched.
@@ -528,10 +549,7 @@ export function createMallRouter(db) {
     const term = q.trim();
     if (term.length < 2 || term.length > 60) return res.json({ items: [] });
     // shortcut: SQLite (dev) LIKE ignores case for ASCII only, so a Cyrillic search is case-sensitive there; Postgres ILIKE is fine.
-    const like = `%${term}%`;
-    const rows = shown(visible(db('products as p')).join('stores as st', 'st.id', 'p.store_id'), m.id, await closedOrgs(db)).whereExists(inStock(db))
-      .where((w) => w.whereILike('p.name', like).orWhereILike('p.name_ru', like).orWhereILike('c.name', like).orWhereILike('c.name_ru', like))
-      .orderBy([{ column: 'st.name' }, { column: 'p.id', order: 'desc' }]).limit(SEARCH_MAX)
+    const rows = searchQuery(db, m.id, term, await closedOrgs(db)).orderBy([{ column: 'st.name' }, { column: 'p.id', order: 'desc' }]).limit(SEARCH_MAX)
       .select(...COLS, 'p.store_id', 'p.fit_offset', 'st.name as store_name', 'st.mall_floor as floor', 'st.mall_unit as unit');
     if (gender) rows.whereIn('p.gender', genders(gender));
     rows.where('p.audience', audience);

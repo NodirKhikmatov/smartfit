@@ -418,6 +418,8 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
     'PATCH /mall/slides': async () => refused(await admin('PATCH', '/mall/slides', { seconds: 10 }, ownerA)),
     // Task 44: the mall map is the mall admin's.
     'GET /mall/map': async () => refused(await admin('GET', '/mall/map', undefined, ownerA)),
+    'GET /mall/stats': async () => refused(await admin('GET', '/mall/stats', undefined, ownerA)), // task 53: mall analytics are the mall's
+    'GET /mall/stats/export': async () => refused(await admin('GET', '/mall/stats/export', undefined, ownerA)),
     'POST /mall/floors/:id/plan': async () => refused(await admin('POST', '/mall/floors/1/plan', undefined, ownerA, { raw: png, type: 'image/png' })),
     'DELETE /mall/floors/:id/plan': async () => refused(await admin('DELETE', '/mall/floors/1/plan', undefined, ownerA)),
     'POST /mall/spots': async () => refused(await admin('POST', '/mall/spots', { floor_id: 1, label: 'X', pin: { x: 1, y: 1 } }, ownerA)),
@@ -601,7 +603,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 42; i > 12; i--) await m.migrate.down(); // 042 … 013
+    for (let i = 43; i > 12; i--) await m.migrate.down(); // 043 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);
