@@ -310,6 +310,7 @@ test('migration 040: down drops the seller and commission columns, up brings the
   const m = testDb();
   try {
     await m.migrate.latest();
+    await m.migrate.down(); // 042
     await m.migrate.down(); // 041
     await m.migrate.down(); // 040
     for (const [t, c] of [['orders', 'seller_id'], ['orders', 'seller_at'], ['orders', 'seller_percent'], ['stores', 'commission_percent'], ['admins', 'commission_percent']]) {

@@ -285,6 +285,7 @@ const PAGES = {
   stats: { title: 'adm.route.stats', load: loadStats },
   profit: { title: 'adm.route.profit', load: loadProfit }, // task 49
   sellers: { title: 'adm.route.sellers', load: loadSellers }, // task 50
+  transfers: { title: 'adm.route.transfers', load: loadTransfers }, // task 52
   demand: { title: 'adm.route.demand', load: loadDemand },
   reviews: { title: 'adm.route.reviews', load: loadReviews }, // task 46
   qr: { title: 'adm.route.qr', load: loadQr },
@@ -306,6 +307,7 @@ const ACTIONS = {
   offers: [el('button', { type: 'button', className: 'primary', onclick: () => openOffer(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.offers.add') }))],
   stats: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => exportStats() }, icon('download'))],
   sellers: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => download('/sellers/export?' + qs(sellersQuery()), 'sellers.csv') }, icon('download'))],
+  transfers: [el('button', { type: 'button', className: 'primary', onclick: () => openTransfer(null) }, icon('plus'), el('span', { className: 'label', textContent: t('adm.tr.new') }))],
   demand: [el('button', { type: 'button', className: 'icon-btn', title: t('adm.export'), ariaLabel: t('adm.export'), onclick: () => download('/demand/export?' + qs(scoped({ days: demandDays() })), `talab-${demandDays()}d.csv`) }, icon('download'))],
 };
 
@@ -1204,7 +1206,7 @@ function openForm(p) {
 }
 // Task 47: the product's stock history (every change: the form, CSV, the sync API, receiving, counts, sales, returns).
 const MOVE_REASON = { admin: 'adm.moves.admin', csv: 'adm.moves.csv', sync: 'adm.moves.sync', receive: 'adm.moves.receive', count: 'adm.moves.count',
-  sale: 'adm.moves.sale', cancel: 'adm.moves.cancel', return: 'adm.moves.return', exchange: 'adm.moves.exchange' };
+  sale: 'adm.moves.sale', cancel: 'adm.moves.cancel', return: 'adm.moves.return', exchange: 'adm.moves.exchange', transfer: 'adm.moves.transfer' };
 let moveOffset = 0;
 async function loadMoves(first) {
   const p = editing;
@@ -1216,7 +1218,7 @@ async function loadMoves(first) {
     const rows = r.items.map((m) => el('li', {},
       el('span', { className: 'num', textContent: t('adm.moves.line', { size: m.size, before: m.quantity_before, after: m.quantity_after }) }),
       el('span', { className: `badge ${m.delta > 0 ? 'ok' : 'warn'}`, textContent: m.delta > 0 ? `+${m.delta}` : `−${-m.delta}` }),
-      el('span', { className: 'grow', textContent: [t(MOVE_REASON[m.reason]), m.order_number && t('adm.moves.order', { n: m.order_number }), m.session_note, m.admin_email].filter(Boolean).join(' · ') }),
+      el('span', { className: 'grow', textContent: [m.transfer_id ? t('adm.moves.transfer_n', { n: m.transfer_id, from: m.transfer_from, to: m.transfer_to }) : t(MOVE_REASON[m.reason]), m.order_number && t('adm.moves.order', { n: m.order_number }), m.session_note, m.admin_email].filter(Boolean).join(' · ') }),
       el('span', { className: 'muted', textContent: fmt.dateTime(m.created_at) })));
     if (first) $('moveList').replaceChildren(...(r.total ? rows : [el('li', { className: 'muted', textContent: t('adm.moves.empty') })]));
     else $('moveList').append(...rows);
@@ -1596,6 +1598,166 @@ async function loadSellers() {
 }
 const withStoreName = (id) => (showStore() && id ? stores.find((x) => x.id === id)?.name : null);
 
+// ---------- Ko'chirishlar (task 52): moving stock between the organisation's stores. A manager of either store or the
+// owner drafts; the sending side sends (the units leave at once); the receiving store's staff receive it in the staff app.
+const TR_STATES = { draft: ['adm.tr.st_draft', 'off'], sent: ['adm.tr.st_sent', 'warn'], received: ['adm.tr.st_received', 'ok'], cancelled: ['adm.tr.st_cancelled', 'off'] };
+const trBadge = (x) => el('span', { className: `badge ${TR_STATES[x.status][1]}`, textContent: t(TR_STATES[x.status][0]) });
+const trF = $('trFilters');
+trF.status.onchange = () => setParams({ status: trF.status.value });
+trF.onsubmit = (e) => e.preventDefault();
+async function loadTransfers() {
+  const seq = (loads.transfers = (loads.transfers || 0) + 1);
+  trF.status.value = route.params.status || '';
+  const stop = skeletonRows($('trRows'), 5);
+  let r;
+  try { r = await call('/transfers?' + qs(scoped({ status: route.params.status }))); } catch (err) {
+    stop();
+    if (seq === loads.transfers) stateBox($('trError'), err, () => loadTransfers());
+    return;
+  }
+  stop();
+  if (seq !== loads.transfers) return;
+  stateBox($('trError'));
+  if (!r.items.length) return emptyRow($('trRows'), 5, { ic: 'arrow-right', title: t('adm.tr.empty'), text: t('adm.tr.empty_text') });
+  const open = (x) => () => openTransfer(x.id);
+  $('trRows').replaceChildren(...r.items.map((x) => el('tr', { tabIndex: 0, onclick: open(x), onkeydown: (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), open(x)()) },
+    el('td', {}, el('strong', { textContent: `№ ${x.id}` }), el('div', { className: 'sizes show-sm', textContent: fmt.dateTime(x.received_at ?? x.cancelled_at ?? x.sent_at ?? x.created_at) })),
+    el('td', {}, el('span', { textContent: `${x.from_store} → ${x.to_store}` }), x.note && el('div', { className: 'sizes', textContent: x.note })),
+    el('td', {}, trBadge(x), x.missing > 0 && el('div', { className: 'sizes neg', textContent: t('adm.tr.missing_n', { n: x.missing }) })),
+    el('td', { className: 'num', textContent: ['sent', 'received'].includes(x.status) ? `${x.received}/${x.units}` : String(x.units) }),
+    el('td', { className: 'hide-sm', textContent: fmt.dateTime(x.received_at ?? x.cancelled_at ?? x.sent_at ?? x.created_at) }))));
+}
+
+const trForm = $('trForm');
+let trCur = null, trLines = [], trOpts = null, trStores = [];
+const mine = (id) => me.role === 'super' || stores.some((s) => s.id === Number(id));
+const trStore = (id) => trStores.find((s) => s.id === Number(id));
+const trEditable = () => !trCur || trCur.can.edit;
+// The other end: same organisation, not the same store, and one of the two must be the caller's.
+function fillTo(keep) {
+  const from = trStore(trForm.from.value);
+  const list = trStores.filter((s) => from && s.organization_id === from.organization_id && s.id !== from.id && (mine(from.id) || mine(s.id)));
+  trForm.to.replaceChildren(...list.map((s) => el('option', { value: s.id, textContent: s.name })));
+  if (keep && list.some((s) => String(s.id) === String(keep))) trForm.to.value = keep;
+}
+async function openTransfer(id, preset = null) {
+  $('trDlgError').textContent = '';
+  trForm.reset();
+  try {
+    if (!trStores.length) trStores = await call('/transfers/stores');
+    trCur = id ? await call(`/transfers/${id}`) : null;
+  } catch (err) { return toast(err.message, { tone: 'danger' }); }
+  const ends = trCur ? [trStore(trCur.from_store_id) ?? { id: trCur.from_store_id, name: trCur.from_store }, trStore(trCur.to_store_id) ?? { id: trCur.to_store_id, name: trCur.to_store }] : null;
+  trForm.from.replaceChildren(...(ends ? [ends[0]] : trStores.filter((s) => trStores.some((x) => x.organization_id === s.organization_id && x.id !== s.id))).map((s) => el('option', { value: s.id, textContent: s.name })));
+  if (ends) trForm.to.replaceChildren(el('option', { value: ends[1].id, textContent: ends[1].name }));
+  else {
+    const start = preset?.from ?? (scope && mine(scope) ? scope : stores[0]?.id);
+    if (start && trStore(start)) trForm.from.value = start;
+    fillTo(preset?.to);
+  }
+  trForm.from.disabled = trForm.to.disabled = Boolean(trCur);
+  trLines = trCur ? trCur.lines.map((l) => ({ ...l })) : preset?.line ? [preset.line] : [];
+  trForm.note.value = trCur?.note ?? '';
+  trOpts = null;
+  trRender();
+  $('trDlg').showModal();
+  if (trEditable()) await trLoadOptions();
+}
+async function trLoadOptions() {
+  trOpts = null;
+  trForm.product.replaceChildren(el('option', { value: '', textContent: t('adm.tr.loading') }));
+  if (!trForm.from.value || !trForm.to.value) return trFillProducts();
+  try { trOpts = await call(`/transfers/products?${qs({ from_store_id: trForm.from.value, to_store_id: trForm.to.value })}`); } catch (err) { $('trDlgError').textContent = err.message; }
+  trFillProducts();
+}
+function trFillProducts() {
+  const list = trOpts?.products ?? [];
+  trForm.product.replaceChildren(el('option', { value: '', textContent: list.length ? t('adm.tr.pick_product') : t('adm.tr.no_products') }),
+    ...list.map((p) => el('option', { value: p.id, textContent: [productName(p), p.sku].filter(Boolean).join(' · ') })));
+  trFillSizes();
+}
+function trFillSizes() {
+  const p = trOpts?.products.find((x) => String(x.id) === trForm.product.value);
+  trForm.size.replaceChildren(...(p?.sizes ?? []).map((s) => el('option', { value: s.size, disabled: !s.free, textContent: t('adm.tr.size_opt', { size: sizeText(s.size), n: s.free, there: s.there }) })));
+  const first = p?.sizes.find((s) => s.free);
+  if (first) trForm.size.value = first.size;
+}
+trForm.from.onchange = () => { fillTo(trForm.to.value); trLines = []; trRender(); trLoadOptions(); };
+trForm.to.onchange = () => { trLines = []; trRender(); trLoadOptions(); };
+trForm.product.onchange = trFillSizes;
+$('trAddBtn').onclick = () => {
+  $('trDlgError').textContent = '';
+  const p = trOpts?.products.find((x) => String(x.id) === trForm.product.value);
+  const s = p?.sizes.find((x) => x.size === trForm.size.value);
+  const n = Number(trForm.qty.value);
+  if (!p || !s) { $('trDlgError').textContent = t('adm.tr.pick_first'); return trForm.product.focus(); }
+  const have = trLines.find((l) => l.product_id === p.id && l.size === s.size);
+  const total = n + (have?.quantity ?? 0);
+  if (!Number.isInteger(n) || n < 1 || total > s.free) { $('trDlgError').textContent = t('adm.tr.too_many', { n: s.free }); return trForm.qty.focus(); }
+  if (have) have.quantity = total;
+  else trLines.push({ product_id: p.id, size: s.size, quantity: n, name: p.name, name_ru: p.name_ru, sku: p.sku, free: s.free });
+  trForm.qty.value = '1';
+  trRender();
+  trForm.product.focus();
+};
+function trRender() {
+  const edit = trEditable(), c = trCur;
+  $('trDlgTitle').textContent = c ? t('adm.tr.title_n', { n: c.id }) : t('adm.tr.new');
+  const steps = c ? [[c.created_at, 'adm.tr.made', c.created_email], [c.sent_at, 'adm.tr.sent', c.sent_email], [c.received_at, 'adm.tr.received', c.received_email], [c.cancelled_at, 'adm.tr.cancelled', c.cancelled_email]]
+    .filter(([at]) => at).map(([at, key, who]) => t(key, { at: fmt.dateTime(at), who: who?.split('@')[0] ?? '—' })) : [t('adm.tr.new_hint')];
+  $('trInfo').replaceChildren(...(c ? [trBadge(c), ' '] : []), steps.join(' · '));
+  $('trAdd').hidden = !edit;
+  $('trNoteWrap').hidden = !edit && !c?.note;
+  trForm.note.disabled = !edit;
+  const th = (key, cls = '') => el('th', { className: cls, textContent: key ? t(key) : '' });
+  const shipped = c && ['sent', 'received'].includes(c.status);
+  $('trHead').replaceChildren(th('adm.tr.product'), th('adm.demand.size', 'hide-sm'), ...(shipped ? [th('adm.tr.sent_n', 'num'), th('adm.tr.received_n', 'num')] : [th('adm.tr.units', 'num'), th(null)]));
+  if (!trLines.length) return emptyRow($('trLines'), 4, { ic: 'hanger', title: t('adm.tr.no_lines'), text: t('adm.tr.no_lines_text') }), trActions();
+  $('trLines').replaceChildren(...trLines.map((l, i) => el('tr', {},
+    el('td', {}, el('strong', { textContent: productName(l) }), el('div', { className: 'sizes', textContent: [l.sku, !shipped && c?.status !== 'cancelled' && t('adm.tr.free_n', { n: l.free })].filter(Boolean).join(' · ') }),
+      el('div', { className: 'sizes show-sm', textContent: `${t('adm.demand.size')}: ${sizeText(l.size)}` })), // phones: the size column hides
+    el('td', { className: 'hide-sm', textContent: sizeText(l.size) }),
+    el('td', { className: `num${!shipped && l.quantity > l.free ? ' neg' : ''}`, textContent: l.quantity }),
+    shipped ? el('td', { className: `num${c.status === 'received' && l.received < l.quantity ? ' neg' : ''}` }, el('span', { textContent: l.received }),
+      c.status === 'received' && l.received < l.quantity && el('div', { className: 'sizes', textContent: t('adm.tr.missing_n', { n: l.quantity - l.received }) }))
+      : el('td', { className: 'num' }, edit && el('button', { type: 'button', className: 'icon-btn', title: t('adm.tr.remove'), ariaLabel: t('adm.tr.remove'), onclick: () => { trLines.splice(i, 1); trRender(); } }, icon('trash'))))));
+  trActions();
+}
+function trActions() {
+  const c = trCur, edit = trEditable();
+  const btn = (key, cls, run) => {
+    const b = el('button', { type: 'button', className: cls, textContent: t(key) });
+    b.onclick = async () => {
+      $('trDlgError').textContent = '';
+      for (const x of $('trActions').children) x.disabled = true;
+      try { await run(); } catch (err) { $('trDlgError').textContent = err.message; } finally { for (const x of $('trActions').children) x.disabled = false; }
+    };
+    return b;
+  };
+  const body = () => ({ note: trForm.note.value.trim() || null, lines: trLines.map((l) => ({ product_id: l.product_id, size: l.size, quantity: l.quantity })) });
+  const save = async () => {
+    if (!trLines.length) throw new Error(t('adm.tr.no_lines'));
+    trCur = await call(c ? `/transfers/${c.id}` : '/transfers', { method: c ? 'PUT' : 'POST', body: c ? body() : { from_store_id: Number(trForm.from.value), to_store_id: Number(trForm.to.value), ...body() } });
+    trLines = trCur.lines.map((l) => ({ ...l }));
+  };
+  const done = (msg) => { toast(msg, { tone: 'ok' }); $('trDlg').close(); if (route.route === 'transfers') loadTransfers(); };
+  const acts = [btn('adm.tr.close', '', async () => $('trDlg').close())];
+  if (c?.can.cancel) acts.push(btn('adm.tr.cancel', 'danger ghost', async () => {
+    if (!(await confirmDialog({ title: t('adm.tr.cancel_title', { n: c.id }), text: t(c.status === 'sent' ? 'adm.tr.cancel_sent' : 'adm.tr.cancel_draft', { n: c.units, store: c.from_store }), ok: t('adm.tr.cancel'), danger: true }))) return;
+    await call(`/transfers/${c.id}/cancel`, { method: 'POST' });
+    done(t('adm.tr.cancelled_toast', { n: c.id }));
+  }));
+  if (edit) acts.push(btn('adm.tr.save', '', async () => { await save(); toast(t('adm.tr.saved', { n: trCur.id }), { tone: 'ok' }); trRender(); if (route.route === 'transfers') loadTransfers(); }));
+  if (edit && (c ? c.can.send : mine(trForm.from.value))) acts.push(btn('adm.tr.send', 'primary', async () => {
+    const units = trLines.reduce((n, l) => n + l.quantity, 0);
+    if (!(await confirmDialog({ title: t('adm.tr.send_title'), text: t('adm.tr.send_text', { n: units, from: trForm.from.selectedOptions[0]?.textContent ?? '', to: trForm.to.selectedOptions[0]?.textContent ?? '' }), ok: t('adm.tr.send') }))) return;
+    await save();
+    await call(`/transfers/${trCur.id}/send`, { method: 'POST' });
+    done(t('adm.tr.sent_toast', { n: trCur.id }));
+  }));
+  $('trActions').replaceChildren(...acts);
+}
+
 // ---------- Foyda (task 49): profit and margin by day, category and product, what discounts cost, stock at cost and
 // the lines sold below cost. Sales of products without a cost are shown apart, never counted as profit.
 
@@ -1691,7 +1853,8 @@ async function loadDemand() {
   else $('demandRows').replaceChildren(...d.items.map((x) => el('tr', {},
     el('td', {}, el('span', { className: 'demand-name' }, el('strong', { textContent: productName(x) }),
       el('span', { className: 'sizes', textContent: [x.sku || catOf(x), withStore && x.store_name].filter(Boolean).join(' · ') }),
-      el('span', { className: 'show-sm', textContent: [`${t('adm.demand.size')}: ${sizeText(x.size)}`, x.waiting && `${t('adm.demand.waiting')}: ${x.waiting}`].filter(Boolean).join(' · ') }))), // phones: size and waiting columns hide
+      el('span', { className: 'show-sm', textContent: [`${t('adm.demand.size')}: ${sizeText(x.size)}`, x.waiting && `${t('adm.demand.waiting')}: ${x.waiting}`].filter(Boolean).join(' · ') }), // phones: size and waiting columns hide
+      offerTransfer(x))),
     el('td', { className: 'hide-sm', textContent: sizeText(x.size) }),
     el('td', { className: 'num', textContent: x.missed }),
     el('td', { className: 'num hide-sm', textContent: x.waiting }), // task 31: "Kelganda xabar bering" requests still open
@@ -1731,6 +1894,15 @@ async function loadDemand() {
     el('td', { className: 'num', textContent: o.customers }), el('td', { className: 'num', textContent: o.orders }))));
   $('dropDayHead').replaceChildren(head('adm.stats.day'));
   $('dropDayRows').replaceChildren(...f.per_day.slice().reverse().map((x) => el('tr', {}, el('td', { textContent: day(x.day) }), ...cells(x))));
+}
+
+// Task 52: "Ko'chirish" when another store of the organisation has this size free: a draft from there, prefilled.
+function offerTransfer(x) {
+  const e = x.elsewhere?.[0];
+  if (!e) return null;
+  const line = { product_id: e.product_id, size: x.size, quantity: Math.min(e.free, Math.max(1, x.suggest)), name: x.name, name_ru: x.name_ru, sku: x.sku, free: e.free };
+  return el('button', { type: 'button', className: 'tr-offer', onclick: () => openTransfer(null, { from: e.store_id, to: x.store_id, line }) },
+    icon('arrow-right'), el('span', { textContent: t('adm.tr.offer', { store: e.store_name, n: e.free }) }));
 }
 
 const MODE_NAME = { outfit: 'adm.drop.mode_outfit', single: 'adm.drop.mode_single' };
@@ -2445,7 +2617,7 @@ function auditLines(l) {
 }
 const auditSubject = (l) => (l.entity === 'order' ? t('adm.order.title', { id: l.entity_label }) : l.entity === 'fitting' ? t('adm.fit.cabin', { cabin: l.entity_label }) : l.entity_label || '');
 const af = $('auditFilters');
-for (const e of ['product', 'category', 'size_chart', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'points', 'review']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
+for (const e of ['product', 'category', 'size_chart', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'transfer', 'points', 'review']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
 af.entity.onchange = af.admin.onchange = af.from.onchange = af.to.onchange = () =>
   setParams({ tab: 'audit', entity: af.entity.value, admin: af.admin.value, from: af.from.value, to: af.to.value });
 af.onsubmit = (e) => e.preventDefault();

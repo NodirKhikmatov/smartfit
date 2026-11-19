@@ -55,6 +55,7 @@
           <li><a href="#/stats" data-route="stats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.route.stats"></span></a></li>
           <li><a href="#/profit" data-route="profit"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#wallet"></use></svg><span data-i18n="adm.route.profit"></span></a></li>
           <li><a href="#/sellers" data-route="sellers"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#user"></use></svg><span data-i18n="adm.route.sellers"></span></a></li>
+          <li><a href="#/transfers" data-route="transfers"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg><span data-i18n="adm.route.transfers"></span></a></li>
           <li><a href="#/demand" data-route="demand"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trend-up"></use></svg><span data-i18n="adm.route.demand"></span></a></li>
           <li><a href="#/reviews" data-route="reviews"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#star"></use></svg><span data-i18n="adm.route.reviews"></span></a></li>
           <li><a href="#/qr" data-route="qr"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg><span data-i18n="adm.route.qr"></span></a></li>
@@ -391,6 +392,29 @@
             <table class="table">
               <thead><tr><th data-i18n="adm.sellers.seller"></th><th class="num" data-i18n="adm.sellers.orders"></th><th class="num hide-sm" data-i18n="adm.sellers.sum"></th><th class="num hide-sm" data-i18n="adm.sellers.returns"></th><th class="num" data-i18n="adm.sellers.commission"></th></tr></thead>
               <tbody id="sellersRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <!-- Ko'chirishlar (task 52): stock moved between the organisation's stores (draft → sent → received, or cancelled) -->
+      <section data-page="transfers" hidden>
+        <form class="toolbar" id="trFilters">
+          <label><span data-i18n="adm.tr.state"></span> <select name="status">
+            <option value="" data-i18n="adm.tr.all"></option>
+            <option value="draft" data-i18n="adm.tr.st_draft"></option>
+            <option value="sent" data-i18n="adm.tr.st_sent"></option>
+            <option value="received" data-i18n="adm.tr.st_received"></option>
+            <option value="cancelled" data-i18n="adm.tr.st_cancelled"></option>
+          </select></label>
+        </form>
+        <div id="trError"></div>
+        <section class="card panel" aria-labelledby="trTitle">
+          <div class="panel-head"><div><h2 id="trTitle" data-i18n="adm.tr.title"></h2><p class="panel-sub" data-i18n="adm.tr.sub"></p></div></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th data-i18n="adm.tr.number"></th><th data-i18n="adm.tr.route"></th><th data-i18n="adm.tr.state"></th><th class="num" data-i18n="adm.tr.units"></th><th class="hide-sm" data-i18n="adm.tr.date"></th></tr></thead>
+              <tbody id="trRows"></tbody>
             </table>
           </div>
         </section>
@@ -1104,6 +1128,32 @@
       <button type="button" id="pointsDlgCancel" data-i18n="common.cancel"></button>
       <button class="primary" id="pointsDlgSave" data-i18n="adm.form.save"></button>
     </div>
+  </form>
+</dialog>
+
+<dialog id="trDlg" aria-labelledby="trDlgTitle">
+  <form id="trForm" method="dialog" novalidate>
+    <h2 id="trDlgTitle"></h2>
+    <p class="muted" id="trInfo"></p>
+    <div class="grid" id="trStores">
+      <label><span data-i18n="adm.tr.from"></span> <select name="from"></select></label>
+      <label><span data-i18n="adm.tr.to"></span> <select name="to"></select></label>
+    </div>
+    <div class="grid tr-add" id="trAdd">
+      <label><span data-i18n="adm.tr.product"></span> <select name="product"></select></label>
+      <label><span data-i18n="adm.demand.size"></span> <select name="size"></select></label>
+      <label><span data-i18n="field.quantity"></span> <input name="qty" type="number" min="1" max="1000" step="1" value="1" inputmode="numeric"></label>
+      <button type="button" id="trAddBtn"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="adm.tr.add_line"></span></button>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr id="trHead"></tr></thead>
+        <tbody id="trLines"></tbody>
+      </table>
+    </div>
+    <label class="field" id="trNoteWrap"><span data-i18n="field.transfer_note"></span> <input name="note" maxlength="200" autocomplete="off"></label>
+    <p class="error" id="trDlgError" role="alert"></p>
+    <div class="actions" id="trActions"></div>
   </form>
 </dialog>
 

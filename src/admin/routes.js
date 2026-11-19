@@ -28,6 +28,7 @@ import { mayDo, FEATURES } from '../plans.js';
 import { reviewRoutes, report } from '../reviews.js';
 import { moved } from '../movements.js';
 import { stockRoutes } from './stock.js';
+import { transferRoutes, listTransfers, withElsewhere } from './transfers.js';
 import { sellerRoutes } from './sellers.js';
 import { cashRoutes, PAID_WITH } from './cash.js';
 import { profitRoutes } from './profit.js';
@@ -204,7 +205,9 @@ const IMAGE_TYPES = [
 // What the staff role may call (task 28): its own account, the floor queue, fitting accept/done and order steps.
 export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/me\/sales$/, /^GET \/staff$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/orders\/\d+\/(status|pay)$/, // task 51: staff take payments
   // Task 47: receiving and counting. Confirming a count's corrections is not here: a manager or owner does that.
-  /^GET \/stock\/(catalog|sessions)$/, /^GET \/stock\/sessions\/\d+$/, /^POST \/stock\/(sessions|scans)$/, /^POST \/stock\/sessions\/\d+\/close$/];
+  /^GET \/stock\/(catalog|sessions)$/, /^GET \/stock\/sessions\/\d+$/, /^POST \/stock\/(sessions|scans)$/, /^POST \/stock\/sessions\/\d+\/close$/,
+  // Task 52: receiving a transfer from another store. Drafting, sending and cancelling are a manager's or owner's.
+  /^GET \/transfers\/\d+$/, /^POST \/transfers\/scans$/, /^POST \/transfers\/\d+\/receive$/];
 // What the mall role may call (task 37): its own account and its mall (profile, logo, QR, the shops' directory entries,
 // shop invites, summary numbers). Every product, order, customer, team and settings route is 403 for it.
 export const MALL_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^(GET|PATCH) \/mall$/, /^(POST|DELETE) \/mall\/logo$/, /^GET \/mall\/qr$/,
@@ -867,6 +870,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
       // Quiet kiosks seen in the last day: a tablet retired for good stops alerting after 24 h.
       kiosks: (await kioskStatus(inStores(req.admin, db('kiosks').where('last_seen_at', '>', iso(now - DAY_MS)), 'store_id'), now)).filter((k) => !k.online),
       stats: responseStats(today),
+      incoming: await listTransfers(db, req.admin, { status: 'sent', incoming: true }), // task 52: transfers to receive here
     });
   });
 
@@ -880,6 +884,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
   pointsRoutes(r, db, { resolveStore }); // task 34
   reviewRoutes(r, db); // task 46
   stockRoutes(r, db, { findProduct }); // task 47
+  transferRoutes(r, db); // task 52
   profitRoutes(r, db); // task 49
   sellerRoutes(r, db); // task 50
   cashRoutes(r, db); // task 51
@@ -950,7 +955,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
   r.get('/demand', async (req, res) => {
     const { days, keys, from, scope } = demandWindow(req);
     res.json({
-      days, items: await demandItems(db, scope, { from }), funnel: await funnelStats(db, scope, { from, keys }), methods: await methodStats(db, scope, { from }),
+      days, items: await withElsewhere(db, await demandItems(db, scope, { from })), funnel: await funnelStats(db, scope, { from, keys }), methods: await methodStats(db, scope, { from }),
       scans: await scanStats(db, scope, { from }), // task 32: garment labels scanned often but rarely bought
       occasions: await occasionStats(db, scope, { from }), // task 33: customers and orders per "Qayerga kiyasiz?" answer
     });

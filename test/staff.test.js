@@ -111,6 +111,12 @@ test('route walk: the staff role can call only the staff routes', async () => {
   // Task 47: a receiving of a1 for the stock routes (staff open, scan, look and close; confirming is a manager's).
   const uid = () => `walk-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
   const recv = (await admin('POST', '/stock/sessions', { key: uid(), kind: 'receive' }, managerA1)).body;
+  // Task 52: a transfer sent from a2 to a1 (rows written directly: the walk is about the gate) for staff to receive.
+  const size = (await db('product_stock').where({ product_id: product.id }).first()).size;
+  const pA2 = await db('products').where({ store_id: a2 }).first();
+  const [{ id: tr }] = await db('transfers').insert({ organization_id: (await db('stores').where({ id: a1 }).first()).organization_id, from_store_id: a2, to_store_id: a1, status: 'sent' }).returning('id');
+  await db('transfer_items').insert({ transfer_id: tr, product_id: pA2.id, to_product_id: product.id, size, quantity: 2 });
+  ids['/transfers/:id'] = tr;
   const fill = (path) => path.replace('/stock/sessions/:id', `/stock/sessions/${recv.id}`).replace(/^(\/[a-z-]+(?:\/invites)?)\/:id/, (m, head) => `${head}/${ids[`${head}/:id`]}`);
   const PUBLIC = ['POST /login', 'POST /invite/check', 'POST /invite/accept']; // before the auth middleware, no token used
   const ALLOWED = {
@@ -120,6 +126,9 @@ test('route walk: the staff role can call only the staff routes', async () => {
     'POST /stock/sessions': async () => assert.equal((await admin('POST', '/stock/sessions', { key: uid(), kind: 'count', shelf: 'A-1' }, staff1)).status, 201),
     'POST /stock/scans': async () => assert.equal((await admin('POST', '/stock/scans', { key: uid(), session: recv.key, product_id: product.id, size: (await db('product_stock').where({ product_id: product.id }).first()).size, quantity: 1 }, staff1)).status, 201),
     'POST /stock/sessions/:id/close': async () => assert.equal((await admin('POST', `/stock/sessions/${recv.id}/close`, {}, staff1)).body.status, 'closed'),
+    'GET /transfers/:id': async () => assert.deepEqual((await admin('GET', `/transfers/${tr}`, undefined, staff1)).body.can, { edit: false, send: false, cancel: false, receive: true }),
+    'POST /transfers/scans': async () => assert.equal((await admin('POST', '/transfers/scans', { key: uid(), transfer_id: tr, product_id: product.id, size, quantity: 1 }, staff1)).status, 201),
+    'POST /transfers/:id/receive': async () => assert.equal((await admin('POST', `/transfers/${tr}/receive`, {}, staff1)).body.status, 'received'),
     'GET /me': async () => assert.equal((await admin('GET', '/me', undefined, staff1)).body.role, 'staff'),
     'GET /me/sales': async () => assert.equal((await admin('GET', '/me/sales', undefined, staff1)).status, 200), // task 50: their own numbers
     'GET /staff': async () => assert.equal((await admin('GET', '/staff', undefined, staff1)).status, 200),

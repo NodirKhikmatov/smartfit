@@ -250,6 +250,7 @@ test('migration 041 goes down and up', async () => {
   const m = testDb();
   try {
     await m.migrate.latest();
+    await m.migrate.down(); // 042
     await m.migrate.down();
     assert.equal(await m.schema.hasTable('cash_closings'), false);
     for (const c of ['paid_with', 'cancelled_at']) assert.equal(await m.schema.hasColumn('orders', c), false, c);

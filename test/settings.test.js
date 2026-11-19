@@ -287,7 +287,31 @@ test('every mutating admin route writes an audit row', async () => {
   // Task 47: a receiving and a count of the Tashkent store (keys as the phone makes them).
   const uid = () => `walk-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
   const session = async (kind) => (await admin('POST', '/stock/sessions', { key: uid(), kind, store_id: tashkent, ...(kind === 'count' && { shelf: 'WALK-1' }) }, ownerToken)).body;
+  // Task 52: a sibling store of Tashkent's organisation carrying a copy (same SKU) of its first top, and transfers to it.
+  let sib = null;
+  const sibling = async () => {
+    if (sib) return sib;
+    const p = await db('products').where({ store_id: tashkent, category: 'top' }).orderBy('id').first();
+    await db('product_stock').where({ product_id: p.id, size: 'M' }).update({ quantity: 50, reserved: 0 });
+    const [{ id: store }] = await db('stores').insert({ name: 'Walk filial', city: 'Toshkent', address: 'Walk 1', lat: 41.3, lon: 69.2, organization_id: (await db('stores').where({ id: tashkent }).first()).organization_id }).returning('id');
+    const { id: _, created_at, updated_at, ...copy } = p;
+    const [{ id: q }] = await db('products').insert({ ...copy, store_id: store, barcode: null }).returning('id');
+    sib = { store, p, q };
+    return sib;
+  };
+  const newTransfer = async (send = false) => {
+    const { store, p } = await sibling();
+    const t = (await admin('POST', '/transfers', { from_store_id: tashkent, to_store_id: store, lines: [{ product_id: p.id, size: 'M', quantity: 1 }] }, ownerToken)).body;
+    if (send) await admin('POST', `/transfers/${t.id}/send`, undefined, ownerToken);
+    return t;
+  };
   const recipes = {
+    'POST /transfers': ['transfer.create', async () => admin('POST', '/transfers', { from_store_id: tashkent, to_store_id: (await sibling()).store, note: 'Walk', lines: [{ product_id: sib.p.id, size: 'M', quantity: 1 }] }, ownerToken)],
+    'PUT /transfers/:id': ['transfer.update', async () => admin('PUT', `/transfers/${(await newTransfer()).id}`, { lines: [{ product_id: sib.p.id, size: 'M', quantity: 2 }] }, ownerToken)],
+    'POST /transfers/:id/send': ['transfer.send', async () => admin('POST', `/transfers/${(await newTransfer()).id}/send`, undefined, managerToken)],
+    'POST /transfers/:id/cancel': ['transfer.cancel', async () => admin('POST', `/transfers/${(await newTransfer(true)).id}/cancel`, undefined, ownerToken)],
+    'POST /transfers/scans': ['transfer.scan', async () => admin('POST', '/transfers/scans', { key: uid(), transfer_id: (await newTransfer(true)).id, product_id: sib.q, size: 'M', quantity: 1 }, ownerToken)],
+    'POST /transfers/:id/receive': ['transfer.receive', async () => admin('POST', `/transfers/${(await newTransfer(true)).id}/receive`, undefined, ownerToken)],
     'POST /stock/sessions': ['stock.open', () => admin('POST', '/stock/sessions', { key: uid(), kind: 'receive', store_id: tashkent, note: 'Faktura 1' }, ownerToken)],
     'POST /stock/scans': ['stock.receive', async () => {
       const s = await session('receive');

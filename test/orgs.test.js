@@ -94,7 +94,14 @@ async function orgBRecords() {
   await db('products').where({ id: product.id }).update({ shelf_location: 'B-1' });
   await db('stock_scans').insert({ key: 'orgb-scan-00000000001', session_id: count, product_id: product.id, size: 'M', quantity: 1 });
   await db('stock_movements').insert({ store_id: b1, product_id: product.id, size: 'M', delta: 1, quantity_before: 8, quantity_after: 9, reason: 'admin' });
-  return { product, order, fitting, invite, key, member, promo, profile, offer, review, count };
+  // Task 52: a second org B store and a sent transfer b1 → b2 with one receiving scan.
+  const [{ id: b2 }] = await db('stores').insert({ name: 'B filial', city: 'Samarqand', address: 'B 2', lat: 39.65, lon: 66.96, organization_id: orgB }).returning('id');
+  const { id: _, created_at, updated_at, ...copy } = product;
+  const [{ id: bCopy }] = await db('products').insert({ ...copy, store_id: b2, barcode: null }).returning('id');
+  const [{ id: transfer }] = await db('transfers').insert({ organization_id: orgB, from_store_id: b1, to_store_id: b2, status: 'sent' }).returning('id');
+  const [{ id: item }] = await db('transfer_items').insert({ transfer_id: transfer, product_id: product.id, to_product_id: bCopy, size: 'M', quantity: 2, received: 1 }).returning('id');
+  await db('transfer_scans').insert({ key: 'orgb-trscan-000000001', transfer_id: transfer, item_id: item, quantity: 1 });
+  return { product, order, fitting, invite, key, member, promo, profile, offer, review, count, b2, bCopy, transfer };
 }
 
 // The isolation walk: every admin route, called by org A's owner against org B's records. A route not listed here
@@ -443,6 +450,32 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       assert.equal((await db('stock_sessions').where({ id: B.count }).first()).status, 'open');
     },
     'GET /products/:id/movements': async () => refused(await admin('GET', `/products/${B.product.id}/movements`, undefined, ownerA)),
+    // Task 52: org B's transfer and stores, from org A's owner.
+    'GET /transfers': async () => {
+      const r = await admin('GET', `/transfers?store_id=${b1}`, undefined, ownerA);
+      assert.deepEqual([r.status, r.body.items], [200, []]);
+      assert.ok(!(await admin('GET', '/transfers', undefined, ownerA)).body.items.some((x) => x.id === B.transfer));
+    },
+    'GET /transfers/stores': async () => assert.deepEqual((await admin('GET', '/transfers/stores', undefined, ownerA)).body.map((s) => s.id).sort(), [a1, a2].sort()),
+    'GET /transfers/products': async () => {
+      refused(await admin('GET', `/transfers/products?from_store_id=${b1}&to_store_id=${B.b2}`, undefined, ownerA));
+      refused(await admin('GET', `/transfers/products?from_store_id=${a1}&to_store_id=${b1}`, undefined, ownerA));
+    },
+    'GET /transfers/:id': async () => refused(await admin('GET', `/transfers/${B.transfer}`, undefined, ownerA)),
+    'POST /transfers': async () => {
+      refused(await admin('POST', '/transfers', { from_store_id: b1, to_store_id: B.b2, lines: [{ product_id: B.product.id, size: 'M', quantity: 1 }] }, ownerA));
+      refused(await admin('POST', '/transfers', { from_store_id: b1, to_store_id: a1, lines: [{ product_id: B.product.id, size: 'M', quantity: 1 }] }, ownerA));
+    },
+    'PUT /transfers/:id': async () => refused(await admin('PUT', `/transfers/${B.transfer}`, { lines: [{ product_id: B.product.id, size: 'M', quantity: 1 }] }, ownerA)),
+    'POST /transfers/:id/send': async () => refused(await admin('POST', `/transfers/${B.transfer}/send`, undefined, ownerA)),
+    'POST /transfers/:id/cancel': async () => refused(await admin('POST', `/transfers/${B.transfer}/cancel`, undefined, ownerA)),
+    'POST /transfers/:id/receive': async () => refused(await admin('POST', `/transfers/${B.transfer}/receive`, undefined, ownerA)),
+    'POST /transfers/scans': async () => {
+      refused(await admin('POST', '/transfers/scans', { key: 'orga-trscan-000000001', transfer_id: B.transfer, product_id: B.bCopy, size: 'M', quantity: 1 }, ownerA));
+      assert.equal((await admin('POST', '/transfers/scans', { key: 'orgb-trscan-000000001', transfer_id: B.transfer, product_id: B.bCopy, size: 'M', quantity: 1 }, ownerA)).status, 409, 'org B\'s phone id is not answered');
+      const t = await db('transfers').where({ id: B.transfer }).first();
+      assert.deepEqual([t.status, (await db('transfer_items').where({ transfer_id: B.transfer }).first()).received], ['sent', 1], 'org B\'s transfer untouched');
+    },
     'GET /products/export': async () => {
       const r = await admin('GET', `/products/export?store_id=${b1}`, undefined, ownerA);
       assert.equal(r.status, 200);
@@ -568,7 +601,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 41; i > 12; i--) await m.migrate.down(); // 041 … 013
+    for (let i = 42; i > 12; i--) await m.migrate.down(); // 042 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

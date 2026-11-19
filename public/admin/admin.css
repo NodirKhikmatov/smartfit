@@ -438,3 +438,8 @@ dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }
   .close-expected { background: none; border: 1px solid; }
   .badge { border: 1px solid currentColor; background: none; }
 }
+
+/* Task 52: transfers. The add row lines its button up with the fields; "Ko'chirish" sits under a Talab row's name. */
+.tr-add { align-items: end; margin-top: var(--s-3); }
+.tr-offer { display: inline-flex; align-items: center; gap: var(--s-1); margin-top: var(--s-1); padding: var(--s-1) var(--s-2); font-size: var(--text-sm); }
+#trInfo .badge { margin-right: var(--s-1); }

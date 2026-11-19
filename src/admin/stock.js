@@ -24,6 +24,21 @@ const sessionOut = (s, n = {}) => ({ ...s, created_at: stamp(s.created_at), clos
 const shelfKey = (v) => String(v ?? '').trim().toLowerCase();
 const inScope = (s, p) => (s.category_id == null || p.category_id === s.category_id) && (s.shelf == null || shelfKey(p.shelf_location) === shelfKey(s.shelf));
 
+// Task 49: a product's cost becomes the weighted average of its stock on hand (all sizes, before the new units are
+// added) and `qty` new units at `cost`, rounded to whole so'm. An unknown old cost, or no stock left, takes the new cost
+// as it is; an unknown new cost (null) changes nothing. The no-op UPDATE takes the product's row first, so two
+// deliveries of one product can't both average the same old cost. Call it before adding the units. Task 52 uses it too.
+export async function averageCost(trx, productId, cost, qty) {
+  if (cost == null) return null;
+  await trx('products').where({ id: productId }).update({ cost: trx.raw('cost') });
+  const { cost: old } = await trx('products').where({ id: productId }).first('cost');
+  const [{ n }] = await trx('product_stock').where({ product_id: productId }).sum({ n: 'quantity' });
+  const have = Math.max(Number(n) || 0, 0);
+  const after = old == null || !have ? cost : Math.round((old * have + cost * qty) / (have + qty));
+  await trx('products').where({ id: productId }).update({ cost: after, updated_at: trx.fn.now() });
+  return { before: old, after };
+}
+
 export function stockRoutes(r, db, { findProduct }) {
   // ?store_id when given (must be one of the caller's), else the caller's only store.
   async function storeFor(admin, raw) {
@@ -175,18 +190,8 @@ export function stockRoutes(r, db, { findProduct }) {
         const [{ n }] = await trx('stock_scans').where({ session_id: s.id, product_id: p.id, size: b.size }).sum({ n: 'quantity' });
         if (Number(n) < 0) throw fail(409, 'err.stock_count_negative');
       } else {
-        // The cost becomes the weighted average of the stock on hand (all sizes, before this scan) and these units. The
-        // no-op UPDATE takes the product's row first, so two deliveries of one product can't both average the same old cost.
-        // An unknown old cost, or no stock left, takes the new cost as it is.
-        let costs = null;
-        if (cost !== null) {
-          await trx('products').where({ id: p.id }).update({ cost: trx.raw('cost') });
-          const { cost: old } = await trx('products').where({ id: p.id }).first('cost');
-          const [{ n }] = await trx('product_stock').where({ product_id: p.id }).sum({ n: 'quantity' });
-          const have = Math.max(Number(n) || 0, 0);
-          costs = { before: old, after: old == null || !have ? cost : Math.round((old * have + cost * qty) / (have + qty)) };
-          await trx('products').where({ id: p.id }).update({ cost: costs.after, updated_at: trx.fn.now() });
-        }
+        // The cost becomes the weighted average of the stock on hand and these units (averageCost).
+        const costs = await averageCost(trx, p.id, cost, qty);
         const up = await trx('product_stock').where({ product_id: p.id, size: b.size }).increment('quantity', qty);
         if (!up) await trx('product_stock').insert({ product_id: p.id, size: b.size, quantity: qty });
         await moved(trx, { productId: p.id, size: b.size, delta: qty, reason: 'receive', who: req.admin, ref: { session_id: s.id } });
@@ -262,8 +267,10 @@ export function stockRoutes(r, db, { findProduct }) {
     const { limit, offset } = paging(req.query);
     const [rows, [{ n }]] = await Promise.all([
       db('stock_movements as m').leftJoin('stock_sessions as s', 's.id', 'm.session_id').leftJoin('orders as o', 'o.id', 'm.order_id')
+        .leftJoin('transfers as t', 't.id', 'm.transfer_id').leftJoin('stores as fs', 'fs.id', 't.from_store_id').leftJoin('stores as ts', 'ts.id', 't.to_store_id')
         .where('m.product_id', p.id).orderBy('m.id', 'desc').limit(limit).offset(offset)
-        .select('m.id', 'm.size', 'm.delta', 'm.quantity_before', 'm.quantity_after', 'm.reason', 'm.admin_email', 'm.session_id', 's.kind as session_kind', 's.note as session_note', 'o.number as order_number', 'm.created_at'),
+        .select('m.id', 'm.size', 'm.delta', 'm.quantity_before', 'm.quantity_after', 'm.reason', 'm.admin_email', 'm.session_id', 's.kind as session_kind', 's.note as session_note', 'o.number as order_number',
+          'm.transfer_id', 'fs.name as transfer_from', 'ts.name as transfer_to', 'm.created_at'), // task 52
       db('stock_movements').where({ product_id: p.id }).count({ n: '*' }),
     ]);
     res.json({ items: rows.map((x) => ({ ...x, created_at: stamp(x.created_at) })), total: Number(n), limit, offset });

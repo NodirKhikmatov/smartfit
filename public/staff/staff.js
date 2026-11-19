@@ -151,6 +151,7 @@ function render() {
   $('orderList').replaceChildren(...(data.orders.length ? data.orders.map(orderCard) : [empty('staff.orders.empty', 'staff.orders.empty_text')]));
   $('lowList').replaceChildren(data.low.items.length ? lowList(data.low) : empty('staff.low.empty', 'staff.low.empty_text'));
   $('statsBody').replaceChildren(...stats(data.stats));
+  renderIncoming();
   if (focused) document.querySelector(`[data-key="${focused}"]`)?.focus();
 }
 
@@ -319,6 +320,7 @@ function renderQueue() {
 }
 
 const kindText = (k) => t(k === 'receive' ? 'staff.stock.receive' : 'staff.stock.count');
+const isTransfer = () => current?.kind === 'transfer';
 const scopeText = (s) => [s.category_id && catName(s.category_id), s.shelf && t('staff.stock.shelf', { shelf: s.shelf }), s.note].filter(Boolean).join(' · ');
 const catName = (id) => { const c = catalog?.categories.find((x) => x.id === id); return c ? (getLang() === 'ru' ? c.name_ru : c.name) : ''; };
 const nameOf = (p) => productName(p);
@@ -397,7 +399,7 @@ async function catalogFor(storeId) {
   } catch { return loadJson(cKey(storeId), null); }
 }
 async function openSession(s) {
-  current = { key: s.key, id: s.id ?? sessions.find((x) => x.key === s.key)?.id, kind: s.kind, store_id: s.store_id, note: s.note, category_id: s.category_id, shelf: s.shelf };
+  current = { key: s.key, id: s.id ?? sessions.find((x) => x.key === s.key)?.id, kind: s.kind, store_id: s.store_id, note: s.note, category_id: s.category_id, shelf: s.shelf, sub: s.sub };
   detail = null;
   diffMode = false;
   catalog = loadJson(cKey(s.store_id), null);
@@ -426,8 +428,9 @@ $('ssBack').onclick = () => (diffMode ? (diffMode = false, renderSession()) : cl
 async function loadDetail() {
   if (!current?.id) return;
   try {
-    const d = await call(`/stock/sessions/${current.id}`);
-    if (d.key === current.key) { detail = d; renderSession(); }
+    const d = await call(isTransfer() ? `/transfers/${current.id}` : `/stock/sessions/${current.id}`);
+    if (isTransfer() ? d.id === current.id : d.key === current.key) { detail = d; renderSession(); }
+    if (isTransfer() && d.status !== 'sent') closeSession(); // received or cancelled meanwhile
   } catch (err) {
     if (err.status === 404) closeSession(); // closed or confirmed meanwhile
   }
@@ -490,7 +493,11 @@ $('scanAdd').onclick = () => {
   const cost = costText === '' ? null : Number(costText);
   if (cost !== null && (!Number.isInteger(cost) || cost < 0 || cost > 1e9)) { $('scanError').textContent = t('staff.stock.bad_cost'); return $('scanForm').cost.focus(); }
   const label = `${nameOf(picked.p)} · ${sizeText(picked.size)} · ${qty > 0 && current.kind === 'count' ? '+' : ''}${qty}${cost === null ? '' : ` · ${fmt.som(cost)}`}`;
-  enqueue({ path: '/stock/scans', session: current.key, body: { key: newId(), session: current.key, product_id: picked.p.id, size: picked.size, quantity: qty, ...(cost !== null && { cost }) }, label });
+  if (isTransfer()) {
+    // Task 52: only what this transfer carries (checked here so a wrong scan is said at once, and by the server).
+    if (detail && !detail.lines.some((l) => l.to_product_id === picked.p.id && l.size === picked.size)) { $('scanError').textContent = t('staff.tr.not_in'); return; }
+    enqueue({ path: '/transfers/scans', session: current.key, body: { key: newId(), transfer_id: current.id, product_id: picked.p.id, size: picked.size, quantity: qty }, label });
+  } else enqueue({ path: '/stock/scans', session: current.key, body: { key: newId(), session: current.key, product_id: picked.p.id, size: picked.size, quantity: qty, ...(cost !== null && { cost }) }, label });
   toast(t('staff.stock.added', { what: label }));
   navigator.vibrate?.(40);
   resetScan();
@@ -543,8 +550,8 @@ document.addEventListener('visibilitychange', () => document.visibilityState ===
 
 function renderSession() {
   if (!current) return;
-  $('ssTitle').textContent = kindText(current.kind);
-  $('ssSub').textContent = scopeText(current) || t('staff.stock.no_note');
+  $('ssTitle').textContent = isTransfer() ? t('staff.tr.title', { n: current.id }) : kindText(current.kind);
+  $('ssSub').textContent = (isTransfer() ? current.sub : scopeText(current)) || t('staff.stock.no_note');
   $('scanForm').hidden = diffMode;
   const pending = queue().filter((o) => o.session === current.key);
   const waiting = pending.length || queue().some((o) => o.body.key === current.key);
@@ -555,7 +562,12 @@ function renderSession() {
   });
   const body = [];
   if (diffMode && detail) body.push(...diffView(detail));
-  else if (current.kind === 'receive') {
+  else if (isTransfer()) {
+    const lines = (detail?.lines ?? []).map((l) => row(nameOf(l), l.received >= l.quantity ? t('staff.tr.line_done') : t('staff.tr.line_left', { n: l.quantity - l.received }),
+      `${sizeText(l.size)} · ${l.received}/${l.quantity}`, l.received >= l.quantity ? 'done' : ''));
+    body.push(el('section', { className: 'card stock-card' }, el('h3', { textContent: t('staff.tr.progress', { n: detail?.received ?? 0, of: detail?.units ?? 0 }) }),
+      el('ul', { className: 'lines plain-rows' }, ...pendingRows, ...lines)));
+  } else if (current.kind === 'receive') {
     const sent = (detail?.scans ?? []).map((x) => row(nameOf(x), `${x.admin_email?.split('@')[0] ?? ''} · ${fmt.time(x.created_at)}`, `${sizeText(x.size)} × ${x.quantity}`));
     body.push(el('section', { className: 'card stock-card' }, el('h3', { textContent: t('staff.stock.received', { n: (detail?.units ?? 0) }) }),
       pendingRows.length + sent.length ? el('ul', { className: 'lines plain-rows' }, ...pendingRows, ...sent) : el('p', { className: 'muted', textContent: t('staff.stock.empty_receive') })));
@@ -569,7 +581,7 @@ function renderSession() {
   if (waiting) acts.push(el('p', { className: 'hint', textContent: t('staff.stock.wait_send') }));
   else if (current.id && !diffMode) {
     if (current.kind === 'count') acts.push(el('button', { type: 'button', className: 'primary', textContent: t('staff.stock.show_diff'), onclick: async () => { await loadDetail(); unticked = new Set(); diffMode = true; renderSession(); } }));
-    acts.push(el('button', { type: 'button', className: current.kind === 'count' ? 'danger ghost' : 'primary', textContent: t(current.kind === 'count' ? 'staff.stock.cancel_count' : 'staff.stock.finish'), onclick: finish }));
+    acts.push(el('button', { type: 'button', className: current.kind === 'count' ? 'danger ghost' : 'primary', textContent: t(current.kind === 'count' ? 'staff.stock.cancel_count' : 'staff.stock.finish'), onclick: isTransfer() ? finishTransfer : finish }));
   }
   $('ssActions').replaceChildren(...acts);
 }
@@ -581,6 +593,32 @@ async function finish() {
     toast(t(count ? 'staff.stock.cancelled' : 'staff.stock.finished'));
     closeSession();
   } catch (err) { toast(err.message, { tone: 'danger' }); loadDetail(); }
+}
+
+// Task 52: the receiving store says it's done. What was sent and not scanned is recorded as missing (said here first).
+async function finishTransfer() {
+  await loadDetail();
+  if (!current || !detail) return;
+  const missing = detail.units - detail.received;
+  if (!(await confirmDialog({ title: t('staff.tr.finish_title'), text: missing ? t('staff.tr.finish_missing', { n: missing }) : t('staff.tr.finish_all'), ok: t('staff.stock.finish'), danger: missing > 0 }))) return;
+  try {
+    await call(`/transfers/${current.id}/receive`, { method: 'POST' });
+    toast(t('staff.tr.finished', { n: detail.received }));
+    closeSession();
+    poll();
+  } catch (err) { toast(err.message, { tone: 'danger' }); loadDetail(); }
+}
+
+// Task 52: transfers sent to this store (from the poll), each opened like a receiving.
+function renderIncoming() {
+  const list = data?.incoming ?? [];
+  $('incomingWrap').hidden = !list.length;
+  $('incomingList').replaceChildren(...list.map((x) => el('article', { className: 'card req' },
+    el('header', {}, el('h3', { textContent: t('staff.tr.title', { n: x.id }) }), el('span', { className: 'badge warn', textContent: t('staff.tr.on_way') })),
+    el('p', { className: 'muted', textContent: [`${x.from_store} → ${x.to_store}`, x.note].filter(Boolean).join(' · ') }),
+    el('p', { textContent: t('staff.tr.summary', { n: x.units, got: x.received }) }),
+    el('div', { className: 'actions' }, el('button', { type: 'button', className: 'primary', textContent: t('staff.tr.receive'),
+      onclick: () => openSession({ key: `transfer-${x.id}`, id: x.id, kind: 'transfer', store_id: x.to_store_id, sub: [`${x.from_store} → ${x.to_store}`, x.note].filter(Boolean).join(' · ') }) })))));
 }
 
 // The differences: stock now vs counted, per size. A manager ticks what to correct; a line under the reserved units

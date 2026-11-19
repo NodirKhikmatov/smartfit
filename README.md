@@ -470,6 +470,9 @@ staff account goes straight there). Add it to the home screen (Android Chrome: "
   - Every stock change writes a movement row (who, when, why, before → after): the admin form, CSV import, the sync
     API, receiving, counts, sales, paid-order cancels, returns to stock and exchanges. Admin → Kiyimlar → a product →
     "Qoldiq tarixi". The back-in-stock alert (task 31) fires when receiving or a count brings a size back.
+  - **Kelayotgan ko'chirishlar** (task 52): transfers another store of the organisation sent here. "Qabul qilish" opens the
+    same scan screen; each scan (only items and sizes on the transfer, never more than was sent) makes the units
+    sellable here at once, through the same offline queue. "Qabulni yakunlash" fixes it: what never arrived is recorded.
 - **Alerts:** a red line when a kiosk seen in the last day has been quiet for 3 minutes.
 - The app polls every 5 s. A new request or a newly paid order rings twice and vibrates, after one tap on "Ovozni
   yoqish" (browsers allow sound only after a tap). With the screen off, phones pause web pages, so keep the staff
@@ -511,6 +514,19 @@ code) and points cost on those orders; the stock on hand at cost now; and the li
 the order). A return put back on the shelf gives its cost back; one written off (not restocked) keeps it. Sales of a
 product without a cost, and orders paid before costs existed, are shown apart ("tannarxsiz") and never counted as
 profit. Delivery fees are not goods and stay out.
+
+## Transfers between stores (task 52)
+
+`/admin` → "Ko'chirishlar" moves stock between two stores of one organisation (never across organisations). A manager of
+either store or the owner drafts it: from, to, and lines (product, size, units) picked from the products whose SKU both
+stores carry; the Talab page offers "Ko'chirish" on a missed size another store has free. A draft changes nothing.
+**Sending** (the sending store's manager or the owner) takes the units out of that store at once, all or nothing, and
+only free units (units held in carts or unpaid orders stay). The receiving store's staff receive them in the staff app;
+each scan makes those units sellable there at once. "Finish" marks it received; units sent but never scanned are
+**written off as missing** (shown on the transfer and in the audit log; they don't go back). A draft, or a sent transfer
+nothing of which has been received yet, can be cancelled; a sent one's units go back to the sending store. Each line keeps
+the product's cost at sending, and the receiving product's cost becomes the weighted average (as at receiving); a cancel
+averages it back the same way. Every step writes stock movements ("Ko'chirish № n: A → B" in the product's history).
 
 ## Launch checklist
 

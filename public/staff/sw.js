@@ -1,6 +1,6 @@
 // Staff app service worker (task 28), scope /staff/. Makes the app installable and opens its shell without a network
 // (network first, so updates arrive at once). Never API responses or anything else: the queue is always live.
-const CACHE = 'sf-staff-v3'; // v3: task 49 kirim narxi (v2: task 47 receiving and counts)
+const CACHE = 'sf-staff-v4'; // v4: task 52 transfers (v3: task 49 kirim narxi, v2: task 47 receiving and counts)
 const SHELL = [
   '/staff/', '/staff/staff.js', '/staff/staff.css', '/staff/manifest.webmanifest',
   '/shared/ui.css', '/shared/ui.js', '/shared/i18n.js', '/shared/icons.svg', '/shared/favicon.svg', '/favicon.ico',
