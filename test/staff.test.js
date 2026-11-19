@@ -10,6 +10,7 @@ import { createAdmin, createAdminRouter, responseStats, STAFF_ROUTES } from '../
 import { nextStatuses } from '../src/cart/cart.js';
 import { stageOf } from '../src/notify/telegram.js';
 import { dbTime } from '../src/recommend/routes.js';
+import { accountWalk, PUBLIC_ACCOUNT } from './helpers/account.js';
 
 process.env.ADMIN_TOKEN_SECRET = 'test-secret';
 const db = testDb();
@@ -118,7 +119,7 @@ test('route walk: the staff role can call only the staff routes', async () => {
   await db('transfer_items').insert({ transfer_id: tr, product_id: pA2.id, to_product_id: product.id, size, quantity: 2 });
   ids['/transfers/:id'] = tr;
   const fill = (path) => path.replace('/stock/sessions/:id', `/stock/sessions/${recv.id}`).replace(/^(\/[a-z-]+(?:\/invites)?)\/:id/, (m, head) => `${head}/${ids[`${head}/:id`]}`);
-  const PUBLIC = ['POST /login', 'POST /invite/check', 'POST /invite/accept']; // before the auth middleware, no token used
+  const PUBLIC = ['POST /login', 'POST /invite/check', 'POST /invite/accept', ...PUBLIC_ACCOUNT]; // before the auth middleware, no token used
   const ALLOWED = {
     'GET /stock/catalog': async () => assert.equal((await admin('GET', '/stock/catalog', undefined, staff1)).body.store_id, a1),
     'GET /stock/sessions': async () => assert.ok((await admin('GET', '/stock/sessions', undefined, staff1)).body.open.some((s) => s.id === recv.id)),
@@ -149,6 +150,7 @@ test('route walk: the staff role can call only the staff routes', async () => {
       assert.equal(r.status, 200);
       staff2 = r.body.token;
     },
+    ...accountWalk(admin, () => staff2, (t) => { staff2 = t; }, () => 'staff-pass-2b'), // task 54
   };
   const routes = createAdminRouter(db).stack.filter((l) => l.route)
     .flatMap((l) => Object.keys(l.route.methods).filter((m) => m !== '_all' && m !== 'head').map((m) => [m.toUpperCase(), l.route.path]));
@@ -297,5 +299,5 @@ test('the staff app: served under /staff/, installable, its service worker never
   }
   assert.doesNotMatch(sw.replace(/^\s*\/\/.*$/gm, ''), /\/api\/|\/uploads/, 'only the shell list is ever cached');
   assert.match(read('public/staff/staff.js'), /serviceWorker\?\.register\('\/staff\/sw\.js', \{ scope: '\/staff\/' \}\)/);
-  assert.match(read('public/admin/admin.js'), /me\.role === 'staff'\) return location\.replace\('\/staff\/'\)/);
+  assert.match(read('public/admin/admin.js'), /me\.role === 'staff' && !location\.hash\.startsWith\('#\/settings'\)\) return location\.replace\('\/staff\/'\)/); // task 54: but their account page
 });

@@ -28,7 +28,7 @@ async function call(path, opts = {}) {
   } catch {
     throw Object.assign(new Error(t('adm.offline')), { offline: true });
   }
-  if (res.status === 401 && path !== '/login') { store.set('sfToken', null); show(); throw new Error(t('adm.relogin')); }
+  if (res.status === 401 && !path.startsWith('/login')) { store.set('sfToken', null); show(); throw new Error(t('adm.relogin')); }
   const body = res.status === 204 ? null : await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(body.error || t('common.error')), { status: res.status, code: body.code });
   return body;
@@ -47,6 +47,8 @@ async function show() {
   $('stockSession').hidden = $('sessionForm').hidden = true;
   $('stockHome').hidden = false;
   if (!me) return $('login').email.focus();
+  // Task 54: the organisation requires two-step login and this account has none yet: set it up on the account page first.
+  if (me.two_step?.setup) return location.assign('/admin/#/settings?tab=account');
   renderStock();
   $('salesBody').replaceChildren(); // another person may have signed in
   if (tab === 'sales') loadSales();
@@ -58,12 +60,38 @@ $('login').addEventListener('submit', async (e) => {
   const f = e.target;
   $('loginError').textContent = '';
   try {
-    const r = await call('/login', { method: 'POST', body: { email: f.email.value, password: f.password.value } });
-    store.set('sfToken', r.token);
+    const r = ticket ? await call('/login/code', { method: 'POST', body: { ticket, code: f.code.value } })
+      : await call('/login', { method: 'POST', body: { email: f.email.value, password: f.password.value } });
     f.password.value = '';
+    if (r.two_step) {
+      loginStep(true);
+      ticket = r.ticket;
+      return;
+    }
+    store.set('sfToken', r.token);
+    if (ticket) loginStep(false);
     show();
-  } catch (err) { $('loginError').textContent = err.message; }
+  } catch (err) {
+    if (err.code === 'login_again') loginStep(false); // the 5 minutes for the code ran out
+    $('loginError').textContent = err.message;
+  }
 });
+// Task 54: the second step (authenticator code or a recovery code) when the account has two-step login on.
+let ticket = null;
+function loginStep(code) {
+  const f = $('login');
+  $('loginEmail').hidden = $('loginPass').hidden = code;
+  f.email.required = f.password.required = !code;
+  $('loginCode').hidden = $('loginBack').hidden = !code;
+  f.code.required = code;
+  f.code.value = '';
+  if (!code) ticket = null;
+  (code ? f.code : f.email).focus();
+}
+$('loginBack').onclick = () => {
+  $('loginError').textContent = '';
+  loginStep(false);
+};
 $('logout').onclick = () => { store.set('sfToken', null); show(); };
 
 // ---------- Polling. Hidden tabs keep polling (a phone in a pocket should still ring); a returning tab polls at once.

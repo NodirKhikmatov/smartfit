@@ -296,6 +296,19 @@ a.kpi:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); col
 .invite-list { display: grid; gap: var(--s-2); list-style: none; margin: 0; padding: 0; }
 .invite-row { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-3) var(--s-4); }
 .invite-row .grow { flex: 1; min-width: 0; }
+/* Task 54: two-step login and the sign-in list */
+.ts-steps { margin: 0 0 var(--s-3); padding-left: 1.25em; display: grid; gap: var(--s-1); }
+.ts-qr { width: 12rem; max-width: 100%; padding: var(--s-2); background: var(--surface); border-radius: var(--r-sm); border: 1px solid var(--line); }
+.ts-qr svg { display: block; width: 100%; height: auto; }
+.ts-secret code { font-size: var(--text-md); letter-spacing: .04em; word-break: normal; } /* wraps between the groups of four */
+.ts-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: var(--s-2) var(--s-4); margin: 0 0 var(--s-3); padding-left: 1.75em;
+  font: var(--text-md) ui-monospace, 'SF Mono', Menlo, monospace; font-variant-numeric: tabular-nums; }
+.logins { list-style: none; margin: 0 0 var(--s-3); padding: 0; display: grid; }
+.login-row { display: flex; align-items: flex-start; gap: var(--s-3); padding: var(--s-3) 0; border-bottom: 1px solid var(--line); }
+.login-row:last-child { border-bottom: 0; }
+.login-row .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.login-row .badge.accent { margin-left: var(--s-2); }
+.login-row > .badge { flex: none; min-width: 5.5rem; justify-content: center; text-align: center; }
 .code-sample code { background: none; padding: 0; word-break: normal; }
 .code-sample { margin: 0; padding: var(--s-3) var(--s-4); overflow-x: auto; max-width: 100%; font-size: var(--text-sm, .875rem); line-height: 1.5; }
 .changes { list-style: none; margin: 0; padding: 0; font-size: var(--text-sm); }

@@ -308,7 +308,8 @@ test('migration 043 goes down and up', async () => {
   try {
     await m.migrate.latest();
     await m('malls').insert({ name: 'Qoladi', city: 'Toshkent', address: 'Navoiy 1', report_chat_id: 123 });
-    await m.migrate.down();
+    await m.migrate.down(); // 044
+    await m.migrate.down(); // 043
     assert.equal(await m.schema.hasTable('mall_stats'), false);
     for (const c of ['report_chat_id', 'report_week']) assert.equal(await m.schema.hasColumn('malls', c), false, c);
     assert.ok(await m('malls').where({ name: 'Qoladi' }).first());

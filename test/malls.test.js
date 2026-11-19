@@ -11,6 +11,7 @@ import { createApp } from '../src/app.js';
 import { seed, DEMO_MALL } from '../src/db/seed.js';
 import { createAdmin, createAdminRouter, MALL_ROUTES } from '../src/admin/routes.js';
 import { dbTime } from '../src/recommend/routes.js';
+import { accountWalk, PUBLIC_ACCOUNT } from './helpers/account.js';
 
 process.env.ADMIN_TOKEN_SECRET = 'test-secret';
 const db = testDb();
@@ -168,7 +169,7 @@ test('route walk: a mall admin reaches only their own mall; every shop data rout
   const [{ id: spotB }] = await db('mall_spots').insert({ mall_id: mallB, floor_id: floorB, label: 'B kiosk', x: 1, y: 1 }).returning('id');
   const fill = (p) => p.replace(/^(\/[a-z-]+(?:\/invites)?)\/:id/, (m, head) => `${head}/${ids[`${head}/:id`]}`).replace('/mall/stores/:id', `/mall/stores/${s1}`).replace('/mall/offers/:id', `/mall/offers/${offerA}`)
     .replace('/mall/floors/:id', `/mall/floors/${floorA}`).replace('/mall/spots/:id', `/mall/spots/${spotA}`);
-  const PUBLIC = ['POST /login', 'POST /invite/check', 'POST /invite/accept'];
+  const PUBLIC = ['POST /login', 'POST /invite/check', 'POST /invite/accept', ...PUBLIC_ACCOUNT];
   const ALLOWED = {
     'GET /me': async () => assert.equal((await admin('GET', '/me', undefined, mallTokenA)).body.mall_id, mallA),
     'POST /me/password': async () => {
@@ -176,6 +177,7 @@ test('route walk: a mall admin reaches only their own mall; every shop data rout
       assert.equal(r.status, 200);
       mallTokenA = r.body.token;
     },
+    ...accountWalk(admin, () => mallTokenA, (t) => { mallTokenA = t; }, () => 'mall-pass-1b'), // task 54
     'GET /mall': async () => {
       const r = await admin('GET', '/mall', undefined, mallTokenA);
       assert.equal(r.body.mall.id, mallA);

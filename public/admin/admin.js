@@ -44,7 +44,7 @@ async function call(path, opts = {}) {
   } catch {
     throw new Error(t('adm.offline')); // the browser's own text ("Failed to fetch") is English and says nothing useful
   }
-  if (res.status === 401 && path !== '/login') { store.set('sfToken', null); show(); throw new Error(t('adm.relogin')); }
+  if (res.status === 401 && !path.startsWith('/login')) { store.set('sfToken', null); show(); throw new Error(t('adm.relogin')); }
   if (opts.blob && res.ok) return res.blob();
   const data = res.status === 204 ? null : await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error || t('common.error')), { data });
@@ -203,10 +203,12 @@ async function show() {
   $('login').hidden = !!me;
   $('app').hidden = !me;
   if (!me) return;
-  if (me.role === 'staff') return location.replace('/staff/'); // task 28: the shop-floor role has only the staff app
+  // Task 28: the shop-floor role has only the staff app, and (task 54) its account page here.
+  if (me.role === 'staff' && !location.hash.startsWith('#/settings')) return location.replace('/staff/');
   // Task 37: a mall admin has no store at all and only the mall page (the server refuses everything else).
   const mallRole = me.role === 'mall';
-  stores = mallRole ? [] : await call('/stores');
+  const acct = acctOnly();
+  stores = mallRole || acct ? [] : await call('/stores');
   const sup = many();
   scope = sup && stores.some((s) => String(s.id) === store.get('sfAdminStore')) ? store.get('sfAdminStore') : '';
   $('scope').replaceChildren(el('option', { value: '', textContent: t('adm.all_stores') }), ...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
@@ -223,26 +225,55 @@ async function show() {
   $('navSizes').hidden = !['owner', 'manager', 'super'].includes(me.role); // task 48: managers edit size charts too
   $('navOffers').hidden = !['owner', 'super'].includes(me.role) || !feat('offers'); // offers are the owner's, on a plan with them (task 45)
   planBanner();
-  for (const li of $('nav').children) if (!li.id || li.id === 'navSettings') li.hidden = mallRole;
+  for (const li of $('nav').children) if (!li.id) li.hidden = mallRole;
   $('navMall').hidden = $('navMallStats').hidden = !mallRole; // task 53: "Tahlil"
-  $('userMenu').querySelector('a[href="#/settings"]').hidden = mallRole;
-  document.querySelector('.side-inner > .wordmark').href = mallRole ? '#/mall' : '#/dashboard';
-  if (!mallRole) await loadCats();
+  // Task 54: staff, and anyone whose organisation requires two-step login they haven't set up, get only their account.
+  if (acct) for (const li of $('nav').children) li.hidden = li.id !== 'navSettings' && !(me.role === 'staff' && li.querySelector('[data-route=staff]'));
+  document.querySelector('.side-inner > .wordmark').href = acct ? '#/settings?tab=account' : mallRole ? '#/mall' : '#/dashboard';
+  if (!mallRole && !acct) await loadCats();
   $('form').store_id.replaceChildren(...stores.map((s) => el('option', { value: s.id, textContent: s.name })));
   render();
-  if (!mallRole) pollBadge();
+  if (!mallRole && !acct) pollBadge();
 }
+const acctOnly = () => me.role === 'staff' || me.two_step?.setup;
+
+// Sign-in: email + password, then (task 54) the authenticator code when the account has two-step login on.
+let ticket = null;
+function loginStep(code) {
+  const f = $('login');
+  $('loginEmail').hidden = $('loginPass').hidden = code;
+  f.email.required = f.password.required = !code;
+  $('loginCode').hidden = $('loginBack').hidden = !code;
+  f.code.required = code;
+  f.code.value = '';
+  if (!code) ticket = null;
+  (code ? f.code : f.email).focus();
+}
+$('loginBack').onclick = () => {
+  $('loginError').textContent = '';
+  loginStep(false);
+};
 
 $('login').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('loginError').textContent = '';
   try {
     const f = e.target;
-    const r = await call('/login', { method: 'POST', body: { email: f.email.value, password: f.password.value } });
-    store.set('sfToken', r.token);
+    const r = ticket ? await call('/login/code', { method: 'POST', body: { ticket, code: f.code.value } })
+      : await call('/login', { method: 'POST', body: { email: f.email.value, password: f.password.value } });
     f.password.value = '';
+    if (r.two_step) {
+      loginStep(true);
+      ticket = r.ticket;
+      return;
+    }
+    store.set('sfToken', r.token);
+    if (ticket) loginStep(false);
     show();
-  } catch (err) { $('loginError').textContent = err.message; }
+  } catch (err) {
+    if (err.data?.code === 'login_again') loginStep(false); // the 5 minutes for the code ran out
+    $('loginError').textContent = err.message;
+  }
 });
 $('logout').onclick = () => { $('userMenu').hidePopover?.(); store.set('sfToken', null); show(); };
 $('scope').onchange = (e) => {
@@ -316,12 +347,14 @@ const ACTIONS = {
 function render() {
   route = parseHash(location.hash);
   // A new owner has no store yet: everything but the wizard and their account waits for it. Only owners add stores.
-  const welcome = me.role === 'owner' && !stores.length;
+  const acct = acctOnly();
+  const welcome = !acct && me.role === 'owner' && !stores.length;
   const mallRole = me.role === 'mall';
-  if ((welcome && !['welcome', 'settings'].includes(route.route)) || (route.route === 'welcome' && me.role !== 'owner') || (['orgs', 'malls'].includes(route.route) && me.role !== 'super')
-    || (['categories', 'offers'].includes(route.route) && !['owner', 'super'].includes(me.role)) || (route.route === 'sizes' && !['owner', 'manager', 'super'].includes(me.role)) || (route.route === 'offers' && !feat('offers')) || (mallRole !== ['mall', 'mallstats'].includes(route.route))) {
-    route = parseHash(welcome ? '#/welcome' : mallRole ? '#/mall' : '#/dashboard');
-    history.replaceState(null, '', buildHash(route.route));
+  if ((acct && route.route !== 'settings') || (welcome && !['welcome', 'settings'].includes(route.route)) || (route.route === 'welcome' && me.role !== 'owner') || (['orgs', 'malls'].includes(route.route) && me.role !== 'super')
+    || (['categories', 'offers'].includes(route.route) && !['owner', 'super'].includes(me.role)) || (route.route === 'sizes' && !['owner', 'manager', 'super'].includes(me.role)) || (route.route === 'offers' && !feat('offers'))
+    || (mallRole ? !['mall', 'mallstats', 'settings'].includes(route.route) : ['mall', 'mallstats'].includes(route.route))) {
+    route = parseHash(acct ? '#/settings?tab=account' : welcome ? '#/welcome' : mallRole ? '#/mall' : '#/dashboard');
+    history.replaceState(null, '', buildHash(route.route, route.params));
   }
   const name = route.route;
   for (const s of document.querySelectorAll('[data-page]')) s.hidden = s.dataset.page !== name;
@@ -350,7 +383,7 @@ window.addEventListener('hashchange', () => {
 const seenKey = () => `sfSeenOrder:${me.id}`;
 let latestOrder = 0;
 async function pollBadge() {
-  if (me?.role === 'mall') return; // no orders of their own
+  if (me?.role === 'mall' || (me && acctOnly())) return; // no orders of their own (task 54: nor while only the account page is open)
   try {
     const since = Number(store.get(seenKey())) || 0;
     const r = await call(`/orders/unseen?since=${since}`);
@@ -1946,7 +1979,8 @@ function printQr(q) {
 
 const SET_TABS = [['store', 'adm.set.store'], ['team', 'adm.set.team'], ['promo', 'adm.set.promo'], ['points', 'adm.set.points'], ['sync', 'adm.set.sync'], ['audit', 'adm.set.audit'], ['plan', 'adm.set.plan'], ['account', 'adm.set.account']];
 function loadSettings() {
-  const tabs = SET_TABS.filter(([k]) => (me.role !== 'manager' || ['store', 'points', 'account'].includes(k)) && (k !== 'plan' || me.role === 'owner'));
+  const tabs = SET_TABS.filter(([k]) => (me.role !== 'manager' || ['store', 'points', 'account'].includes(k)) && (k !== 'plan' || me.role === 'owner')
+    && (k === 'account' || !(acctOnly() || me.role === 'mall')));
   const tab = tabs.some(([k]) => k === route.params.tab) ? route.params.tab : stores.length ? 'store' : 'account'; // a new owner has no store yet
   $('setTabs').replaceChildren(...tabs.map(([k, label]) => {
     const a = el('a', { className: 'chip', href: buildHash('settings', k === 'store' ? {} : { tab: k }), textContent: t(label) });
@@ -2197,8 +2231,10 @@ async function loadTeam() {
       sup ? el('td', { className: 'hide-sm', textContent: m.store_name || t('adm.all_stores') }) : null,
       el('td', { className: 'num' }, commissionCell(m)),
       el('td', { className: 'hide-sm' }, el('span', { className: `badge ${m.disabled ? 'off' : 'ok'}`, textContent: t(m.disabled ? 'adm.team.disabled' : 'adm.team.active') })), // phones: in the first cell
-      el('td', { className: 'row-actions' }, m.can_manage && el('button', { type: 'button', className: m.disabled ? '' : 'danger ghost', onclick: (e) => setDisabled(m, !m.disabled, e.currentTarget) },
-        t(m.disabled ? 'adm.team.enable' : 'adm.team.disable'))))));
+      el('td', { className: 'row-actions' },
+        m.can_manage && !m.disabled && el('button', { type: 'button', className: 'ghost', onclick: (e) => resetLink(m, e.currentTarget) }, t('adm.reset.make')), // task 54
+        m.can_manage && el('button', { type: 'button', className: m.disabled ? '' : 'danger ghost', onclick: (e) => setDisabled(m, !m.disabled, e.currentTarget) },
+          t(m.disabled ? 'adm.team.enable' : 'adm.team.disable'))))));
     $('inviteList').replaceChildren(...(r.invites.length ? r.invites.map((i) => el('li', { className: 'card invite-row' },
       el('div', { className: 'grow' }, el('strong', { className: 'cell-email', textContent: i.email }),
         el('div', { className: 'sizes', textContent: [roleName(i.role), sup && i.store_name, t('adm.team.expires', { at: fmt.dateTime(i.expires_at) })].filter(Boolean).join(' · ') })),
@@ -2238,6 +2274,23 @@ async function setDisabled(m, disabled, btn) {
     await loadTeam();
   } catch (err) { toast(err.message, { tone: 'danger' }); btn.disabled = false; }
 }
+// Task 54: a one-time password reset link, shown once in the invite dialog's link step.
+async function resetLink(m, btn) {
+  if (!(await confirmDialog({ title: t('adm.reset.make_q', { email: m.email }), text: t('adm.reset.make_text'), ok: t('adm.reset.make') }))) return btn.focus();
+  try {
+    const r = await call(`/team/${m.id}/reset`, { method: 'POST' });
+    inviteStep(true);
+    $('inviteTitle').textContent = t('adm.reset.link_title', { email: r.email });
+    $('inviteLinkText').textContent = t('adm.reset.link_text');
+    $('inviteLinkLabel').textContent = t('adm.reset.link');
+    $('inviteDlgError').textContent = '';
+    $('inviteUrl').value = r.url;
+    $('inviteExpiry').textContent = t('adm.team.link_expiry', { at: fmt.dateTime(r.expires_at) });
+    $('inviteDlg').showModal();
+    $('inviteUrl').focus();
+    $('inviteUrl').select();
+  } catch (err) { toast(err.message, { tone: 'danger' }); }
+}
 async function revokeInvite(i) {
   if (!(await confirmDialog({ title: t('adm.team.revoke_q', { email: i.email }), text: t('adm.team.revoke_text'), ok: t('adm.team.revoke'), danger: true }))) return;
   try {
@@ -2248,6 +2301,9 @@ async function revokeInvite(i) {
 
 const inv = $('inviteForm');
 function inviteStep(done) {
+  $('inviteTitle').textContent = t('adm.team.invite');
+  $('inviteLinkText').textContent = t('adm.team.link_text');
+  $('inviteLinkLabel').textContent = t('adm.team.link');
   $('inviteAsk').hidden = done;
   $('inviteDone').hidden = !done;
   $('inviteCreate').hidden = done;
@@ -2579,6 +2635,7 @@ const AUDIT_FIELDS = {
   hidden: 'adm.cats.hide', sort: 'adm.cats.order',
   title: 'field.offer_title', title_ru: 'field.offer_title_ru', body: 'field.offer_body', body_ru: 'field.offer_body_ru', reject_reason: 'field.offer_reason', // task 43
   promo_code_id: 'adm.offers.link_promo', product_id: 'adm.offers.link_product', seconds: 'field.slide_seconds', order: 'field.slide_order',
+  require_two_step: 'adm.ts.org_rule', left: 'adm.audit.codes_left', step: 'adm.audit.step', // task 54
   starts_on: 'adm.promo.starts', ends_on: 'adm.promo.ends', max_uses: 'field.promo_max_uses', max_per_phone: 'field.promo_per_phone', active: 'field.promo_active',
 };
 const MONEY = ['price', 'discount_price', 'cost', 'delivery_fee', 'free_delivery_threshold', 'min_order'];
@@ -2668,9 +2725,142 @@ async function loadAudit() {
 function loadAccount() {
   const fact = (k, v) => [el('dt', { textContent: t(k) }), el('dd', { textContent: v })];
   $('accFacts').replaceChildren(...fact('adm.login.email', me.email), ...fact('adm.set.role', roleName(me.role)),
-    ...fact('common.store', many() ? t('adm.all_stores') : stores[0]?.name || ''));
-  $('pwForm').username.value = me.email;
+    ...(stores.length ? fact('common.store', many() ? t('adm.all_stores') : stores[0].name) : []));
+  $('pwForm').username.value = $('tsOn').username.value = me.email;
+  if (!$('tsCodes').hidden) return; // codes on screen: they stay until "Saqladim"
+  tsView(null);
+  loadSecurity();
 }
+
+// ---------- Task 54: two-step login (authenticator app + recovery codes), the organisation's rule, "Kirishlar".
+let tsSecret = null; // the secret being set up: in memory and on screen only until confirmed or cancelled
+function tsView(v) { // null = whatever the account's state shows (tsOff / tsOn), set by loadSecurity
+  $('tsSetup').hidden = v !== 'setup';
+  $('tsCodes').hidden = v !== 'codes';
+  if (v) $('tsOff').hidden = $('tsOn').hidden = true;
+  if (v !== 'setup') {
+    tsSecret = null;
+    $('tsQr').replaceChildren();
+    $('tsSecret').textContent = '';
+  }
+  if (v !== 'codes') $('tsCodeList').replaceChildren();
+}
+const LOGIN_METHOD = { password: 'adm.logins.m_password', two_step: 'adm.logins.m_two_step', recovery: 'adm.logins.m_recovery', invite: 'adm.logins.m_invite', reset: 'adm.logins.m_reset' };
+// "Mozilla/5.0 (iPhone; …) … Safari/604.1" → "Safari · iOS": enough to recognise a device, nothing more.
+function deviceName(ua = '') {
+  const b = /Edg\//.test(ua) ? 'Edge' : /YaBrowser/.test(ua) ? 'Yandex' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
+  const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : '';
+  return [b, os].filter(Boolean).join(' · ') || t('adm.logins.device_unknown');
+}
+async function loadSecurity() {
+  const seq = (loads.sec = (loads.sec || 0) + 1);
+  let s;
+  try {
+    s = await call('/me/security');
+  } catch (err) {
+    if (seq === loads.sec) stateBox($('loginsError'), err, () => loadSecurity());
+    return;
+  }
+  if (seq !== loads.sec) return;
+  stateBox($('loginsError'));
+  const on = s.two_step.on;
+  $('tsRequired').hidden = on || !s.two_step.required;
+  if (me.two_step?.setup && !on) $('tsCard').scrollIntoView({ block: 'start' }); // the one thing to do here
+  $('tsState').className = `badge ${on ? 'ok' : 'off'}`;
+  $('tsState').textContent = t(on ? 'adm.ts.on' : 'adm.ts.off');
+  $('tsLeft').textContent = on ? t('adm.ts.left', { n: s.two_step.codes_left }) : '';
+  if ($('tsSetup').hidden && $('tsCodes').hidden) {
+    $('tsOff').hidden = on;
+    $('tsOn').hidden = !on;
+  }
+  $('tsOffBtn').hidden = s.two_step.required; // the organisation's rule keeps it on
+  $('tsOrgWrap').hidden = !s.org;
+  $('tsOrg').checked = Boolean(s.org?.require_two_step);
+  $('loginList').replaceChildren(...(s.logins.length ? s.logins.map((l) => el('li', { className: 'login-row' },
+    el('span', { className: `badge ${l.ok ? 'ok' : 'danger'}`, textContent: t(l.ok ? 'adm.logins.ok' : 'adm.logins.fail') }),
+    el('div', { className: 'grow' },
+      el('strong', { textContent: t(LOGIN_METHOD[l.method]) }), l.current && el('span', { className: 'badge accent', textContent: t('adm.logins.this') }),
+      el('div', { className: 'sizes', textContent: [fmt.dateTime(l.created_at), deviceName(l.agent || ''), l.ip].filter(Boolean).join(' · ') }))))
+    : [el('li', { className: 'li-empty' }, emptyState({ ic: 'user', title: t('adm.logins.none') }))]));
+}
+$('tsStart').onclick = async () => {
+  try {
+    const r = await call('/me/two-step/new');
+    tsView('setup');
+    tsSecret = r.secret;
+    $('tsQr').innerHTML = r.svg; // generated by our server from the otpauth:// link (path data only)
+    $('tsSecret').textContent = r.secret.toUpperCase().match(/.{4}/g).join(' ');
+    $('tsSetupError').textContent = '';
+    $('tsSetup').code.value = '';
+    $('tsSetup').code.focus();
+  } catch (err) { toast(err.message, { tone: 'danger' }); }
+};
+$('tsCancel').onclick = () => {
+  tsView(null);
+  loadSecurity();
+  $('tsStart').focus();
+};
+function showCodes(codes) {
+  tsView('codes');
+  $('tsCodeList').replaceChildren(...codes.map((c) => el('li', { textContent: c })));
+  $('tsSaved').focus();
+}
+$('tsSetup').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  $('tsSetupError').textContent = '';
+  if (!/^\d{6}$/.test(f.code.value.trim())) { $('tsSetupError').textContent = t('adm.ts.code6_rule'); return f.code.focus(); }
+  try {
+    const r = await call('/me/two-step', { method: 'POST', body: { secret: tsSecret, code: f.code.value.trim() } });
+    showCodes(r.recovery_codes);
+    toast(t('adm.ts.on_done'), { tone: 'ok' });
+    loadSecurity(); // the badge and count; the codes stay on screen
+  } catch (err) { $('tsSetupError').textContent = err.message; }
+};
+$('tsCopy').onclick = () => navigator.clipboard?.writeText([...$('tsCodeList').children].map((li) => li.textContent).join('\n'))
+  .then(() => toast(t('adm.ts.copied'), { tone: 'ok' }), () => toast(t('common.error'), { tone: 'danger' }));
+$('tsSaved').onclick = () => {
+  tsView(null);
+  if (me.two_step?.setup) return show(); // the organisation's rule is met: the whole panel opens
+  loadSecurity();
+  $('tsTitle').focus?.();
+};
+$('tsOn').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const what = e.submitter?.value;
+  $('tsOnError').textContent = '';
+  if (!f.password.value) { $('tsOnError').textContent = t('adm.ts.pw_needed'); return f.password.focus(); }
+  if (what === 'off' && !(await confirmDialog({ title: t('adm.ts.off_q'), text: t('adm.ts.off_text'), ok: t('adm.ts.turn_off'), danger: true }))) return;
+  try {
+    const r = await call(what === 'off' ? '/me/two-step/off' : '/me/two-step/codes', { method: 'POST', body: { password: f.password.value } });
+    f.password.value = '';
+    if (what === 'off') {
+      toast(t('adm.ts.off_done'), { tone: 'ok' });
+      loadSecurity();
+    } else showCodes(r.recovery_codes);
+  } catch (err) { $('tsOnError').textContent = err.message; }
+};
+$('tsOrg').onchange = async (e) => {
+  const want = e.target.checked;
+  try {
+    await call('/org/two-step', { method: 'PATCH', body: { required: want } });
+    toast(t(want ? 'adm.ts.org_on' : 'adm.ts.org_off'), { tone: 'ok' });
+    loadSecurity(); // "O'chirish" hides while the rule is on
+  } catch (err) {
+    e.target.checked = !want;
+    toast(err.message, { tone: 'danger' });
+  }
+};
+$('logoutAll').onclick = async () => {
+  if (!(await confirmDialog({ title: t('adm.logins.out_q'), text: t('adm.logins.out_text'), ok: t('adm.logins.out_all'), danger: true }))) return;
+  try {
+    const r = await call('/me/logout-all', { method: 'POST' });
+    store.set('sfToken', r.token);
+    toast(t('adm.logins.out_done'), { tone: 'ok' });
+    loadSecurity();
+  } catch (err) { toast(err.message, { tone: 'danger' }); }
+};
 $('pwForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target;
@@ -2898,17 +3088,22 @@ async function loadWizQr(id) {
 
 // On load or on a hash change (a signed-in admin pasting the link). The token leaves the address bar at once,
 // so it isn't kept in history or shown over a shoulder.
+// Task 54: a password reset link (#/reset?token=…) uses the same screen.
 function inviteFromHash() {
-  if (!location.hash.startsWith('#/invite')) return false;
+  const kind = location.hash.startsWith('#/invite') ? 'invite' : location.hash.startsWith('#/reset') ? 'reset' : null;
+  if (!kind) return false;
   const tok = new URLSearchParams(location.hash.split('?')[1]).get('token');
   history.replaceState(null, '', location.pathname);
-  showInvite(tok);
+  showInvite(tok, kind);
   return true;
 }
-async function showInvite(tok) {
+async function showInvite(tok, kind) {
   const f = $('invite');
   me = null; // stops the background polls while this screen is up
-  document.title = `${t('adm.inv.title')} · Smart Fit`;
+  const title = t(kind === 'reset' ? 'adm.reset.title' : 'adm.inv.title');
+  document.title = `${title} · Smart Fit`;
+  $('invitePageTitle').textContent = title;
+  $('inviteSubmit').textContent = t(kind === 'reset' ? 'adm.reset.submit' : 'adm.inv.submit');
   for (const d of document.querySelectorAll('dialog[open]')) d.close();
   $('inviteFields').hidden = $('inviteSubmit').hidden = false;
   $('inviteLogin').hidden = true;
@@ -2917,8 +3112,8 @@ async function showInvite(tok) {
   $('app').hidden = true;
   f.hidden = false;
   try {
-    const r = await call('/invite/check', { method: 'POST', body: { token: tok } });
-    $('inviteFor').textContent = t('adm.inv.for', { email: r.email, role: roleName(r.role), store: r.store_name || r.org_name || r.mall_name });
+    const r = await call(`/${kind}/check`, { method: 'POST', body: { token: tok } });
+    $('inviteFor').textContent = kind === 'reset' ? t('adm.reset.for', { email: r.email }) : t('adm.inv.for', { email: r.email, role: roleName(r.role), store: r.store_name || r.org_name || r.mall_name });
     f.username.value = r.email;
     f.password.focus();
   } catch (err) {
@@ -2931,7 +3126,7 @@ async function showInvite(tok) {
     $('inviteError').textContent = '';
     if (f.password.value !== f.repeat.value) { $('inviteError').textContent = t('adm.pw.mismatch'); return f.repeat.focus(); }
     try {
-      const r = await call('/invite/accept', { method: 'POST', body: { token: tok, password: f.password.value } });
+      const r = await call(`/${kind}/accept`, { method: 'POST', body: { token: tok, password: f.password.value } });
       store.set('sfToken', r.token);
       f.reset();
       show();

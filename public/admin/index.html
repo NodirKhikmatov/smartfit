@@ -16,15 +16,17 @@
   <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
   <h1 data-i18n="adm.login.title"></h1>
   <div id="loginLang"></div>
-  <label><span data-i18n="adm.login.email"></span> <input name="email" type="email" autocomplete="username" required></label>
-  <label><span data-i18n="adm.login.password"></span> <input name="password" type="password" autocomplete="current-password" required></label>
+  <label id="loginEmail"><span data-i18n="adm.login.email"></span> <input name="email" type="email" autocomplete="username" required></label>
+  <label id="loginPass"><span data-i18n="adm.login.password"></span> <input name="password" type="password" autocomplete="current-password" required></label>
+  <label id="loginCode" hidden><span data-i18n="adm.ts.code"></span> <input name="code" autocomplete="one-time-code" maxlength="40" autocapitalize="off" spellcheck="false" aria-describedby="loginCodeHint"><span class="hint" id="loginCodeHint" data-i18n="adm.ts.code_hint"></span></label>
   <p class="error" id="loginError" role="alert"></p>
   <button class="primary" data-i18n="adm.login.submit"></button>
+  <button type="button" class="ghost" id="loginBack" hidden data-i18n="common.back"></button>
 </form>
 
 <form id="invite" class="card raised" hidden>
   <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
-  <h1 data-i18n="adm.inv.title"></h1>
+  <h1 id="invitePageTitle" data-i18n="adm.inv.title"></h1>
   <p class="muted" id="inviteFor"></p>
   <input name="username" type="email" autocomplete="username" hidden>
   <div id="inviteFields">
@@ -32,7 +34,7 @@
     <label class="field"><span data-i18n="adm.pw.repeat"></span> <input name="repeat" type="password" autocomplete="new-password" required minlength="8" maxlength="200"></label>
   </div>
   <p class="error" id="inviteError" role="alert"></p>
-  <button class="primary" id="inviteSubmit" data-i18n="adm.inv.submit"></button>
+  <button class="primary" id="inviteSubmit"></button>
   <a class="button ghost" href="/admin/" id="inviteLogin" hidden data-i18n="adm.inv.to_login"></a>
 </form>
 
@@ -926,6 +928,47 @@
               <p class="error" id="pwError" role="alert"></p>
               <div class="actions"><button class="primary" data-i18n="adm.pw.submit"></button></div>
             </form>
+            <section class="card" id="tsCard" aria-labelledby="tsTitle">
+              <h2 id="tsTitle" data-i18n="adm.ts.title"></h2>
+              <p class="notice warn" id="tsRequired" hidden data-i18n="adm.ts.required"></p>
+              <p class="muted" data-i18n="adm.ts.sub"></p>
+              <p><span class="badge" id="tsState"></span> <span class="muted" id="tsLeft"></span></p>
+              <div class="actions" id="tsOff" hidden><button type="button" class="primary" id="tsStart" data-i18n="adm.ts.start"></button></div>
+              <form id="tsSetup" hidden novalidate>
+                <ol class="ts-steps">
+                  <li data-i18n="adm.ts.step1"></li>
+                  <li data-i18n="adm.ts.step2"></li>
+                </ol>
+                <div class="ts-qr" id="tsQr"></div>
+                <p class="ts-secret"><span data-i18n="adm.ts.secret"></span> <code id="tsSecret"></code></p>
+                <label class="field"><span data-i18n="adm.ts.code6"></span> <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required pattern="[0-9]{6}"></label>
+                <p class="error" id="tsSetupError" role="alert"></p>
+                <div class="actions"><button type="button" id="tsCancel" data-i18n="common.cancel"></button><button class="primary" data-i18n="adm.ts.confirm"></button></div>
+              </form>
+              <div id="tsCodes" hidden>
+                <p class="notice warn" data-i18n="adm.ts.codes_once"></p>
+                <ol class="ts-codes" id="tsCodeList"></ol>
+                <div class="actions"><button type="button" id="tsCopy"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="adm.ts.copy"></span></button><button type="button" class="primary" id="tsSaved" data-i18n="adm.ts.saved"></button></div>
+              </div>
+              <form id="tsOn" hidden>
+                <input name="username" type="email" autocomplete="username" hidden>
+                <label class="field"><span data-i18n="adm.pw.current"></span> <input name="password" type="password" autocomplete="current-password" required maxlength="200"><span class="hint" data-i18n="adm.ts.pw_hint"></span></label>
+                <p class="error" id="tsOnError" role="alert"></p>
+                <div class="actions"><button value="codes" data-i18n="adm.ts.new_codes"></button><button value="off" class="danger ghost" id="tsOffBtn" data-i18n="adm.ts.turn_off"></button></div>
+              </form>
+              <div id="tsOrgWrap" hidden>
+                <h3 data-i18n="adm.ts.org_title"></h3>
+                <label class="check"><input type="checkbox" id="tsOrg" aria-describedby="tsOrgHint"> <span data-i18n="adm.ts.org_rule"></span></label>
+                <p class="hint" id="tsOrgHint" data-i18n="adm.ts.org_hint"></p>
+              </div>
+            </section>
+            <section class="card" id="loginsCard" aria-labelledby="loginsTitle">
+              <h2 id="loginsTitle" data-i18n="adm.logins.title"></h2>
+              <p class="muted" data-i18n="adm.logins.sub"></p>
+              <div id="loginsError"></div>
+              <ul class="logins" id="loginList"></ul>
+              <div class="actions"><button type="button" class="danger ghost" id="logoutAll"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logout"></use></svg><span data-i18n="adm.logins.out_all"></span></button></div>
+            </section>
           </div>
         </section>
       </section>
@@ -997,8 +1040,8 @@
       <label class="field" id="inviteStoreWrap"><span data-i18n="common.store"></span> <select name="store_id"></select></label>
     </div>
     <div id="inviteDone" hidden>
-      <p data-i18n="adm.team.link_text"></p>
-      <label class="field"><span data-i18n="adm.team.link"></span> <input id="inviteUrl" readonly></label>
+      <p id="inviteLinkText" data-i18n="adm.team.link_text"></p>
+      <label class="field"><span id="inviteLinkLabel" data-i18n="adm.team.link"></span> <input id="inviteUrl" readonly></label>
       <p class="hint" id="inviteExpiry"></p>
     </div>
     <p class="error" id="inviteDlgError" role="alert"></p>

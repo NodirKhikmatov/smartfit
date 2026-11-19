@@ -9,7 +9,8 @@ import { builtinRows } from '../db/migrations/023_categories.js';
 import { categoryRoutes, categoryFor, catSizes, productSizes, AUDIENCES } from './categories.js';
 import { sizeChartRoutes } from './size-charts.js';
 import { parseCsv, toCsv } from './csv.js';
-import { hashPassword, verifyPassword, DUMMY_HASH, tokenSecret, signToken, verifyToken } from './auth.js';
+import { hashPassword, tokenSecret, verifyToken } from './auth.js';
+import { createLock, securityPublicRoutes, securityRoutes, orgRequires } from './security.js';
 import { releaseExpired, markPaid, orderView, nextStatuses, changeStatus, stamp } from '../cart/cart.js';
 import { LANGS, errorText, t } from '../../public/shared/i18n.js';
 import { dbTime } from '../recommend/routes.js';
@@ -36,8 +37,6 @@ import { profitRoutes } from './profit.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
-const MAX_FAILS = 10;
-const LOCK_MS = 15 * 60 * 1000;
 
 // Client errors carry a dictionary key ('err.…') and its vars; app.js answers { code, error } in the request's language.
 export const fail = (status, key, vars = {}) => Object.assign(new Error(key), { status, publicKey: key, vars });
@@ -203,22 +202,26 @@ const IMAGE_TYPES = [
   ['png', (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))],
   ['webp', (b) => b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP'],
 ];
+// Task 54: every role's own account: password, sign-ins, two-step login, "hamma joydan chiqish".
+const ACCOUNT_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/me\/(security|two-step\/new)$/, /^POST \/me\/(two-step(\/off|\/codes)?|logout-all)$/];
+// What an account may call while its organisation requires two-step login and it has none yet.
+const SETUP_ROUTES = [/^GET \/me$/, /^GET \/me\/(security|two-step\/new)$/, /^POST \/me\/(password|two-step|logout-all)$/];
 // What the staff role may call (task 28): its own account, the floor queue, fitting accept/done and order steps.
-export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/me\/sales$/, /^GET \/staff$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/orders\/\d+\/(status|pay)$/, // task 51: staff take payments
+export const STAFF_ROUTES = [...ACCOUNT_ROUTES, /^GET \/me\/sales$/, /^GET \/staff$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/orders\/\d+\/(status|pay)$/, // task 51: staff take payments
   // Task 47: receiving and counting. Confirming a count's corrections is not here: a manager or owner does that.
   /^GET \/stock\/(catalog|sessions)$/, /^GET \/stock\/sessions\/\d+$/, /^POST \/stock\/(sessions|scans)$/, /^POST \/stock\/sessions\/\d+\/close$/,
   // Task 52: receiving a transfer from another store. Drafting, sending and cancelling are a manager's or owner's.
   /^GET \/transfers\/\d+$/, /^POST \/transfers\/scans$/, /^POST \/transfers\/\d+\/receive$/];
 // What the mall role may call (task 37): its own account and its mall (profile, logo, QR, the shops' directory entries,
 // shop invites, summary numbers). Every product, order, customer, team and settings route is 403 for it.
-export const MALL_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^(GET|PATCH) \/mall$/, /^(POST|DELETE) \/mall\/logo$/, /^GET \/mall\/qr$/,
+export const MALL_ROUTES = [...ACCOUNT_ROUTES, /^(GET|PATCH) \/mall$/, /^(POST|DELETE) \/mall\/logo$/, /^GET \/mall\/qr$/,
   /^POST \/mall\/shops$/, /^PATCH \/mall\/stores\/\d+$/, /^(POST|DELETE) \/mall\/stores\/\d+\/logo$/,
   /^GET \/mall\/offers$/, /^POST \/mall\/offers\/\d+\/(approve|reject)$/, /^PATCH \/mall\/slides$/, // task 43: what shops submitted to it
   /^GET \/mall\/map$/, /^(POST|DELETE) \/mall\/floors\/\d+\/plan$/, /^POST \/mall\/spots$/, /^(PATCH|DELETE) \/mall\/spots\/\d+$/, // task 44: the map
   /^GET \/mall\/stats(\/export)?$/]; // task 53: analytics
-// Task 45: what a read-only organisation may still write: its own password, and finishing orders already placed
+// Task 45: what a read-only organisation may still write: its own account (task 54: and a team member's reset link, the two-step rule), and finishing orders already placed
 // (paid, handed over, cancelled, returned; a fitting request answered), so a customer who paid gets the goods.
-export const READONLY_ROUTES = [/^POST \/me\/password$/, /^POST \/orders\/\d+\/(status|pay|returns)$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/cash\/close$/];
+export const READONLY_ROUTES = [...ACCOUNT_ROUTES, /^POST \/team\/\d+\/reset$/, /^PATCH \/org\/two-step$/, /^POST \/orders\/\d+\/(status|pay|returns)$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/cash\/close$/];
 // Admin routes that belong to a plan feature (offers have their own one check, canPostOffers).
 const FEATURE_ROUTES = [[/^(POST \/points\/adjust|PATCH \/points)$/, 'points']];
 const STATS_TZ = 'Asia/Tashkent'; // every store is in Uzbekistan (UTC+5, no DST)
@@ -269,37 +272,14 @@ const stockTotals = (db) => db('product_stock as ps').join('products as pp', 'pp
 export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, now = Date.now } = {}) {
   const imageDir = path.resolve(uploadDir, 'products');
   const secret = tokenSecret();
-  // shortcut: per-process, per-IP lockout map; move to a shared store if we run several instances.
-  const fails = new Map();
-  // Wrong passwords (login and password change) count per IP: MAX_FAILS within LOCK_MS locks it out for the rest of the window.
-  const lock = {
-    check(ip) {
-      const f = fails.get(ip);
-      if (f && f.until > Date.now() && f.count >= MAX_FAILS) throw fail(429, 'err.too_many_attempts');
-    },
-    miss(ip) {
-      const f = fails.get(ip), now = Date.now();
-      fails.set(ip, f && f.until > now ? { count: f.count + 1, until: f.until } : { count: 1, until: now + LOCK_MS });
-    },
-  };
+  const lock = createLock(); // task 54: per IP, per email + IP, per account's second step
   const r = express.Router();
-
-  r.post('/login', async (req, res) => {
-    lock.check(req.ip);
-    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-    const password = typeof req.body?.password === 'string' && req.body.password.length <= 200 ? req.body.password : '';
-    const admin = email ? await db('admins').where({ email }).first() : undefined;
-    const ok = (await verifyPassword(password, admin?.password_hash ?? DUMMY_HASH)) && admin && password;
-    if (!ok) {
-      lock.miss(req.ip);
-      throw fail(401, 'err.bad_login');
-    }
-    fails.delete(req.ip);
-    // Said only after the right password, so it reveals nothing to a guesser.
-    if (admin.disabled_at) throw fail(403, 'err.account_disabled');
-    res.json({ ...signToken(secret, admin.id, Date.now(), admin.token_version), admin: publicAdmin(admin) });
+  r.use((req, res, next) => {
+    res.set('Cache-Control', 'no-store'); // tokens, reset links, two-step secrets and recovery codes: never cached
+    next();
   });
 
+  securityPublicRoutes(r, db, { secret, lock, now });
   publicTeamRoutes(r, db, { secret });
 
   r.use(async (req, res, next) => {
@@ -309,9 +289,13 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
     // A disabled admin, or a token from before the last password change / disable, is out at once.
     if (!admin || admin.disabled_at || tok.ver !== admin.token_version) throw fail(401, 'err.login_again');
     admin.stores = await storesOf(db, admin);
+    req.sid = tok.sid;
     // Task 28: the staff role reaches only the shop-floor routes; every other admin route is 403 for it, whatever it is.
     if (admin.role === 'staff' && !STAFF_ROUTES.some((re) => re.test(`${req.method} ${req.path}`))) throw fail(403, 'err.forbidden');
     if (admin.role === 'mall' && !MALL_ROUTES.some((re) => re.test(`${req.method} ${req.path}`))) throw fail(403, 'err.forbidden');
+    // Task 54: the organisation requires two-step login and this account has none yet: only setting it up is open.
+    admin.setup_two_step = !admin.totp_secret && (await orgRequires(db, admin.organization_id));
+    if (admin.setup_two_step && !SETUP_ROUTES.some((re) => re.test(`${req.method} ${req.path}`))) throw fail(403, 'err.two_step_required');
     // Task 45: the plan. Every write of a read-only organisation stops here (one place, so a new route is covered too).
     const call = `${req.method} ${req.path}`;
     if (admin.organization_id != null && !['GET', 'HEAD'].includes(req.method) && !READONLY_ROUTES.some((re) => re.test(call))) {
@@ -349,7 +333,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
   // Task 45: an organisation's admins also get its plan state and features (the banner, and hiding switched-off features).
   r.get('/me', async (req, res) => {
     const s = await mayDo(db, req.admin.organization_id, 'read', { now: now() });
-    res.json({ ...publicAdmin(req.admin), ...(s && { plan: { name: s.plan, state: s.state, ends: s.ends, readonly_from: s.readonly_from, features: FEATURES.filter((f) => s.features.includes(f)) } }) });
+    res.json({ ...publicAdmin(req.admin), two_step: { on: Boolean(req.admin.totp_secret), setup: req.admin.setup_two_step }, ...(s && { plan: { name: s.plan, state: s.state, ends: s.ends, readonly_from: s.readonly_from, features: FEATURES.filter((f) => s.features.includes(f)) } }) });
   });
 
   r.get('/stores', async (req, res) => {
@@ -876,7 +860,8 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
     });
   });
 
-  settingsRoutes(r, db, { secret, lock, resolveStore, tryon, now });
+  settingsRoutes(r, db, { secret, resolveStore, tryon, now });
+  securityRoutes(r, db, { secret, lock, now });
   orgRoutes(r, db, { now }); // task 45: plans, the checklist
   promoRoutes(r, db); // task 26
   categoryRoutes(r, db, { uploadDir }); // task 36

@@ -95,7 +95,7 @@ docker stop smartfit-testpg
 | `PORT` | `3000` | HTTP port of the app. |
 | `DATABASE_URL` | empty | `postgres://user:pass@host:5432/db` → PostgreSQL. Empty → SQLite. docker compose sets it for you. |
 | `SQLITE_FILE` | `./smartfit.db` | SQLite file when `DATABASE_URL` is empty. |
-| `ADMIN_TOKEN_SECRET` | random per process | Signs admin login tokens (12 h). **Required in production.** Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `ADMIN_TOKEN_SECRET` | random per process | Signs admin login tokens (12 h) and encrypts the two-step login secrets (task 54). **Required in production; keep it stable:** a new value signs everyone out and makes every authenticator app unreadable (those admins sign in with a recovery code or get a reset link). Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 | `UPLOAD_DIR` | `./uploads` | Product photos uploaded in admin (served at `/uploads`). Customer photos are never saved. |
 | `PUBLIC_URL` | empty | Public address, e.g. `https://fit.example.uz`. Used in the store QR codes and the Click/Payme return link. **Set it in production.** |
 | `ANTHROPIC_API_KEY` | empty | Claude stylist. Empty → rule-based recommendations only (the app works fully without it). |

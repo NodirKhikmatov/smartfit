@@ -13,6 +13,7 @@ import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 import { createAdmin, createAdminRouter } from '../src/admin/routes.js';
 import { AUDIT_ACTIONS } from '../src/admin/audit.js';
+import { codeFor } from './helpers/account.js';
 
 process.env.ADMIN_TOKEN_SECRET = 'test-secret';
 const db = testDb();
@@ -235,7 +236,7 @@ test('disable: sessions end at once, sign-in is refused, invites they sent die; 
 test('every mutating admin route writes an audit row', async () => {
   const routes = createAdminRouter(db).stack.filter((l) => l.route)
     .flatMap((l) => Object.keys(l.route.methods).filter((m) => m !== '_all' && m !== 'get' && m !== 'head').map((m) => `${m.toUpperCase()} ${l.route.path}`));
-  const NOT_MUTATIONS = ['POST /login', 'POST /invite/check']; // read-only POSTs (credentials / token in the body)
+  const NOT_MUTATIONS = ['POST /login', 'POST /invite/check', 'POST /login/code', 'POST /reset/check']; // read-only POSTs (credentials / token in the body); sign-ins go to admin_logins
 
   const product = async () => (await admin('POST', '/products', { name: 'Audit ko\'ylak', category: 'top', gender: 'unisex', color: 'oq', price: 100000, temp_min: 0, temp_max: 30, stock: { M: 3 } }, ownerToken)).body;
   async function pendingOrder() {
@@ -250,6 +251,14 @@ test('every mutating admin route writes an audit row', async () => {
     return db('admins').orderBy('id', 'desc').first();
   };
   const newMall = () => admin('POST', '/malls', { name: `Walk mall ${Date.now()}`, city: 'Toshkent', address: 'Navoiy 1', admin_email: `mall${Date.now()}@smartfit.uz` }, superToken);
+  // Task 54: a member with two-step login on → their token.
+  const twoStep = async (email) => {
+    email ??= (await member()).email;
+    const tok = await login(email, 'walk-pass-1');
+    const { secret } = (await admin('GET', '/me/two-step/new', undefined, tok)).body;
+    assert.equal((await admin('POST', '/me/two-step', { secret, code: codeFor(secret) }, tok)).status, 201);
+    return tok;
+  };
   let mallTok = null;
   const mallToken = async () => {
     if (!mallTok) {
@@ -467,6 +476,27 @@ test('every mutating admin route writes an audit row', async () => {
     'POST /me/password': ['account.password', async () => {
       const m = await member();
       return admin('POST', '/me/password', { current: 'walk-pass-1', password: 'walk-pass-2' }, await login(m.email, 'walk-pass-1'));
+    }],
+    // Task 54: account security.
+    'POST /me/two-step': ['account.two_step_on', async () => {
+      const tok = await login((await member()).email, 'walk-pass-1');
+      const { secret } = (await admin('GET', '/me/two-step/new', undefined, tok)).body;
+      return admin('POST', '/me/two-step', { secret, code: codeFor(secret) }, tok);
+    }],
+    'POST /me/two-step/codes': ['account.recovery_new', async () => admin('POST', '/me/two-step/codes', { password: 'walk-pass-1' }, await twoStep())],
+    'POST /me/two-step/off': ['account.two_step_off', async () => admin('POST', '/me/two-step/off', { password: 'walk-pass-1' }, await twoStep())],
+    'POST /me/logout-all': ['account.logout_all', async () => admin('POST', '/me/logout-all', undefined, await login((await member()).email, 'walk-pass-1'))],
+    'POST /team/:id/reset': ['team.reset_link', async () => admin('POST', `/team/${(await member()).id}/reset`, undefined, ownerToken)],
+    'POST /reset/accept': ['account.reset', async () => {
+      const link = await admin('POST', `/team/${(await member()).id}/reset`, undefined, ownerToken);
+      return admin('POST', '/reset/accept', { token: tokenOf(link.body.url), password: 'walk-pass-9' });
+    }],
+    'PATCH /org/two-step': ['org.two_step', async () => {
+      await createAdmin(db, { email: 'walk.owner@smartfit.uz', password: 'walk-pass-1', storeId: tashkent, role: 'owner' });
+      const tok = await twoStep('walk.owner@smartfit.uz');
+      const r = await admin('PATCH', '/org/two-step', { required: true }, tok);
+      await db('organizations').update({ require_two_step: false }); // the rest of this file signs in without codes
+      return r;
     }],
   };
   assert.deepEqual(Object.keys(recipes).sort(), routes.filter((r) => !NOT_MUTATIONS.includes(r)).sort(), 'every mutating route has a recipe here');

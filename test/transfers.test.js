@@ -316,6 +316,7 @@ test('migration 042: down drops the transfer tables and the reason, up brings th
   const m = testDb();
   try {
     await m.migrate.latest();
+    await m.migrate.down(); // 044
     await m.migrate.down(); // 043
     await m.migrate.down();
     for (const t of ['transfers', 'transfer_items', 'transfer_scans']) assert.equal(await m.schema.hasTable(t), false, t);

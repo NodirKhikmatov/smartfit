@@ -50,9 +50,9 @@ test('scrypt hash verifies only the right password', async () => {
 test('token lasts 12 hours and rejects tampering', () => {
   const now = Date.now();
   const { token } = signToken('k', 7, now);
-  assert.deepEqual(verifyToken('k', token, now), { sub: 7, ver: 0 });
-  assert.deepEqual(verifyToken('k', token, now + TOKEN_TTL_MS - 1), { sub: 7, ver: 0 });
-  assert.deepEqual(verifyToken('k', signToken('k', 7, now, 3).token, now), { sub: 7, ver: 3 });
+  assert.deepEqual(verifyToken('k', token, now), { sub: 7, ver: 0, sid: null });
+  assert.deepEqual(verifyToken('k', token, now + TOKEN_TTL_MS - 1), { sub: 7, ver: 0, sid: null });
+  assert.deepEqual(verifyToken('k', signToken('k', 7, now, 3).token, now), { sub: 7, ver: 3, sid: null });
   assert.equal(verifyToken('k', token, now + TOKEN_TTL_MS), null, 'expired after 12h');
   assert.equal(verifyToken('other', token, now), null, 'wrong secret');
   const forged = Buffer.from(JSON.stringify({ sub: 1, exp: now + 1e9 })).toString('base64url') + '.' + token.split('.')[1];
@@ -196,7 +196,7 @@ test('createAdmin validates input', async () => {
 });
 
 test('login locks an IP after 10 failures', async () => {
-  for (let i = 0; i < 10; i++) await api('/login', { method: 'POST', body: { email: 'x@y.uz', password: 'wrong-pass' } });
+  for (let i = 0; i < 10; i++) await api('/login', { method: 'POST', body: { email: `x${i}@y.uz`, password: 'wrong-pass' } }); // task 54: one email alone locks at 5
   const res = await api('/login', { method: 'POST', body: { email: 'tash@smartfit.uz', password: 'tash-pass-1' } });
   assert.equal(res.status, 429);
 });

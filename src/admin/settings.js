@@ -2,8 +2,9 @@
 // Roles: super = every organisation; owner = every store of one organisation (task 22), their settings and managers;
 // manager = products and orders of one store; staff (task 28) = the shop-floor app of one store, nothing else.
 import { randomBytes, createHash } from 'node:crypto';
-import { fail, text, int, paging, dateRange, createAdmin, publicAdmin, canSee, inStores } from './routes.js';
-import { hashPassword, verifyPassword, signToken } from './auth.js';
+import { fail, text, int, paging, dateRange, createAdmin, canSee, inStores } from './routes.js';
+import { hashPassword } from './auth.js';
+import { signIn } from './security.js';
 import { audit, diff, AUDIT_ENTITIES } from './audit.js';
 import { publicBase } from '../qr.js';
 import { stamp } from '../cart/cart.js';
@@ -19,15 +20,15 @@ const SYNC_KEYS_MAX = 10; // live keys per store
 const STORES_MAX = 50; // per organisation: a typo loop can't fill the table
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 const iso = (ms) => new Date(ms).toISOString(); // written and compared as ISO strings, like cart.js
-const isPassword = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200;
+export const isPassword = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const canEditStore = (admin, storeId) => admin.role === 'super' || (admin.role === 'owner' && canSee(admin, storeId));
-const ownerOrSuper = (admin) => {
+export const ownerOrSuper = (admin) => {
   if (admin.role !== 'super' && admin.role !== 'owner') throw fail(403, 'err.forbidden');
 };
 // Who an admin may disable: super → any owner, manager or staff; owner → managers and staff of their organisation. Never yourself or a super.
-const manages = (admin, target) => target.id !== admin.id && target.role !== 'super'
+export const manages = (admin, target) => target.id !== admin.id && target.role !== 'super'
   && (admin.role === 'super' || (admin.role === 'owner' && STORE_ROLES.includes(target.role) && target.organization_id === admin.organization_id));
 
 // Invite links work without a session: check shows who it is for, accept sets the password and signs in.
@@ -47,7 +48,7 @@ export function publicTeamRoutes(r, db, { secret }) {
   r.post('/invite/accept', async (req, res) => {
     const password = req.body?.password;
     if (!isPassword(password)) throw fail(400, 'err.password_len');
-    const admin = await db.transaction(async (trx) => {
+    const out = await db.transaction(async (trx) => {
       const inv = await liveInvite(trx, req.body?.token);
       // The conditional UPDATE claims the invite: of two parallel accepts only one gets the row.
       if (!inv || !(await trx('admin_invites').where({ id: inv.id }).whereNull('used_at').update({ used_at: iso(Date.now()) }))) throw fail(410, 'err.invite_invalid');
@@ -55,9 +56,9 @@ export function publicTeamRoutes(r, db, { secret }) {
       const id = await createAdmin(trx, { email: inv.email, password, storeId: inv.store_id, orgId: inv.organization_id, mallId: inv.mall_id ?? null, role: inv.role });
       const a = await trx('admins').where({ id }).first();
       await audit(trx, a, { action: 'team.join', storeId: a.store_id, entityId: id, label: a.email, after: { role: a.role } });
-      return a;
+      return signIn(trx, req, secret, a, 'invite');
     });
-    res.status(201).json({ ...signToken(secret, admin.id, Date.now(), admin.token_version), admin: publicAdmin(admin) });
+    res.status(201).json(out);
   });
 }
 
@@ -127,7 +128,7 @@ function validStore(b) {
   return s;
 }
 
-export function settingsRoutes(r, db, { secret, lock, resolveStore, tryon = false, now = Date.now }) {
+export function settingsRoutes(r, db, { resolveStore, tryon = false, now = Date.now }) {
   async function findStore(req) {
     const id = Number(req.params.id);
     if (!canSee(req.admin, id)) throw fail(404, 'err.store_not_found');
@@ -282,6 +283,7 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore, tryon = fals
           ? { disabled_at: iso(Date.now()), token_version: trx.raw('token_version + 1'), updated_at: trx.fn.now() }
           : { disabled_at: null, updated_at: trx.fn.now() });
         if (disabled) await trx('admin_invites').where({ created_by: target.id }).whereNull('used_at').del();
+        if (disabled) await trx('admin_resets').where({ admin_id: target.id }).whereNull('used_at').del(); // task 54
         await audit(trx, req.admin, { action: disabled ? 'team.disable' : 'team.enable', storeId: target.store_id, entityId: target.id, label: target.email,
           before: { disabled: !disabled }, after: { disabled } });
       });
@@ -323,28 +325,6 @@ export function settingsRoutes(r, db, { secret, lock, resolveStore, tryon = fals
       await audit(trx, req.admin, { action: 'sync_key.revoke', storeId: k.store_id, entityId: k.id, label: k.name, before: { name: k.name, prefix: k.prefix } });
     });
     res.status(204).end();
-  });
-
-  // { current, password } → a fresh token for this session; every other token of this admin stops working.
-  r.post('/me/password', async (req, res) => {
-    lock.check(req.ip);
-    const { current, password } = req.body ?? {};
-    if (!isPassword(password)) throw fail(400, 'err.password_len');
-    // 400, not 401: a wrong current password must not sign the user out.
-    if (typeof current !== 'string' || current.length > 200 || !(await verifyPassword(current, req.admin.password_hash))) {
-      lock.miss(req.ip);
-      throw fail(400, 'err.bad_password');
-    }
-    const ver = req.admin.token_version + 1;
-    const hash = await hashPassword(password);
-    await db.transaction(async (trx) => {
-      // Conditional on the version this request saw, so two parallel changes can't both win.
-      if (!(await trx('admins').where({ id: req.admin.id, token_version: req.admin.token_version }).update({ password_hash: hash, token_version: ver, updated_at: trx.fn.now() }))) {
-        throw fail(401, 'err.login_again');
-      }
-      await audit(trx, req.admin, { action: 'account.password', storeId: req.admin.store_id, entityId: req.admin.id, label: req.admin.email });
-    });
-    res.json(signToken(secret, req.admin.id, Date.now(), ver));
   });
 
   // Audit viewer: ?entity&entity_id&admin_id&store_id&from&to&limit&offset → { items, total, limit, offset }, newest first.

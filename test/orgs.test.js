@@ -507,6 +507,15 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       assert.deepEqual([row.hidden_at, row.reply], [null, null], 'org B review untouched');
     },
     'GET /checklist': async () => assert.equal((await admin('GET', '/checklist', undefined, ownerA)).status, 200),
+    // Task 54: a reset link for org B's member is a 404; the two-step rule is always the caller's own organisation.
+    'POST /team/:id/reset': async () => {
+      refused(await admin('POST', `/team/${B.member.id}/reset`, undefined, ownerA));
+      assert.equal((await db('admin_resets').where({ admin_id: B.member.id }).count({ n: '*' }))[0].n, 0);
+    },
+    'PATCH /org/two-step': async () => {
+      assert.equal((await admin('PATCH', '/org/two-step', { required: true, organization_id: orgB }, ownerA)).status, 409, 'turn it on for yourself first');
+      assert.equal(Boolean((await db('organizations').where({ id: orgB }).first()).require_two_step), false, 'org B untouched');
+    },
     'POST /checklist/dismiss': async () => {
       assert.equal((await admin('POST', '/checklist/dismiss', undefined, ownerA)).status, 204);
       assert.equal((await db('organizations').where({ id: orgB }).first()).checklist_dismissed_at, null, 'org B untouched');
@@ -514,7 +523,9 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
     },
   };
   // Not about stores: credentials, the invite flow and the caller's own password.
-  const NOT_SCOPED = ['POST /login', 'POST /invite/check', 'POST /invite/accept', 'POST /me/password'];
+  const NOT_SCOPED = ['POST /login', 'POST /invite/check', 'POST /invite/accept', 'POST /me/password',
+    // Task 54: sign-in and reset links, and the caller's own account (security, two-step login, sign out everywhere).
+    'POST /login/code', 'POST /reset/check', 'POST /reset/accept', 'GET /me/security', 'GET /me/two-step/new', 'POST /me/two-step', 'POST /me/two-step/codes', 'POST /me/two-step/off', 'POST /me/logout-all'];
   const routes = createAdminRouter(db).stack.filter((l) => l.route)
     .flatMap((l) => Object.keys(l.route.methods).filter((m) => m !== '_all' && m !== 'head').map((m) => `${m.toUpperCase()} ${l.route.path}`));
   assert.deepEqual(routes.filter((r) => !NOT_SCOPED.includes(r) && !checks[r]).sort(), [], 'every admin route has an isolation check');
@@ -603,7 +614,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 43; i > 12; i--) await m.migrate.down(); // 043 … 013
+    for (let i = 44; i > 12; i--) await m.migrate.down(); // 044 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

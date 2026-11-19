@@ -9,6 +9,7 @@ import { createAdmin, createAdminRouter, READONLY_ROUTES, dayKey } from '../src/
 import { planState, addDays, PLANS, closedOrgs } from '../src/plans.js';
 import { pointsConfig } from '../src/cart/points.js';
 import { DICT } from '../public/shared/i18n.js';
+import { PUBLIC_ACCOUNT } from './helpers/account.js';
 
 process.env.ADMIN_TOKEN_SECRET = 'test-secret';
 const db = testDb();
@@ -230,8 +231,10 @@ test('read-only: every admin write is refused in one place, except finishing ord
   // The walk: every non-GET admin route with the read-only owner's token is 403 plan_readonly before it runs.
   const routes = createAdminRouter(db).stack.filter((l) => l.route)
     .flatMap((l) => Object.keys(l.route.methods).filter((m) => !['_all', 'get', 'head'].includes(m)).map((m) => [m.toUpperCase(), l.route.path]));
-  const PUBLIC = ['POST /login', 'POST /invite/check', 'POST /invite/accept'];
-  const ALLOWED = ['POST /cash/close', 'POST /me/password', 'POST /orders/:id/status', 'POST /orders/:id/pay', 'POST /orders/:id/returns', 'POST /fitting/:id/accept', 'POST /fitting/:id/done'];
+  const PUBLIC = ['POST /login', 'POST /invite/check', 'POST /invite/accept', ...PUBLIC_ACCOUNT];
+  const ALLOWED = ['POST /cash/close', 'POST /me/password', 'POST /me/two-step', 'POST /me/two-step/codes', 'POST /me/two-step/off', 'POST /me/logout-all', // task 54: own account,
+    'POST /team/:id/reset', 'PATCH /org/two-step', // a member's reset link and the two-step rule
+    'POST /orders/:id/status', 'POST /orders/:id/pay', 'POST /orders/:id/returns', 'POST /fitting/:id/accept', 'POST /fitting/:id/done'];
   assert.deepEqual(routes.map(([m, p]) => `${m} ${p}`).filter((r) => READONLY_ROUTES.some((re) => re.test(r.replace(/:id/g, '1')))).sort(), [...ALLOWED].sort(), 'the allow-list is exactly these');
   const snapshot = async () => JSON.stringify([await db('products').where({ store_id: shop.storeId }).select('id', 'price', 'updated_at'), await db('stores').where({ id: shop.storeId }).first(),
     await db('admin_invites').where({ organization_id: shop.orgId }).count({ n: '*' }), await db('organizations').where({ id: shop.orgId }).first()]);

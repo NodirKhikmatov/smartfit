@@ -19,16 +19,19 @@
   <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
   <h1 data-i18n="staff.login.title"></h1>
   <div id="loginLang"></div>
-  <label><span data-i18n="adm.login.email"></span> <input name="email" type="email" autocomplete="username" required></label>
-  <label><span data-i18n="adm.login.password"></span> <input name="password" type="password" autocomplete="current-password" required></label>
+  <label id="loginEmail"><span data-i18n="adm.login.email"></span> <input name="email" type="email" autocomplete="username" required></label>
+  <label id="loginPass"><span data-i18n="adm.login.password"></span> <input name="password" type="password" autocomplete="current-password" required></label>
+  <label id="loginCode" hidden><span data-i18n="adm.ts.code"></span> <input name="code" autocomplete="one-time-code" maxlength="40" autocapitalize="off" spellcheck="false" aria-describedby="loginCodeHint"><span class="hint" id="loginCodeHint" data-i18n="adm.ts.code_hint"></span></label>
   <p class="error" id="loginError" role="alert"></p>
   <button class="primary" data-i18n="adm.login.submit"></button>
+  <button type="button" class="ghost" id="loginBack" hidden data-i18n="common.back"></button>
 </form>
 
 <div id="app" hidden>
   <header class="bar">
     <div class="wordmark"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</div>
     <div id="lang"></div>
+    <a class="button icon-btn ghost" href="/admin/#/settings?tab=account" data-i18n-aria-label="staff.account" data-i18n-title="staff.account"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#user"></use></svg></a>
     <button type="button" class="icon-btn ghost" id="logout" data-i18n-aria-label="adm.logout" data-i18n-title="adm.logout"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logout"></use></svg></button>
   </header>
   <div class="tabs" role="group" data-i18n-aria-label="staff.sections" id="tabs">

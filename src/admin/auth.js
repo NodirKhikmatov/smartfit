@@ -32,15 +32,16 @@ export function tokenSecret() {
 
 const sign = (secret, data) => createHmac('sha256', secret).update(data).digest('base64url');
 
-// Token = base64url({sub, ver, exp}) + "." + HMAC. Role, store and token_version are re-read from the DB on every request,
-// so bumping admins.token_version (password change, disable) kills every older token. A token without ver counts as 0.
-export function signToken(secret, adminId, now = Date.now(), ver = 0) {
-  const exp = now + TOKEN_TTL_MS;
-  const payload = Buffer.from(JSON.stringify({ sub: adminId, ver, exp })).toString('base64url');
+// Token = base64url({sub, ver, sid, exp}) + "." + HMAC. Role, store and token_version are re-read from the DB on every request,
+// so bumping admins.token_version (password change, disable, reset, "hamma joydan chiqish") kills every older token.
+// A token without ver counts as 0. sid (task 54) = the admin_logins row it came from, only to mark "this device".
+export function signToken(secret, adminId, now = Date.now(), ver = 0, { sid, ttl = TOKEN_TTL_MS } = {}) {
+  const exp = now + ttl;
+  const payload = Buffer.from(JSON.stringify({ sub: adminId, ver, ...(sid && { sid }), exp })).toString('base64url');
   return { token: `${payload}.${sign(secret, payload)}`, expires_at: new Date(exp).toISOString() };
 }
 
-// → { sub, ver } or null.
+// → { sub, ver, sid } or null.
 export function verifyToken(secret, token, now = Date.now()) {
   const [payload, mac] = String(token).split('.');
   if (!payload || !mac) return null;
@@ -48,8 +49,8 @@ export function verifyToken(secret, token, now = Date.now()) {
   const b = Buffer.from(sign(secret, payload));
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   try {
-    const { sub, ver = 0, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
-    return Number.isInteger(sub) && Number.isInteger(ver) && exp > now ? { sub, ver } : null;
+    const { sub, ver = 0, sid = null, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
+    return Number.isInteger(sub) && Number.isInteger(ver) && exp > now ? { sub, ver, sid: Number.isInteger(sid) ? sid : null } : null;
   } catch {
     return null;
   }

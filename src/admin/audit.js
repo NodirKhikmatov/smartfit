@@ -16,6 +16,8 @@ export const AUDIT_ACTIONS = [
   'team.commission', // task 50
   'cash.close', // task 51
   'transfer.create', 'transfer.update', 'transfer.send', 'transfer.cancel', 'transfer.scan', 'transfer.receive', // task 52
+  'account.two_step_on', 'account.two_step_off', 'account.recovery_new', 'account.recovery_used', 'account.logout_all', 'account.reset', 'account.locked',
+  'team.reset_link', 'org.two_step', // task 54
 ];
 export const AUDIT_ENTITIES = ['product', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'org', 'demo', 'promo', 'category', 'mall', 'points', 'offer', 'review', 'size_chart', 'cash', 'transfer'];
 
