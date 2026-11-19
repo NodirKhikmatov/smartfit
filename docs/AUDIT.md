@@ -195,3 +195,20 @@ Planned from the gaps left after phases 5 and 6, not from new market research.
 | No voice of the customer | Returns reasons only | **Task 46**: ratings, fit answers and short reviews after hand-over |
 | Stock numbers drift from the shelf | Edited by hand or CSV / API | **Task 47**: receiving and a stocktake in the staff app, with a movement history |
 | Online subscription payment; a routing engine for the map; paid placement in outfits | — | **Defer**: a payment contract; not needed for a pin; it would break the recommender's trust |
+
+## Phase 8 — a shop's money and control, and numbers for the mall (2026-11-20)
+
+Planned from what a shop owner and a mall still can't do after phase 7, not from new market research.
+
+| Need | Today | Verdict |
+|---|---|---|
+| Sizes that follow the brand | One built-in size table, plus a per-product offset | **Task 48**: a size chart per organisation and category, used by sizing, the mall outfit and the item page |
+| "How much did I earn?" | Sales and discounts, no cost | **Task 49**: cost price (weighted average at receiving), profit and margin reports, hidden from staff and the mall |
+| Sellers work on commission | No seller on an order | **Task 50**: the seller on a paid order, commission per store and person, "Mening sotuvlarim" |
+| The cashier counts the drawer on paper | "Paid at the cashier" with no method | **Task 51**: cash / card / instalments at the cashier and a day closing with the counted cash |
+| Stock sits in the wrong branch | Other stores' stock is shown, not moved | **Task 52**: transfers between an organisation's stores with in-transit stock |
+| The mall has totals, not insight | A few summary numbers | **Task 53**: visitors, searches that found nothing, shop and offer opens, mall outfit conversion |
+| An admin can't change a password | Invite links only; tokens live 12 h | **Task 54**: change and reset, TOTP, sign-ins list, revocable tokens, lockout |
+| Gift cards; points shared across a mall's shops | — | **Defer**: the shop or mall would hold customers' money and settle between shops |
+| Fiscal receipts (OFD); a Billz / 1C / MoySklad connector | A stock sync API (task 20) | **Defer**: needs the shop's own contract and API access |
+| A mall pickup desk for group orders | Pickup at each shop | **Defer**: needs a mall staff process to design against |
