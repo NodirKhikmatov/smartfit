@@ -288,7 +288,8 @@ export async function seedDemoReviews(db) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Not top-level await: seedDemoReviews imports cart.js, which imports this file back, and a module that awaits its own cycle never finishes.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) (async () => {
   await import('../config.js');
   const { createDb } = await import('./index.js');
   const db = createDb();
@@ -301,4 +302,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } finally {
     await db.destroy();
   }
-}
+})();
