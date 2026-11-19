@@ -363,6 +363,8 @@ async function openSession(s) {
   $('camBtn').hidden = !canScan;
   $('codeHint').textContent = t(canScan ? 'staff.stock.code_hint_cam' : 'staff.stock.code_hint');
   $('qtyHint').textContent = current.kind === 'count' ? t('staff.stock.qty_hint_count') : '';
+  // Task 49: "kirim narxi" for a manager or owner receiving; staff never set or see a cost.
+  $('costWrap').hidden = current.kind !== 'receive' || me?.role === 'staff';
   renderSession();
   $('scanForm').code.focus();
   catalog = (await catalogFor(s.store_id)) ?? catalog;
@@ -390,6 +392,7 @@ function resetScan() {
   const f = $('scanForm');
   f.code.value = '';
   f.qty.value = '1';
+  f.cost.value = '';
   f.qty.min = current?.kind === 'count' ? -1000 : 1;
   f.qty.max = 1000;
   picked = null;
@@ -438,8 +441,11 @@ $('scanAdd').onclick = () => {
   const max = 1000, min = current.kind === 'count' ? -1000 : 1;
   if (!picked?.size) { $('scanError').textContent = t('staff.stock.pick_size'); return $('pickSizes').firstElementChild?.focus(); }
   if (!Number.isInteger(qty) || !qty || qty < min || qty > max) { $('scanError').textContent = t('staff.stock.bad_qty', { min, max }); return $('scanForm').qty.focus(); }
-  const label = `${nameOf(picked.p)} · ${sizeText(picked.size)} · ${qty > 0 && current.kind === 'count' ? '+' : ''}${qty}`;
-  enqueue({ path: '/stock/scans', session: current.key, body: { key: newId(), session: current.key, product_id: picked.p.id, size: picked.size, quantity: qty }, label });
+  const costText = $('costWrap').hidden ? '' : $('scanForm').cost.value.trim();
+  const cost = costText === '' ? null : Number(costText);
+  if (cost !== null && (!Number.isInteger(cost) || cost < 0 || cost > 1e9)) { $('scanError').textContent = t('staff.stock.bad_cost'); return $('scanForm').cost.focus(); }
+  const label = `${nameOf(picked.p)} · ${sizeText(picked.size)} · ${qty > 0 && current.kind === 'count' ? '+' : ''}${qty}${cost === null ? '' : ` · ${fmt.som(cost)}`}`;
+  enqueue({ path: '/stock/scans', session: current.key, body: { key: newId(), session: current.key, product_id: picked.p.id, size: picked.size, quantity: qty, ...(cost !== null && { cost }) }, label });
   toast(t('staff.stock.added', { what: label }));
   navigator.vibrate?.(40);
   resetScan();

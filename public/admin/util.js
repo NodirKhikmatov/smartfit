@@ -1,6 +1,6 @@
 // Pure helpers for the admin (no DOM): hash routes, paging text, deltas, chart scales. Tested in test/admin-ui.test.js.
 
-export const ROUTES = ['dashboard', 'orders', 'cashier', 'products', 'categories', 'sizes', 'offers', 'stats', 'demand', 'reviews', 'qr', 'settings', 'orgs', 'malls', 'mall', 'welcome'];
+export const ROUTES = ['dashboard', 'orders', 'cashier', 'products', 'categories', 'sizes', 'offers', 'stats', 'profit', 'demand', 'reviews', 'qr', 'settings', 'orgs', 'malls', 'mall', 'welcome'];
 
 // '#/products?filter=low&page=2' → { route: 'products', params: { filter: 'low', page: '2' } }. Unknown routes → dashboard.
 export function parseHash(hash) {

@@ -465,6 +465,8 @@ staff account goes straight there). Add it to the home screen (Android Chrome: "
   - Weak network: sessions and scans queue on the phone (localStorage, per account) and are sent in order when the
     network is back; each carries an id made on the phone, so a resend applies once. The waiting count is shown; a scan
     the server refuses (unknown item, another store's label, a closed session) is listed with the reason, not retried.
+  - A manager or the owner can also type **"Kirim narxi"** (the unit cost on this delivery) on a scan: the product's
+    cost becomes the weighted average of the stock on hand and the new units. Staff never see that field.
   - Every stock change writes a movement row (who, when, why, before → after): the admin form, CSV import, the sync
     API, receiving, counts, sales, paid-order cancels, returns to stock and exchanges. Admin → Kiyimlar → a product →
     "Qoldiq tarixi". The back-in-stock alert (task 31) fires when receiving or a count brings a size back.
@@ -495,6 +497,20 @@ Set `ERROR_WEBHOOK_URL` to get every error (500s, failed callbacks, crashes) in 
 Below it: paid orders, how many of them are delivery orders, revenue and the average order value (paid, not
 cancelled orders in the period). "Tried on" depends on customers tapping the button, so ask staff to remind them.
 Purchases rung up only on the store's own till (not through the app) are not counted.
+
+## Cost price and profit
+
+A product's **tannarx** (cost of one unit, whole so'm) is set in the product form, as the `cost` column of the CSV
+import/export, or at receiving ("Kirim narxi", a weighted average). When an order is paid, each line keeps the cost of
+that moment, so changing a cost later never rewrites old numbers. Only super, owners and managers ever see a cost: staff,
+the mall admin, the sync API, the kiosk, the phone app and every customer page never carry it (a test checks).
+
+`/admin` → "Foyda", per period (7/30/90 days) and store: revenue (after the line's bundle/promo/points discounts and
+refunds of returns), cost, profit and margin by day, category and product; what the bundle discount, promo codes (per
+code) and points cost on those orders; the stock on hand at cost now; and the lines sold below cost (click one to open
+the order). A return put back on the shelf gives its cost back; one written off (not restocked) keeps it. Sales of a
+product without a cost, and orders paid before costs existed, are shown apart ("tannarxsiz") and never counted as
+profit. Delivery fees are not goods and stay out.
 
 ## Launch checklist
 

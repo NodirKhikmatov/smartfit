@@ -164,6 +164,21 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       assert.equal(r.body.recommendations ?? r.body.totals?.recommendations ?? 0, 0);
     },
     'GET /dashboard': async () => noB(await admin('GET', '/dashboard', undefined, ownerA)),
+    // Task 49: org B's order as if paid (its line carrying a cost); org A's owner sees none of it, nor org B's stock.
+    'GET /profit': async () => {
+      const was = await db('orders').where({ id: B.order.id }).first('payment_status', 'paid_at');
+      await db('orders').where({ id: B.order.id }).update({ payment_status: 'paid', paid_at: new Date().toISOString() });
+      await db('order_items').where({ order_id: B.order.id }).update({ unit_cost: 12345 });
+      const all = await admin('GET', '/profit?days=90', undefined, ownerA);
+      noB(all);
+      assert.ok(!json(all).includes('ORGB-ONLY-1'));
+      const r = await admin('GET', `/profit?store_id=${b1}`, undefined, ownerA);
+      assert.equal(r.status, 200);
+      assert.deepEqual([r.body.totals.units, r.body.totals.no_cost_units, r.body.stock.units, r.body.stock.no_cost_units, r.body.products.length], [0, 0, 0, 0, 0], '?store_id cannot widen the scope');
+      assert.equal((await admin('GET', `/profit?store_id=${b1}`, undefined, ownerB)).body.totals.cost, 12345, 'org B itself sees it');
+      await db('orders').where({ id: B.order.id }).update(was);
+      await db('order_items').where({ order_id: B.order.id }).update({ unit_cost: null });
+    },
     'GET /demand': async () => {
       noB(await admin('GET', '/demand?days=30', undefined, ownerA));
       const r = await admin('GET', `/demand?store_id=${b1}`, undefined, ownerA);
@@ -516,7 +531,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 38; i > 12; i--) await m.migrate.down(); // 038 … 013
+    for (let i = 39; i > 12; i--) await m.migrate.down(); // 039 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

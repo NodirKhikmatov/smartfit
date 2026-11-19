@@ -144,11 +144,16 @@ export function changeStatus(db, orderId, to) {
 
 // Paid → stock leaves the shelf: quantity and reserved both drop. Only a pending, unexpired order can be paid, exactly once.
 // The Click/Payme callbacks call it inside their own transaction (knex nests it as a savepoint).
+// Task 49: the sale copies each product's cost price onto its order line, so a later change never rewrites old reports.
+export const freezeCost = (trx, orderId) => trx('order_items').where({ order_id: orderId })
+  .update({ unit_cost: trx.raw('(select p.cost from products p where p.id = order_items.product_id)') });
+
 export async function markPaid(db, orderId, now = Date.now()) {
   return db.transaction(async (trx) => {
     const n = await trx('orders').where({ id: orderId, payment_status: 'pending' }).where('expires_at', '>', iso(now))
       .update({ payment_status: 'paid', paid_at: iso(now), expires_at: null, updated_at: trx.fn.now() });
     if (!n) return false;
+    await freezeCost(trx, orderId);
     for (const i of await trx('order_items').where({ order_id: orderId })) {
       await trx('product_stock').where({ product_id: i.product_id, size: i.size })
         .update({ quantity: trx.raw('quantity - ?', [i.quantity]), reserved: trx.raw('reserved - ?', [i.quantity]) });

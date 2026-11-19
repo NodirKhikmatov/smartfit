@@ -96,6 +96,10 @@
             <div class="chips" id="pickSizes" role="group" data-i18n-aria-label="staff.stock.size"></div>
             <label class="field"><span data-i18n="field.quantity"></span> <input name="qty" type="number" step="1" inputmode="numeric" aria-describedby="qtyHint"></label>
             <p class="hint" id="qtyHint"></p>
+            <div id="costWrap" hidden>
+              <label class="field"><span data-i18n="staff.stock.cost"></span> <input name="cost" type="number" min="0" step="1" inputmode="numeric" aria-describedby="costHint"></label>
+              <p class="hint" id="costHint" data-i18n="staff.stock.cost_hint"></p>
+            </div>
             <button type="button" class="primary" id="scanAdd" data-i18n="staff.stock.add"></button>
           </div>
         </form>

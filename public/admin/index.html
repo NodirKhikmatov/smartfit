@@ -52,6 +52,7 @@
           <li id="navCats" hidden><a href="#/categories" data-route="categories"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#bag"></use></svg><span data-i18n="adm.route.categories"></span></a></li>
           <li id="navSizes" hidden><a href="#/sizes" data-route="sizes"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#ruler"></use></svg><span data-i18n="adm.route.sizes"></span></a></li>
           <li><a href="#/stats" data-route="stats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.route.stats"></span></a></li>
+          <li><a href="#/profit" data-route="profit"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#wallet"></use></svg><span data-i18n="adm.route.profit"></span></a></li>
           <li><a href="#/demand" data-route="demand"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trend-up"></use></svg><span data-i18n="adm.route.demand"></span></a></li>
           <li><a href="#/reviews" data-route="reviews"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#star"></use></svg><span data-i18n="adm.route.reviews"></span></a></li>
           <li><a href="#/qr" data-route="qr"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg><span data-i18n="adm.route.qr"></span></a></li>
@@ -293,6 +294,63 @@
           <section class="card panel" aria-labelledby="statsTopTitle">
             <div class="panel-head"><div><h2 id="statsTopTitle" data-i18n="adm.stats.top"></h2></div></div>
             <ol class="rank" id="topRows"></ol>
+          </section>
+        </div>
+      </section>
+
+      <!-- Foyda (task 49): profit and margin by day, category and product; what discounts cost; stock at cost; sales below cost -->
+      <section data-page="profit" hidden>
+        <div class="page-head">
+          <p class="muted" id="profitRange"></p>
+          <div class="seg" role="group" data-i18n-aria-label="adm.stats.period" id="profitDays"></div>
+        </div>
+        <div id="profitError"></div>
+        <div class="kpis" id="profitKpis"></div>
+        <p class="notice" id="profitNoCost" hidden></p>
+        <div class="dash-grid">
+          <section class="card panel span-2" aria-labelledby="profitChartTitle">
+            <div class="panel-head"><div><h2 id="profitChartTitle" data-i18n="adm.profit.by_day"></h2><p class="panel-sub" id="profitChartSub"></p></div></div>
+            <div class="chart-box" id="profitChart"></div>
+            <details class="table-view">
+              <summary data-i18n="adm.stats.table"></summary>
+              <div class="table-wrap"><table class="table"><thead><tr><th data-i18n="adm.stats.day"></th><th class="num" data-i18n="adm.profit.revenue"></th><th class="num hide-sm" data-i18n="adm.profit.cost"></th><th class="num" data-i18n="adm.profit.profit"></th><th class="num" data-i18n="adm.profit.margin"></th></tr></thead><tbody id="profitDayRows"></tbody></table></div>
+            </details>
+          </section>
+          <section class="card panel" aria-labelledby="profitDiscTitle">
+            <div class="panel-head"><div><h2 id="profitDiscTitle" data-i18n="adm.profit.discounts"></h2><p class="panel-sub" data-i18n="adm.profit.discounts_sub"></p></div></div>
+            <ul class="rank" id="profitDisc"></ul>
+            <ol class="rank" id="profitCodes"></ol>
+          </section>
+          <section class="card panel" aria-labelledby="profitStockTitle">
+            <div class="panel-head"><div><h2 id="profitStockTitle" data-i18n="adm.profit.stock"></h2><p class="panel-sub" data-i18n="adm.profit.stock_sub"></p></div></div>
+            <ul class="rank" id="profitStock"></ul>
+          </section>
+          <section class="card panel span-2" aria-labelledby="profitCatTitle">
+            <div class="panel-head"><div><h2 id="profitCatTitle" data-i18n="adm.profit.by_category"></h2></div></div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th data-i18n="adm.products.category"></th><th class="num hide-sm" data-i18n="adm.profit.units"></th><th class="num" data-i18n="adm.profit.revenue"></th><th class="num hide-sm" data-i18n="adm.profit.cost"></th><th class="num" data-i18n="adm.profit.profit"></th><th class="num" data-i18n="adm.profit.margin"></th></tr></thead>
+                <tbody id="profitCatRows"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="card panel span-2" aria-labelledby="profitProdTitle">
+            <div class="panel-head"><div><h2 id="profitProdTitle" data-i18n="adm.profit.by_product"></h2><p class="panel-sub" data-i18n="adm.profit.by_product_sub"></p></div></div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th data-i18n="adm.demand.product"></th><th class="num hide-sm" data-i18n="adm.profit.units"></th><th class="num" data-i18n="adm.profit.revenue"></th><th class="num hide-sm" data-i18n="adm.profit.cost"></th><th class="num" data-i18n="adm.profit.profit"></th><th class="num" data-i18n="adm.profit.margin"></th></tr></thead>
+                <tbody id="profitProdRows"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="card panel span-2" aria-labelledby="profitBelowTitle">
+            <div class="panel-head"><div><h2 id="profitBelowTitle" data-i18n="adm.profit.below"></h2><p class="panel-sub" data-i18n="adm.profit.below_sub"></p></div></div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th data-i18n="adm.profit.order"></th><th data-i18n="adm.demand.product"></th><th class="num hide-sm" data-i18n="adm.profit.unit_paid"></th><th class="num hide-sm" data-i18n="adm.profit.unit_cost"></th><th class="num" data-i18n="adm.profit.loss"></th></tr></thead>
+                <tbody id="profitBelowRows"></tbody>
+              </table>
+            </div>
           </section>
         </div>
       </section>
@@ -1156,6 +1214,7 @@
       <label><span data-i18n="adm.form.style"></span> <input name="style" maxlength="40"></label>
       <label><span data-i18n="adm.products.price"></span> <input name="price" type="number" min="1" step="1" required></label>
       <label><span data-i18n="adm.form.discount"></span> <input name="discount_price" type="number" min="1" step="1"></label>
+      <label><span data-i18n="adm.form.cost"></span> <input name="cost" type="number" min="0" step="1" aria-describedby="costNote"></label>
       <label data-outfit><span data-i18n="adm.form.temp_min"></span> <input name="temp_min" type="number" min="-60" max="60" step="1" required></label>
       <label data-outfit><span data-i18n="adm.form.temp_max"></span> <input name="temp_max" type="number" min="-60" max="60" step="1" required></label>
       <label><span data-i18n="adm.form.shelf"></span> <input name="shelf_location" maxlength="40"></label>
@@ -1167,6 +1226,7 @@
       <label class="span-2"><span data-i18n="field.description_ru"></span> <textarea name="description_ru" lang="ru" maxlength="300" rows="2"></textarea></label>
     </div>
     <p class="hint" id="roleNote" data-i18n="adm.form.no_role" hidden></p>
+    <p class="hint" id="costNote" data-i18n="adm.form.cost_note"></p>
     <h3 data-i18n="field.details"></h3>
     <p class="hint" data-i18n="adm.form.details_hint"></p>
     <div class="details" id="details"></div>

@@ -299,7 +299,7 @@ test('a read-only organisation can\'t receive or count', async () => {
 
 test('staff app: the scan screens ship, the service worker cache is bumped, no inline code, camera only through BarcodeDetector', async () => {
   const js = read('public/staff/staff.js'), html = read('public/staff/index.html'), sw = read('public/staff/sw.js');
-  assert.match(sw, /const CACHE = 'sf-staff-v2'/);
+  assert.match(sw, /const CACHE = 'sf-staff-v3'/);
   assert.match(js, /'BarcodeDetector' in window/);
   assert.match(js, /\/stock\/scans/);
   assert.match(html, /id="stockHome"/);
@@ -312,6 +312,7 @@ test('migration 037: down drops the stock tables, up brings them back', async ()
   try {
     await m.migrate.latest();
     assert.ok(await m.schema.hasTable('stock_movements'));
+    await m.migrate.down(); // 039
     await m.migrate.down(); // 038
     await m.migrate.down();
     for (const t of ['stock_movements', 'stock_scans', 'stock_sessions']) assert.equal(await m.schema.hasTable(t), false, t);

@@ -156,6 +156,10 @@ export function stockRoutes(r, db, { findProduct }) {
     if (!s) throw fail(404, 'err.stock_session_missing');
     const qty = s.kind === 'receive' ? int(b.quantity, 1, SCAN_MAX, 'field.quantity') : int(b.quantity, -SCAN_MAX, SCAN_MAX, 'field.quantity');
     if (!qty) throw fail(400, 'err.invalid', { field: 'field.quantity' });
+    // Task 49: "kirim narxi", the unit cost on this delivery (receiving only). Staff never see or set a cost.
+    const cost = b.cost === undefined || b.cost === null || b.cost === '' ? null : int(b.cost, 0, 1e9, 'field.cost');
+    if (cost !== null && req.admin.role === 'staff') throw fail(403, 'err.forbidden');
+    if (cost !== null && s.kind !== 'receive') throw fail(400, 'err.invalid', { field: 'field.cost' });
     // Only this session's store: another store's product (or an unknown id) is refused, never applied.
     const p = Number.isInteger(b.product_id) ? await db('products').where({ id: b.product_id, store_id: s.store_id }).first('id', 'name', 'category', 'sizes', 'category_id', 'shelf_location') : undefined;
     if (!p) throw fail(404, 'err.stock_not_here');
@@ -171,12 +175,25 @@ export function stockRoutes(r, db, { findProduct }) {
         const [{ n }] = await trx('stock_scans').where({ session_id: s.id, product_id: p.id, size: b.size }).sum({ n: 'quantity' });
         if (Number(n) < 0) throw fail(409, 'err.stock_count_negative');
       } else {
+        // The cost becomes the weighted average of the stock on hand (all sizes, before this scan) and these units. The
+        // no-op UPDATE takes the product's row first, so two deliveries of one product can't both average the same old cost.
+        // An unknown old cost, or no stock left, takes the new cost as it is.
+        let costs = null;
+        if (cost !== null) {
+          await trx('products').where({ id: p.id }).update({ cost: trx.raw('cost') });
+          const { cost: old } = await trx('products').where({ id: p.id }).first('cost');
+          const [{ n }] = await trx('product_stock').where({ product_id: p.id }).sum({ n: 'quantity' });
+          const have = Math.max(Number(n) || 0, 0);
+          costs = { before: old, after: old == null || !have ? cost : Math.round((old * have + cost * qty) / (have + qty)) };
+          await trx('products').where({ id: p.id }).update({ cost: costs.after, updated_at: trx.fn.now() });
+        }
         const up = await trx('product_stock').where({ product_id: p.id, size: b.size }).increment('quantity', qty);
         if (!up) await trx('product_stock').insert({ product_id: p.id, size: b.size, quantity: qty });
         await moved(trx, { productId: p.id, size: b.size, delta: qty, reason: 'receive', who: req.admin, ref: { session_id: s.id } });
         const { quantity } = await trx('product_stock').where({ product_id: p.id, size: b.size }).first('quantity');
         await audit(trx, req.admin, { action: 'stock.receive', storeId: s.store_id, entityId: p.id, label: p.name,
-          before: { [b.size]: quantity - qty }, after: { [b.size]: quantity } });
+          before: { [b.size]: quantity - qty, ...(costs && { cost: costs.before }) }, after: { [b.size]: quantity, ...(costs && { cost: costs.after }) } });
+        if (costs) return { id: row.id, key, session_id: s.id, product_id: p.id, size: b.size, quantity: qty, cost: costs.after };
       }
       return { id: row.id, key, session_id: s.id, product_id: p.id, size: b.size, quantity: qty };
     });

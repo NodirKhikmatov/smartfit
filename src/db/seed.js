@@ -210,7 +210,7 @@ export async function seed(db, { uploadDir } = {}) {
       for (const [i, { art, stores, ...p }] of CATALOGUE.entries()) {
         if (!stores.includes(code)) continue;
         const [{ id: productId }] = await trx('products')
-          .insert({ ...p, store_id: storeId, category_id: catIds[p.category], shelf_location: `${'ABCDE'[i % 5]}-${i + 1}`, image_url: `/uploads/products/${imageName(storeIdx, p.sku)}` })
+          .insert({ ...p, cost: demoCost(p.price), store_id: storeId, category_id: catIds[p.category], shelf_location: `${'ABCDE'[i % 5]}-${i + 1}`, image_url: `/uploads/products/${imageName(storeIdx, p.sku)}` })
           .returning('id');
         const sizes = sizesFor(p.category);
         await trx('product_stock').insert(sizes.map((size, s) => ({ product_id: productId, size, quantity: stockFor(i, s, storeIdx, sizes.length) })));
@@ -225,7 +225,7 @@ export async function seed(db, { uploadDir } = {}) {
       }
       for (const [i, { image, ...p }] of KIDS_CATALOGUE.entries()) {
         const sizes = p.category === 'shoes' ? KIDS_SHOES : KIDS;
-        const [{ id: productId }] = await trx('products').insert({ ...p, store_id: storeId, category_id: catIds[p.category], sizes: sizes.join(','), audience: 'child',
+        const [{ id: productId }] = await trx('products').insert({ ...p, cost: demoCost(p.price), store_id: storeId, category_id: catIds[p.category], sizes: sizes.join(','), audience: 'child',
           shelf_location: `K-${i + 1}`, image_url: `/uploads/products/${imageName(storeIdx, p.sku)}` }).returning('id');
         // Every size in stock (2–4), so the child path finds an outfit at any height and temperature.
         await trx('product_stock').insert(sizes.map((size, s) => ({ product_id: productId, size, quantity: 2 + ((i + s + storeIdx) % 3) })));
@@ -264,8 +264,11 @@ export const DEMO_REVIEWS = {
   top: [[5, 'right', 'Mato yoqimli, rangi rasmdagidek.'], [4, 'right', null], [5, 'small', "Biroz tor, lekin chiroyli o'tiradi."], [4, 'right', 'Yaxshi']],
   bottom: [[3, 'small', 'Belidan tor keldi.'], [4, 'small', null], [2, 'small', 'Bir razmer kichik, almashtirdim.']],
 };
+// Task 49: a demo cost price, 55 % of the price rounded to 1 000 so'm, so the profit report has numbers.
+const demoCost = (price) => Math.round((price * 0.55) / 1000) * 1000;
+
 export async function seedDemoReviews(db) {
-  const { insertOrder, storeOf } = await import('../cart/cart.js');
+  const { insertOrder, storeOf, freezeCost } = await import('../cart/cart.js');
   const { randomBytes } = await import('node:crypto');
   const s1 = await db('stores').orderBy('id').first('id');
   const store = await storeOf(db, s1.id);
@@ -278,6 +281,7 @@ export async function seedDemoReviews(db) {
       const id = await insertOrder(trx, store, { customer_name: 'Demo xaridor', phone: '+998900000000', fulfillment: 'pickup', address: null, lat: null, lon: null },
         lines.map(([p, size]) => ({ product_id: p.id, size, quantity: 1, unit_price: p.discount_price ?? p.price })), { notifyToken: randomBytes(16).toString('hex') });
       await trx('orders').where({ id }).update({ status: 'delivered', payment_status: 'paid', paid_at: at, created_at: at, notified: 'delivered' });
+      await freezeCost(trx, id);
       const items = await trx('order_items').where({ order_id: id }).orderBy('id');
       for (const [i, [p, , [rating, fit, text]]] of lines.entries()) {
         await trx('order_items').where({ id: items[i].id }).update({ fit, fit_at: at });

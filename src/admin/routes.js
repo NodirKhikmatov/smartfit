@@ -28,6 +28,7 @@ import { mayDo, FEATURES } from '../plans.js';
 import { reviewRoutes, report } from '../reviews.js';
 import { moved } from '../movements.js';
 import { stockRoutes } from './stock.js';
+import { profitRoutes } from './profit.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -112,6 +113,8 @@ function validProduct(b, c) {
     style: text(b.style, 40, 'field.style', false),
     price: int(b.price, 1, 1e9, 'field.price'),
     discount_price: b.discount_price ?? null,
+    // Task 49: what one unit cost the shop (null = not known; such sales are counted apart, never as 100 % profit).
+    cost: b.cost === undefined || b.cost === null || b.cost === '' ? null : int(b.cost, 0, 1e9, 'field.cost'),
     temp_min: anyWeather && (b.temp_min ?? '') === '' ? -60 : int(b.temp_min, -60, 60, 'field.temp_min'),
     temp_max: anyWeather && (b.temp_max ?? '') === '' ? 60 : int(b.temp_max, -60, 60, 'field.temp_max'),
     waterproof: b.waterproof ?? false,
@@ -169,7 +172,8 @@ async function snapProduct(q, id) {
 // CSV import: one row = one product, stock in one column per size. A filled `id` cell, or else a `sku` already in
 // that store, updates that product; other rows create one.
 // Task 36: `category` is the shop's category by name (or an old role code); a shop's own sizes are columns too.
-const PRODUCT_COLS = ['sku', 'barcode', 'name', 'name_ru', 'category', 'audience', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'waterproof', 'shelf_location', 'description', 'description_ru'];
+// Task 49: `cost` too (the export and the audit log are for owners, managers and super only, like every product route).
+const PRODUCT_COLS = ['sku', 'barcode', 'name', 'name_ru', 'category', 'audience', 'gender', 'color', 'style', 'price', 'discount_price', 'cost', 'temp_min', 'temp_max', 'waterproof', 'shelf_location', 'description', 'description_ru'];
 const SIZE_COLS = [...sizesFor('top'), ...sizesFor('shoes'), ...sizesFor('accessory'), ...KIDS, ...KIDS_SHOES];
 const TEXT_COLS = ['sku', 'barcode', 'name', 'name_ru', 'category', 'color', 'style', 'shelf_location', 'description', 'description_ru'];
 const MAX_IMPORT_ROWS = 2000;
@@ -864,6 +868,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
   pointsRoutes(r, db, { resolveStore }); // task 34
   reviewRoutes(r, db); // task 46
   stockRoutes(r, db, { findProduct }); // task 47
+  profitRoutes(r, db); // task 49
 
   // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.
   const inScope = (req, q, col = 'store_id') => {

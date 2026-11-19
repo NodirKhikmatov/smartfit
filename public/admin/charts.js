@@ -27,10 +27,12 @@ export function lineChart(box, points, { format, tick = format, label, xLabel = 
   function draw() {
     const W = Math.max(box.clientWidth, 280), H = box.clientHeight || 220;
     const pad = { t: 12, r: 16, b: 26, l: 52 };
-    const ticks = niceTicks(Math.max(...points.map((p) => p.value), 0));
-    const top = ticks.at(-1);
+    // Task 49: a value below zero (a day at a loss) mirrors the ticks under the zero line.
+    const lo = Math.min(...points.map((p) => p.value), 0), base = niceTicks(Math.max(...points.map((p) => p.value), -lo, 0));
+    const ticks = lo < 0 ? [...base.slice(1).map((v) => -v).reverse(), ...base] : base;
+    const top = ticks.at(-1), bottom = ticks[0];
     const x = (i) => pad.l + (points.length < 2 ? 0 : (i * (W - pad.l - pad.r)) / (points.length - 1));
-    const y = (v) => pad.t + (H - pad.t - pad.b) * (1 - v / top);
+    const y = (v) => pad.t + ((H - pad.t - pad.b) * (top - v)) / (top - bottom);
     geom = { x, y, W, H, pad };
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     svg.setAttribute('width', W);

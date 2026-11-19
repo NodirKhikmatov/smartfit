@@ -139,6 +139,7 @@ a.kpi:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); col
 .delta .icon { width: 1em; height: 1em; vertical-align: 0; stroke-width: 2; }
 .delta.up { background: var(--accent-soft); color: var(--accent); }
 .delta.down { background: var(--danger-soft); color: var(--danger); }
+.table .neg { color: var(--danger); } /* task 49: a loss */
 .delta.flat { background: var(--sunken); color: var(--ink-2); }
 
 /* Panels */

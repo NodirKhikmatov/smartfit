@@ -282,6 +282,7 @@ const PAGES = {
   sizes: { title: 'adm.route.sizes', load: loadSizes }, // task 48
   offers: { title: 'adm.route.offers', load: loadOffers }, // task 43
   stats: { title: 'adm.route.stats', load: loadStats },
+  profit: { title: 'adm.route.profit', load: loadProfit }, // task 49
   demand: { title: 'adm.route.demand', load: loadDemand },
   reviews: { title: 'adm.route.reviews', load: loadReviews }, // task 46
   qr: { title: 'adm.route.qr', load: loadQr },
@@ -1172,7 +1173,7 @@ function openForm(p) {
   f.reset();
   $('formError').textContent = '';
   $('formTitle').textContent = t(p ? 'adm.form.edit' : 'adm.form.new');
-  for (const k of ['name', 'name_ru', 'gender', 'color', 'style', 'price', 'discount_price', 'temp_min', 'temp_max', 'shelf_location', 'sku', 'barcode', 'description', 'description_ru']) f[k].value = p?.[k] ?? '';
+  for (const k of ['name', 'name_ru', 'gender', 'color', 'style', 'price', 'discount_price', 'cost', 'temp_min', 'temp_max', 'shelf_location', 'sku', 'barcode', 'description', 'description_ru']) f[k].value = p?.[k] ?? '';
   if (!p) f.gender.value = 'unisex';
   // A role-less product is stored as worn in any weather (−60…60): the form shows those as empty.
   if (p && !p.category && p.temp_min === -60 && p.temp_max === 60) f.temp_min.value = f.temp_max.value = '';
@@ -1271,7 +1272,7 @@ $('form').addEventListener('submit', async (e) => {
   const num = (v) => (v === '' ? null : Number(v));
   const body = {
     name: f.name.value, name_ru: f.name_ru.value || null, category_id: Number(f.category.value) || null, gender: f.gender.value, color: f.color.value,
-    style: f.style.value || null, price: num(f.price.value), discount_price: num(f.discount_price.value),
+    style: f.style.value || null, price: num(f.price.value), discount_price: num(f.discount_price.value), cost: num(f.cost.value), // task 49
     temp_min: f.temp_min.required ? num(f.temp_min.value) : null, temp_max: f.temp_max.required ? num(f.temp_max.value) : null,
     waterproof: f.temp_min.required && f.waterproof.checked,
     description: f.description.value.trim() || null, description_ru: f.description_ru.value.trim() || null, details: readDetails(),
@@ -1351,7 +1352,7 @@ async function remove(p) {
   }
 }
 
-$('importCols').textContent = 'id, sku, barcode, store_id, name, name_ru, category, gender, color, style, price, discount_price, temp_min, temp_max, waterproof, shelf_location, description, description_ru, XS, S, M, L, XL, XXL, 36 … 45, ONE';
+$('importCols').textContent = 'id, sku, barcode, store_id, name, name_ru, category, gender, color, style, price, discount_price, cost, temp_min, temp_max, waterproof, shelf_location, description, description_ru, XS, S, M, L, XL, XXL, 36 … 45, ONE';
 function openImport() {
   $('importForm').reset();
   $('importError').textContent = '';
@@ -1427,6 +1428,76 @@ function exportStats() {
   document.body.append(a);
   a.click();
   a.remove();
+}
+
+// ---------- Foyda (task 49): profit and margin by day, category and product, what discounts cost, stock at cost and
+// the lines sold below cost. Sales of products without a cost are shown apart, never counted as profit.
+
+const marginText = (m) => (m === null ? '—' : `${dec(m)}%`);
+const signed = (n) => (n < 0 ? `−${som(-n)}` : som(n));
+const rankRow = (label, value, sub) => el('li', {}, el('span', { className: 'rank-name' }, el('strong', { textContent: label }), sub && el('span', { className: 'muted', textContent: sub })),
+  el('span', { className: 'rank-num num' }, el('strong', { textContent: value })));
+// One table row of a bucket: units, revenue, cost, profit (red when a loss), margin; "no cost" sales noted under the name.
+const profitCells = (b) => [el('td', { className: 'num hide-sm', textContent: b.units }), el('td', { className: 'num', textContent: som(b.revenue) }),
+  el('td', { className: 'num hide-sm', textContent: som(b.cost) }), el('td', { className: `num${b.profit < 0 ? ' neg' : ''}` }, el('strong', { textContent: signed(b.profit) })),
+  el('td', { className: 'num', textContent: marginText(b.margin) })];
+const noCostNote = (b) => (b.no_cost_units ? t('adm.profit.row_no_cost', { n: b.no_cost_units, sum: money(b.no_cost_revenue) }) : null);
+async function loadProfit() {
+  const seq = (loads.profit = (loads.profit || 0) + 1);
+  const p = route.params;
+  const days = ['7', '90'].includes(p.days) ? Number(p.days) : 30;
+  seg($('profitDays'), [7, 30, 90].map((n) => [String(n), t('adm.stats.days', { n })]), String(days), (v) => setParams({ ...p, days: v === '30' ? '' : v }));
+  const stop = showAfter(200, () => $('profitKpis').replaceChildren(...kpiSkeleton(4)));
+  let r;
+  try { r = await call('/profit?' + qs(scoped({ days }))); } catch (err) {
+    stop();
+    if (seq === loads.profit) stateBox($('profitError'), err, () => loadProfit());
+    return;
+  }
+  stop();
+  if (seq !== loads.profit) return;
+  stateBox($('profitError'));
+  const s = r.totals, withStore = showStore();
+  $('profitRange').textContent = t('adm.stats.range', { from: day(r.from), to: day(r.to), n: r.days });
+  const k = (label, v, sub) => kpi({ label: t(label), value: v === null ? '—' : short(v), suffix: v === null ? null : t('common.som'), exact: v === null ? null : money(v), sub });
+  $('profitKpis').replaceChildren(k('adm.profit.revenue', s.revenue, t('adm.profit.units_n', { n: s.units })), k('adm.profit.cost', s.cost),
+    k('adm.profit.profit', s.profit), kpi({ label: t('adm.profit.margin'), value: marginText(s.margin) }));
+  $('profitNoCost').hidden = !s.no_cost_units;
+  $('profitNoCost').replaceChildren(icon('info'), el('span', { textContent: t('adm.profit.no_cost', { n: s.no_cost_units, sum: money(s.no_cost_revenue) }) }));
+  // By day: the profit line (a loss day goes below zero) and the table.
+  $('profitChartSub').replaceChildren(el('strong', { className: 'num', textContent: `${signed(s.profit)} ${t('common.som')}` }));
+  if (!r.per_day.some((d) => d.units || d.no_cost_units)) {
+    $('profitChart').classList.remove('chart');
+    $('profitChart').chartObserver?.disconnect();
+    $('profitChart').replaceChildren(emptyState({ ic: 'wallet', title: t('adm.profit.empty'), text: t('adm.profit.empty_text') }));
+  } else lineChart($('profitChart'), r.per_day.map((d) => ({ label: day(d.day), value: d.profit })), { label: t('adm.profit.by_day'), format: (v) => `${signed(v)} ${t('common.som')}`, tick: short });
+  $('profitDayRows').replaceChildren(...r.per_day.slice().reverse().map((d) => el('tr', {}, el('td', { textContent: day(d.day) }),
+    el('td', { className: 'num', textContent: som(d.revenue) }), el('td', { className: 'num hide-sm', textContent: som(d.cost) }),
+    el('td', { className: `num${d.profit < 0 ? ' neg' : ''}`, textContent: signed(d.profit) }), el('td', { className: 'num', textContent: marginText(d.margin) }))));
+  // What the discounts cost on these orders, and the promo codes by cost.
+  const disc = r.discounts;
+  $('profitDisc').replaceChildren(rankRow(t('adm.profit.d_bundle'), money(disc.bundle)), rankRow(t('adm.profit.d_promo'), money(disc.promo)),
+    rankRow(t('adm.profit.d_points'), money(disc.points)), rankRow(t('adm.profit.d_total'), money(disc.total)));
+  $('profitCodes').replaceChildren(...disc.promo_codes.map((c) => rankRow(c.code, money(c.sum), t('adm.profit.code_orders', { n: c.orders }))));
+  // Stock at cost now.
+  const st = r.stock;
+  $('profitStock').replaceChildren(rankRow(t('adm.profit.stock_value'), money(st.value), t('adm.profit.units_n', { n: st.units })),
+    ...(st.no_cost_units ? [rankRow(t('adm.profit.stock_no_cost'), t('adm.profit.units_n', { n: st.no_cost_units }), t('adm.profit.products_n', { n: st.no_cost_products }))] : []));
+  const empty = (tbody, cols) => emptyRow(tbody, cols, { ic: 'wallet', title: t('adm.profit.empty'), text: t('adm.profit.empty_text') });
+  if (!r.categories.length) empty($('profitCatRows'), 6);
+  else $('profitCatRows').replaceChildren(...r.categories.map((c) => el('tr', {},
+    el('td', {}, el('span', { className: 'demand-name' }, el('strong', { textContent: catOf(c) }), noCostNote(c) && el('span', { className: 'sizes', textContent: noCostNote(c) }))), ...profitCells(c))));
+  if (!r.products.length) empty($('profitProdRows'), 6);
+  else $('profitProdRows').replaceChildren(...r.products.map((x) => el('tr', {},
+    el('td', {}, el('span', { className: 'demand-name' }, el('strong', { textContent: productName(x) }),
+      el('span', { className: 'sizes', textContent: [x.sku || cat(x.category), withStore && storeName(x.store_id), noCostNote(x)].filter(Boolean).join(' · ') }))), ...profitCells(x))));
+  if (!r.below_cost.length) emptyRow($('profitBelowRows'), 5, { ic: 'check', title: t('adm.profit.below_empty'), text: t('adm.profit.below_empty_text') });
+  else $('profitBelowRows').replaceChildren(...r.below_cost.map((x) => el('tr', { tabIndex: 0, onclick: () => openOrder(x.order_id), onkeydown: (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), openOrder(x.order_id)) },
+    el('td', { className: 'tabular', textContent: `№ ${x.number}` }),
+    el('td', {}, el('span', { className: 'demand-name' }, el('strong', { textContent: productName(x) }),
+      el('span', { className: 'sizes', textContent: [`${sizeText(x.size)} × ${x.quantity}`, withStore && storeName(x.store_id)].filter(Boolean).join(' · ') }))),
+    el('td', { className: 'num hide-sm', textContent: som(x.unit_paid) }), el('td', { className: 'num hide-sm', textContent: som(x.unit_cost) }),
+    el('td', { className: 'num neg' }, el('strong', { textContent: `−${som(x.loss)}` })))));
 }
 
 // ---------- Talab (task 24): missed demand with a restock suggestion, and the customer funnel by step per kiosk and day.
@@ -2136,7 +2207,7 @@ $('offerDelete').onclick = async () => {
 // Audit log: newest first, filtered by what / who / dates (all in the hash), paged.
 const AUDIT_FIELDS = {
   name: 'field.name', name_ru: 'field.name_ru', category: 'field.category', gender: 'field.gender', color: 'field.color', style: 'field.style',
-  price: 'field.price', discount_price: 'field.discount_price', temp_min: 'field.temp_min', temp_max: 'field.temp_max', waterproof: 'field.waterproof',
+  price: 'field.price', discount_price: 'field.discount_price', cost: 'field.cost', temp_min: 'field.temp_min', temp_max: 'field.temp_max', waterproof: 'field.waterproof',
   shelf_location: 'field.shelf_location', image_url: 'field.photo', stock: 'field.stock', status: 'field.status', payment_status: 'adm.orders.payment',
   city: 'field.city', address: 'field.address', lat: 'adm.set.lat', lon: 'adm.set.lon', opens_at: 'adm.set.opens', closes_at: 'adm.set.closes',
   delivery_fee: 'field.delivery_fee', free_delivery_threshold: 'field.free_threshold', telegram_chat_id: 'field.telegram_chat', report_chat_id: 'field.report_chat',
@@ -2149,7 +2220,7 @@ const AUDIT_FIELDS = {
   promo_code_id: 'adm.offers.link_promo', product_id: 'adm.offers.link_product', seconds: 'field.slide_seconds', order: 'field.slide_order',
   starts_on: 'adm.promo.starts', ends_on: 'adm.promo.ends', max_uses: 'field.promo_max_uses', max_per_phone: 'field.promo_per_phone', active: 'field.promo_active',
 };
-const MONEY = ['price', 'discount_price', 'delivery_fee', 'free_delivery_threshold', 'min_order'];
+const MONEY = ['price', 'discount_price', 'cost', 'delivery_fee', 'free_delivery_threshold', 'min_order'];
 function auditValue(k, v) {
   if (v == null || v === '') return '—';
   if (k === 'image_url') return t('adm.audit.photo');
