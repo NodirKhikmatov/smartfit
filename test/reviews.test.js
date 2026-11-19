@@ -340,6 +340,7 @@ test('demo seed: the demo item pages show an average, a fit summary and a shop a
     } finally {
       app.close();
     }
+    await m.migrate.down(); // 037
     await m.migrate.down();
     assert.equal(await m.schema.hasTable('product_reviews'), false);
     await m.migrate.latest();

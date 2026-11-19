@@ -17,6 +17,7 @@ import { pointsConfig, balanceOf, maxSpend, checkSpend, spend, refundSpent, earn
 import { termsOf, plan, monthly } from './instalment.js';
 import { allows, shopOpen } from '../plans.js';
 import { orderLines } from '../reviews.js';
+import { moved } from '../movements.js';
 
 export const HOLD_MS = 15 * 60 * 1000;
 export const HANDOFF_MS = 5 * 60 * 1000; // how long the kiosk's "continue on your phone" QR works
@@ -103,6 +104,7 @@ async function cancelPaid(trx, orderId) {
   if (!n) return false;
   for (const i of await trx('order_items').where({ order_id: orderId })) {
     await trx('product_stock').where({ product_id: i.product_id, size: i.size }).increment('quantity', i.quantity);
+    await moved(trx, { productId: i.product_id, size: i.size, delta: i.quantity, reason: 'cancel', ref: { order_id: orderId } });
   }
   await releasePromo(trx, orderId);
   await refundSpent(trx, orderId);
@@ -150,6 +152,7 @@ export async function markPaid(db, orderId, now = Date.now()) {
     for (const i of await trx('order_items').where({ order_id: orderId })) {
       await trx('product_stock').where({ product_id: i.product_id, size: i.size })
         .update({ quantity: trx.raw('quantity - ?', [i.quantity]), reserved: trx.raw('reserved - ?', [i.quantity]) });
+      await moved(trx, { productId: i.product_id, size: i.size, delta: -i.quantity, reason: 'sale', ref: { order_id: orderId } });
     }
     return true;
   });

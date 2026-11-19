@@ -25,6 +25,8 @@ import { fitOf } from '../size/size.js';
 import { demandItems, funnelStats, methodStats, occasionStats } from '../demand.js';
 import { mayDo, FEATURES } from '../plans.js';
 import { reviewRoutes, report } from '../reviews.js';
+import { moved } from '../movements.js';
+import { stockRoutes } from './stock.js';
 
 export const CATEGORIES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
 export const GENDERS = ['male', 'female', 'unisex'];
@@ -138,12 +140,14 @@ function validStock(stock, sizes) {
   });
 }
 
-async function applyStock(trx, productId, entries) {
+// Task 47: each size that moves writes a stock movement (reason 'admin' for the form, 'csv' for an import row).
+async function applyStock(trx, productId, entries, who, reason) {
   const current = await trx('product_stock').where({ product_id: productId });
   for (const [size, quantity] of entries) {
     const row = current.find((r) => r.size === size);
     if (row && row.reserved > quantity) throw fail(409, 'err.size_reserved', { size, n: row.reserved });
     await trx('product_stock').insert({ product_id: productId, size, quantity }).onConflict(['product_id', 'size']).merge(['quantity']);
+    await moved(trx, { productId, size, delta: quantity - (row?.quantity ?? 0), reason, who });
   }
 }
 
@@ -191,7 +195,9 @@ const IMAGE_TYPES = [
   ['webp', (b) => b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP'],
 ];
 // What the staff role may call (task 28): its own account, the floor queue, fitting accept/done and order steps.
-export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/staff$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/orders\/\d+\/status$/];
+export const STAFF_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^GET \/staff$/, /^POST \/fitting\/\d+\/(accept|done)$/, /^POST \/orders\/\d+\/status$/,
+  // Task 47: receiving and counting. Confirming a count's corrections is not here: a manager or owner does that.
+  /^GET \/stock\/(catalog|sessions)$/, /^GET \/stock\/sessions\/\d+$/, /^POST \/stock\/(sessions|scans)$/, /^POST \/stock\/sessions\/\d+\/close$/];
 // What the mall role may call (task 37): its own account and its mall (profile, logo, QR, the shops' directory entries,
 // shop invites, summary numbers). Every product, order, customer, team and settings route is 403 for it.
 export const MALL_ROUTES = [/^GET \/me$/, /^POST \/me\/password$/, /^(GET|PATCH) \/mall$/, /^(POST|DELETE) \/mall\/logo$/, /^GET \/mall\/qr$/,
@@ -430,7 +436,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
     if (sku !== null && (await trx('products').where({ store_id: storeId, sku }).whereNot('id', exceptId).first())) throw fail(409, 'err.sku_taken', { sku });
   }
 
-  async function insertProduct(trx, admin, body) {
+  async function insertProduct(trx, admin, body, reason = 'admin') {
     const storeId = await resolveStore(trx, admin, body.store_id);
     // Task 45: the plan's product limit (a CSV import counts its own rows as it goes, inside its transaction).
     await mayDo(trx, (await trx('stores').where({ id: storeId }).first('organization_id')).organization_id, 'products', { now: now(), admin });
@@ -439,13 +445,13 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
     await skuFree(trx, storeId, product.sku);
     const [{ id }] = await trx('products').insert({ ...product, store_id: storeId }).returning('id');
     await trx('product_stock').insert(sizesOf(product).map((size) => ({ product_id: id, size, quantity: 0 })));
-    await applyStock(trx, id, stock);
+    await applyStock(trx, id, stock, admin, reason);
     await audit(trx, admin, { action: 'product.create', storeId, entityId: id, label: product.name, after: await snapProduct(trx, id) });
     return id;
   }
 
   // Partial edit: only the given fields change, plus optional `stock`. store_id cannot change.
-  async function updateProduct(trx, existing, body, admin) {
+  async function updateProduct(trx, existing, body, admin, reason = 'admin') {
     if (body.store_id !== undefined && Number(body.store_id) !== existing.store_id) throw fail(400, 'err.store_locked');
     // The category named in the edit, else the current one (an old row without category_id: by its role).
     const named = (body.category_id ?? body.category ?? null) !== null;
@@ -457,7 +463,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
     await skuFree(trx, existing.store_id, product.sku, existing.id);
     const before = await snapProduct(trx, existing.id);
     await trx('products').where({ id: existing.id }).update({ ...product, updated_at: trx.fn.now() });
-    await applyStock(trx, existing.id, stock);
+    await applyStock(trx, existing.id, stock, admin, reason);
     const d = diff(before, await snapProduct(trx, existing.id));
     if (d) await audit(trx, admin, { action: 'product.update', storeId: existing.store_id, entityId: existing.id, label: product.name, ...d });
   }
@@ -555,7 +561,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
             const bySku = id === undefined && body.sku
               ? await trx('products').where({ store_id: await resolveStore(trx, req.admin, storeId), sku: body.sku }).first() : undefined;
             if (id === undefined && !bySku) {
-              seenIds.add(await insertProduct(trx, req.admin, body)); // a later row with the same SKU is a duplicate, not an update
+              seenIds.add(await insertProduct(trx, req.admin, body, 'csv')); // a later row with the same SKU is a duplicate, not an update
               created++;
             } else {
               const n = bySku ? bySku.id : Number(id);
@@ -564,7 +570,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
               if (seenIds.has(n)) throw fail(400, 'err.csv_id_dup', { id: n });
               seenIds.add(n);
               // Update rows: an empty cell keeps the current value, so a stock-only row needs just id + sizes.
-              await updateProduct(trx, existing, Object.fromEntries(Object.entries(body).filter(([, v]) => v !== null)), req.admin);
+              await updateProduct(trx, existing, Object.fromEntries(Object.entries(body).filter(([, v]) => v !== null)), req.admin, 'csv');
               updated++;
             }
           } catch (err) {
@@ -758,11 +764,15 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
           const { returned } = await trx('order_items').where({ id: line.id }).first('returned');
           throw fail(409, 'err.return_too_many', { n: line.quantity - returned });
         }
-        if (b.restock) await trx('product_stock').where({ product_id: line.product_id, size: line.size }).increment('quantity', qty);
+        if (b.restock) {
+          await trx('product_stock').where({ product_id: line.product_id, size: line.size }).increment('quantity', qty);
+          await moved(trx, { productId: line.product_id, size: line.size, delta: qty, reason: 'return', who: req.admin, ref: { order_id: o.id } });
+        }
         // Main rule: the new size must be on the shelf (free stock), and it leaves the shelf now.
         if (newSize && !(await trx('product_stock').where({ product_id: line.product_id, size: newSize }).whereRaw('quantity - reserved >= ?', [qty]).decrement('quantity', qty))) {
           throw fail(409, 'err.out_of_stock', { product: p, size: newSize });
         }
+        if (newSize) await moved(trx, { productId: line.product_id, size: newSize, delta: -qty, reason: 'exchange', who: req.admin, ref: { order_id: o.id } });
         await returnPoints(trx, { id: retId, order_id: o.id, order_item_id: line.id, kind: b.kind, quantity: qty }); // task 34
         await audit(trx, req.admin, { action: 'order.return', storeId: o.store_id, entityId: o.id, label: o.number,
           after: { product: p.name, size: line.size, kind: b.kind, reason: b.reason, quantity: qty, refund, restock: b.restock, new_size: newSize } });
@@ -851,6 +861,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
   offerRoutes(r, db, { uploadDir }); // task 43
   pointsRoutes(r, db, { resolveStore }); // task 34
   reviewRoutes(r, db); // task 46
+  stockRoutes(r, db, { findProduct }); // task 47
 
   // Store scope for the analytics endpoints: a manager is always pinned to their store; ?store_id narrows a super-admin.
   const inScope = (req, q, col = 'store_id') => {

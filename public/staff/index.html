@@ -51,7 +51,57 @@
     </section>
     <section id="low" data-section hidden>
       <h2 class="visually-hidden" data-i18n="staff.tab.low"></h2>
-      <div id="lowList"></div>
+      <p class="notice" id="queueNote" role="status" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#clock"></use></svg><span></span></p>
+      <div class="list" id="rejectedList"></div>
+      <div id="stockHome">
+        <div class="actions stock-start">
+          <button type="button" class="primary" id="newReceive"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#plus"></use></svg><span data-i18n="staff.stock.receive"></span></button>
+          <button type="button" id="newCount"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#check"></use></svg><span data-i18n="staff.stock.count"></span></button>
+        </div>
+        <div class="list" id="sessionList"></div>
+        <h3 class="stock-low-title" data-i18n="staff.stock.low_title"></h3>
+        <div id="lowList"></div>
+      </div>
+      <form id="sessionForm" class="card stock-card" hidden novalidate>
+        <h3 id="sfTitle"></h3>
+        <p class="muted" id="sfText"></p>
+        <label class="field" id="sfStoreWrap"><span data-i18n="common.store"></span> <select name="store"></select></label>
+        <label class="field" data-count><span data-i18n="field.category"></span> <select name="category"></select></label>
+        <label class="field" data-count><span data-i18n="field.shelf_location"></span> <input name="shelf" maxlength="40" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span data-i18n="field.stock_note"></span> <input name="note" maxlength="200" autocomplete="off" aria-describedby="sfNoteHint"></label>
+        <p class="hint" id="sfNoteHint"></p>
+        <p class="error" id="sfError" role="alert"></p>
+        <div class="actions">
+          <button type="button" id="sfCancel" data-i18n="common.cancel"></button>
+          <button class="primary" data-i18n="staff.stock.start"></button>
+        </div>
+      </form>
+      <div id="stockSession" hidden>
+        <div class="stock-head">
+          <button type="button" class="icon-btn ghost" id="ssBack" data-i18n-aria-label="staff.stock.back" data-i18n-title="staff.stock.back"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-left"></use></svg></button>
+          <div class="grow"><h3 id="ssTitle"></h3><p class="muted" id="ssSub"></p></div>
+        </div>
+        <form id="scanForm" class="card stock-card" novalidate>
+          <div class="stock-code">
+            <label class="field grow"><span data-i18n="staff.stock.code"></span> <input name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="search" aria-describedby="codeHint"></label>
+            <button type="button" class="icon-btn" id="camBtn" data-i18n-aria-label="staff.stock.camera" data-i18n-title="staff.stock.camera" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#camera"></use></svg></button>
+            <button id="findBtn" data-i18n="staff.stock.find"></button>
+          </div>
+          <p class="hint" id="codeHint"></p>
+          <video id="camView" playsinline muted hidden></video>
+          <p class="error" id="scanError" role="alert"></p>
+          <div class="list" id="scanMatches"></div>
+          <div id="scanPick" hidden>
+            <p class="stock-pick-name" id="pickName"></p>
+            <div class="chips" id="pickSizes" role="group" data-i18n-aria-label="staff.stock.size"></div>
+            <label class="field"><span data-i18n="field.quantity"></span> <input name="qty" type="number" step="1" inputmode="numeric" aria-describedby="qtyHint"></label>
+            <p class="hint" id="qtyHint"></p>
+            <button type="button" class="primary" id="scanAdd" data-i18n="staff.stock.add"></button>
+          </div>
+        </form>
+        <div id="ssBody"></div>
+        <div class="actions" id="ssActions"></div>
+      </div>
     </section>
   </main>
 </div>

@@ -375,7 +375,7 @@
           <ul class="low-list" id="orgEnding"></ul>
         </section>
         <div class="table-wrap">
-          <table class="table">
+          <table class="table org-table">
             <caption class="visually-hidden" data-i18n="adm.route.orgs"></caption>
             <thead><tr><th data-i18n="field.org_name"></th><th data-i18n="adm.orgs.plan_col"></th><th class="hide-sm" data-i18n="adm.orgs.ends_col"></th><th class="num" data-i18n="adm.orgs.stores"></th><th class="num hide-sm" data-i18n="adm.orgs.admins"></th><th class="num hide-sm" data-i18n="adm.orgs.invites"></th><th class="hide-sm" data-i18n="adm.orgs.created"></th><th><span class="visually-hidden" data-i18n="adm.actions"></span></th></tr></thead>
             <tbody id="orgRows"></tbody>
@@ -1155,6 +1155,11 @@
     </div>
     <h3 data-i18n="adm.form.sizes"></h3>
     <div class="stock" id="stock"></div>
+    <details class="moves" id="moveWrap">
+      <summary data-i18n="adm.moves.title"></summary>
+      <ul id="moveList"></ul>
+      <button type="button" id="moveMore" data-i18n="adm.moves.more" hidden></button>
+    </details>
     <div id="fitWrap">
       <h3 data-i18n="adm.sizefit.title"></h3>
       <p class="muted" id="fitStats"></p>

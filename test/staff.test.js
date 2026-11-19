@@ -108,9 +108,18 @@ test('route walk: the staff role can call only the staff routes', async () => {
   const f = await fitting(a1, 0, 7);
   const product = await db('products').where({ store_id: a1 }).first();
   const ids = { '/products/:id': product.id, '/orders/:id': o.id, '/fitting/:id': f, '/stores/:id': a1, '/team/:id': 1, '/team/invites/:id': 1, '/sync-keys/:id': 1, '/promos/:id': 1, '/demo-requests/:id': 1 };
-  const fill = (path) => path.replace(/^(\/[a-z-]+(?:\/invites)?)\/:id/, (m, head) => `${head}/${ids[`${head}/:id`]}`);
+  // Task 47: a receiving of a1 for the stock routes (staff open, scan, look and close; confirming is a manager's).
+  const uid = () => `walk-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+  const recv = (await admin('POST', '/stock/sessions', { key: uid(), kind: 'receive' }, managerA1)).body;
+  const fill = (path) => path.replace('/stock/sessions/:id', `/stock/sessions/${recv.id}`).replace(/^(\/[a-z-]+(?:\/invites)?)\/:id/, (m, head) => `${head}/${ids[`${head}/:id`]}`);
   const PUBLIC = ['POST /login', 'POST /invite/check', 'POST /invite/accept']; // before the auth middleware, no token used
   const ALLOWED = {
+    'GET /stock/catalog': async () => assert.equal((await admin('GET', '/stock/catalog', undefined, staff1)).body.store_id, a1),
+    'GET /stock/sessions': async () => assert.ok((await admin('GET', '/stock/sessions', undefined, staff1)).body.open.some((s) => s.id === recv.id)),
+    'GET /stock/sessions/:id': async () => assert.equal((await admin('GET', `/stock/sessions/${recv.id}`, undefined, staff1)).body.kind, 'receive'),
+    'POST /stock/sessions': async () => assert.equal((await admin('POST', '/stock/sessions', { key: uid(), kind: 'count', shelf: 'A-1' }, staff1)).status, 201),
+    'POST /stock/scans': async () => assert.equal((await admin('POST', '/stock/scans', { key: uid(), session: recv.key, product_id: product.id, size: (await db('product_stock').where({ product_id: product.id }).first()).size, quantity: 1 }, staff1)).status, 201),
+    'POST /stock/sessions/:id/close': async () => assert.equal((await admin('POST', `/stock/sessions/${recv.id}/close`, {}, staff1)).body.status, 'closed'),
     'GET /me': async () => assert.equal((await admin('GET', '/me', undefined, staff1)).body.role, 'staff'),
     'GET /staff': async () => assert.equal((await admin('GET', '/staff', undefined, staff1)).status, 200),
     'POST /fitting/:id/accept': async () => assert.equal((await admin('POST', `/fitting/${f}/accept`, {}, staff1)).status, 204),

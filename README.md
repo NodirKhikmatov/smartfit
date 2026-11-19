@@ -433,7 +433,22 @@ staff account goes straight there). Add it to the home screen (Android Chrome: "
   allowed next steps, the same rules as admin (Yig'ishni boshlash → Mijozga topshirildi, or → Yo'lga chiqarish →
   Yetkazildi); each step updates the customer's status page and Telegram message. Staff can't cancel (a refund) or take
   payment: that stays with a manager (Kassa).
-- **Ombor:** sizes at or below the store's low-stock threshold, sold out first.
+- **Ombor:** sizes at or below the store's low-stock threshold, sold out first, plus receiving and stocktake (task 47):
+  - **Qabul qilish** (receiving): a session with a note (supplier, invoice); scan the garment's QR label or barcode with
+    the camera (browsers with `BarcodeDetector`, e.g. Android Chrome, over HTTPS or localhost) or type the SKU / barcode
+    / part of the name, pick the size and the quantity. Each scan adds stock at once.
+  - **Inventarizatsiya** (count): pick a category and/or a shelf and scan what is really there (a minus number takes back
+    a miscount; items outside the count's category/shelf are refused). "Farqlarni ko'rish" shows the stock now against
+    the counted number per size. Staff count; a manager or the owner ticks the lines to correct and confirms. Compared
+    at confirm time: if the stock moved since the manager looked (a sale), nothing is applied and the list reloads.
+    Units held in carts and unpaid orders are still on the shelf, so a count is compared with total stock, and a line
+    counted below the held units can't be confirmed (find the item in a fitting room and count again).
+  - Weak network: sessions and scans queue on the phone (localStorage, per account) and are sent in order when the
+    network is back; each carries an id made on the phone, so a resend applies once. The waiting count is shown; a scan
+    the server refuses (unknown item, another store's label, a closed session) is listed with the reason, not retried.
+  - Every stock change writes a movement row (who, when, why, before → after): the admin form, CSV import, the sync
+    API, receiving, counts, sales, paid-order cancels, returns to stock and exchanges. Admin → Kiyimlar → a product →
+    "Qoldiq tarixi". The back-in-stock alert (task 31) fires when receiving or a count brings a size back.
 - **Alerts:** a red line when a kiosk seen in the last day has been quiet for 3 minutes.
 - The app polls every 5 s. A new request or a newly paid order rings twice and vibrates, after one tap on "Ovozni
   yoqish" (browsers allow sound only after a tap). With the screen off, phones pause web pages, so keep the staff
@@ -479,6 +494,7 @@ the 2-week pilot.
 
 **Phones, kiosk, camera**
 - [ ] QR → `/m` → camera with the 10 s timer → gallery picker on a real iPhone (Safari) and a real Android (Chrome), over HTTPS.
+- [ ] Staff app "Qabul qilish": scan a printed QR label and a barcode with a real Android phone camera over HTTPS (iPhone Safari has no `BarcodeDetector`: staff type the SKU there).
 - [ ] Size accuracy on 20 people: the size from the photo matches the real size in ≥ 70 % of cases. The size chart and
       factors in `src/size/size.js` are marked `shortcut:` guesses; recalibrate them from these measurements.
 - [ ] Speed: photo to results in under 15 s on the kiosk and a mid-range phone.

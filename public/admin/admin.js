@@ -1101,12 +1101,39 @@ function openForm(p) {
   renderDetails(p?.details);
   renderFit(p);
   $('imgWrap').hidden = !p;
+  $('moveWrap').hidden = !p;
+  $('moveWrap').open = false;
+  $('moveList').replaceChildren();
   $('formDelete').hidden = !p;
   $('imgError').textContent = '';
   $('imgFile').value = '';
   showImage(p?.image_url);
   $('dlg').showModal();
 }
+// Task 47: the product's stock history (every change: the form, CSV, the sync API, receiving, counts, sales, returns).
+const MOVE_REASON = { admin: 'adm.moves.admin', csv: 'adm.moves.csv', sync: 'adm.moves.sync', receive: 'adm.moves.receive', count: 'adm.moves.count',
+  sale: 'adm.moves.sale', cancel: 'adm.moves.cancel', return: 'adm.moves.return', exchange: 'adm.moves.exchange' };
+let moveOffset = 0;
+async function loadMoves(first) {
+  const p = editing;
+  if (!p) return;
+  if (first) moveOffset = 0;
+  try {
+    const r = await call(`/products/${p.id}/movements?limit=25&offset=${moveOffset}`);
+    if (editing !== p) return;
+    const rows = r.items.map((m) => el('li', {},
+      el('span', { className: 'num', textContent: t('adm.moves.line', { size: m.size, before: m.quantity_before, after: m.quantity_after }) }),
+      el('span', { className: `badge ${m.delta > 0 ? 'ok' : 'warn'}`, textContent: m.delta > 0 ? `+${m.delta}` : `−${-m.delta}` }),
+      el('span', { className: 'grow', textContent: [t(MOVE_REASON[m.reason]), m.order_number && t('adm.moves.order', { n: m.order_number }), m.session_note, m.admin_email].filter(Boolean).join(' · ') }),
+      el('span', { className: 'muted', textContent: fmt.dateTime(m.created_at) })));
+    if (first) $('moveList').replaceChildren(...(r.total ? rows : [el('li', { className: 'muted', textContent: t('adm.moves.empty') })]));
+    else $('moveList').append(...rows);
+    moveOffset += r.items.length;
+    $('moveMore').hidden = moveOffset >= r.total;
+  } catch (err) { toast(err.message, { tone: 'danger' }); }
+}
+$('moveWrap').addEventListener('toggle', () => $('moveWrap').open && loadMoves(true));
+$('moveMore').onclick = () => loadMoves(false);
 // The product's store decides which organisation's categories it can take (a new product: the picked store).
 function fillFormCats(p) {
   const f = $('form'), list = catsOf(f.store_id.value);

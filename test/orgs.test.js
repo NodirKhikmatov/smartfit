@@ -87,7 +87,12 @@ async function orgBRecords() {
     ends_at: new Date(Date.now() + 86400000).toISOString(), promo_code_id: promo.id, status: 'draft' }).returning('id');
   // Task 46: a review of org B's order line (with a word the walk looks for).
   const [{ id: review }] = await db('product_reviews').insert({ order_item_id: order.items[0].id, order_id: order.id, store_id: b1, product_id: product.id, rating: 1, fit: 'small', text: 'ORGB-REVIEW' }).returning('id');
-  return { product, order, fitting, invite, key, member, promo, profile, offer, review };
+  // Task 47: an open count of org B (a shelf of its product) with one scan, and a movement of that product.
+  const [{ id: count }] = await db('stock_sessions').insert({ key: 'orgb-count-0000000001', store_id: b1, kind: 'count', shelf: 'B-1' }).returning('id');
+  await db('products').where({ id: product.id }).update({ shelf_location: 'B-1' });
+  await db('stock_scans').insert({ key: 'orgb-scan-00000000001', session_id: count, product_id: product.id, size: 'M', quantity: 1 });
+  await db('stock_movements').insert({ store_id: b1, product_id: product.id, size: 'M', delta: 1, quantity_before: 8, quantity_after: 9, reason: 'admin' });
+  return { product, order, fitting, invite, key, member, promo, profile, offer, review, count };
 }
 
 // The isolation walk: every admin route, called by org A's owner against org B's records. A route not listed here
@@ -339,6 +344,28 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
     'GET /demo-requests': async () => refused(await admin('GET', '/demo-requests', undefined, ownerA)),
     'PATCH /demo-requests/:id': async () => refused(await admin('PATCH', '/demo-requests/1', { handled: true }, ownerA)),
     // Task 45: plans, the products CSV and the first-run checklist.
+    // Task 47: receiving, counts and the stock history.
+    'GET /stock/catalog': async () => {
+      refused(await admin('GET', `/stock/catalog?store_id=${b1}`, undefined, ownerA));
+      noB(await admin('GET', `/stock/catalog?store_id=${a1}`, undefined, ownerA));
+    },
+    'GET /stock/sessions': async () => noB(await admin('GET', '/stock/sessions', undefined, ownerA)),
+    'GET /stock/sessions/:id': async () => refused(await admin('GET', `/stock/sessions/${B.count}`, undefined, ownerA)),
+    'POST /stock/sessions': async () => {
+      refused(await admin('POST', '/stock/sessions', { key: 'orga-into-b-000000001', kind: 'receive', store_id: b1 }, ownerA));
+      assert.equal((await admin('POST', '/stock/sessions', { key: 'orgb-count-0000000001', kind: 'receive', store_id: a1 }, ownerA)).status, 409, 'org B\'s phone id is not answered');
+    },
+    'POST /stock/scans': async () => {
+      refused(await admin('POST', '/stock/scans', { key: 'orga-scan-00000000001', session: 'orgb-count-0000000001', product_id: B.product.id, size: 'M', quantity: 1 }, ownerA));
+      assert.equal((await admin('POST', '/stock/scans', { key: 'orgb-scan-00000000001', session: 'orgb-count-0000000001', product_id: B.product.id, size: 'M', quantity: 1 }, ownerA)).status, 409);
+      assert.equal(Number((await db('stock_scans').where({ session_id: B.count }).count({ n: '*' }))[0].n), 1);
+    },
+    'POST /stock/sessions/:id/close': async () => refused(await admin('POST', `/stock/sessions/${B.count}/close`, undefined, ownerA)),
+    'POST /stock/sessions/:id/confirm': async () => {
+      refused(await admin('POST', `/stock/sessions/${B.count}/confirm`, { lines: [] }, ownerA));
+      assert.equal((await db('stock_sessions').where({ id: B.count }).first()).status, 'open');
+    },
+    'GET /products/:id/movements': async () => refused(await admin('GET', `/products/${B.product.id}/movements`, undefined, ownerA)),
     'GET /products/export': async () => {
       const r = await admin('GET', `/products/export?store_id=${b1}`, undefined, ownerA);
       assert.equal(r.status, 200);
@@ -464,7 +491,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 36; i > 12; i--) await m.migrate.down(); // 036 … 013
+    for (let i = 37; i > 12; i--) await m.migrate.down(); // 037 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

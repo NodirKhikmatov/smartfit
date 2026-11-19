@@ -7,6 +7,7 @@ import { fail, langOf, errorBody } from './routes.js';
 import { sizesOf } from '../db/seed.js';
 import { audit } from './audit.js';
 import { mayDo } from '../plans.js';
+import { moved } from '../movements.js';
 
 export const SYNC_MAX_ITEMS = 1000;
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
@@ -60,6 +61,7 @@ export function createSyncRouter(db) {
             row(fail(409, 'err.size_reserved', { size, n: reserved }));
             continue;
           }
+          await moved(trx, { productId: p.id, size, delta: quantity - (cur?.quantity ?? 0), reason: 'sync', who: { id: null, email: `API: ${key.name}` } });
           before[`${sku} ${size}`] = cur?.quantity ?? 0;
           after[`${sku} ${size}`] = quantity;
           updated++;

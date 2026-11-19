@@ -357,6 +357,7 @@ test('migration 029 down and up: expiry and correction rows go, order_id is requ
     const [{ id: p }] = await m('customer_profiles').insert({ organization_id: org, telegram_user_id: 1, phone: '+998901112233', consent_at: new Date().toISOString() }).returning('id');
     await m('points_ledger').insert({ organization_id: org, profile_id: p, order_id: null, kind: 'adjust', amount: 5, ref: 'adjust:x', admin_id: 1, note: 'Sinov' });
     await assert.rejects(m('points_ledger').insert({ organization_id: org, profile_id: p, kind: 'bonus', amount: 5, ref: 'b:1' }));
+    await m.migrate.down(); // 037
     await m.migrate.down(); // 036
     await m.migrate.down(); // 035
     await m.migrate.down(); // 034

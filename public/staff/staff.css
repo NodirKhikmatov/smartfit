@@ -44,3 +44,32 @@ main section[hidden] { display: none; }
 .stats p, .stats h4 { margin: 0; }
 .stats h4 { font-size: var(--text-sm); color: var(--ink-2); margin-top: var(--s-2); }
 .plain { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); }
+
+/* Task 47: receiving and counts in the Ombor tab. */
+#stockHome, #stockSession { display: grid; gap: var(--s-4); }
+#stockHome[hidden], #stockSession[hidden], #sessionForm[hidden], #scanPick[hidden], #camView[hidden] { display: none; }
+#queueNote, #rejectedList .notice { margin: 0; }
+#rejectedList:empty, #sessionList:empty, #scanMatches:empty { display: none; }
+.stock-start { margin: 0; }
+.stock-start button { flex: 1 1 9rem; }
+.stock-low-title { margin: 0; font-size: var(--text-sm); color: var(--ink-2); }
+.stock-card { display: grid; gap: var(--s-3); padding: var(--s-4); }
+.stock-card .field { margin-bottom: 0; }
+.stock-card h3, .stock-card p { margin: 0; }
+.stock-card .actions { margin-top: 0; }
+.stock-head { display: flex; align-items: flex-start; gap: var(--s-2); }
+.stock-head h3, .stock-head p { margin: 0; overflow-wrap: anywhere; }
+.stock-code { display: flex; align-items: flex-end; gap: var(--s-2); }
+.stock-code .grow { flex: 1; }
+#camView { width: 100%; max-height: 40vh; border-radius: var(--r-md); background: var(--ink); object-fit: cover; }
+.stock-pick-name { font-weight: var(--weight-strong); overflow-wrap: anywhere; }
+#pickSizes { margin-bottom: var(--s-1); }
+.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+.lines li { display: grid; grid-template-columns: auto 1fr auto; gap: var(--s-3); align-items: center; padding-bottom: var(--s-2); border-bottom: 1px solid var(--line); }
+.lines li:last-child { padding-bottom: 0; border-bottom: 0; }
+.lines .what { min-width: 0; overflow-wrap: anywhere; }
+.lines .what small { display: block; color: var(--ink-2); }
+.lines .num { font-variant-numeric: tabular-nums; font-weight: var(--weight-strong); white-space: nowrap; text-align: right; }
+.lines .blocked { color: var(--danger); font-size: var(--text-sm); }
+.lines.plain-rows li { grid-template-columns: 1fr auto; }
+.match { justify-content: flex-start; text-align: left; overflow-wrap: anywhere; }

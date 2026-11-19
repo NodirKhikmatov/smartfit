@@ -284,7 +284,18 @@ test('every mutating admin route writes an audit row', async () => {
     const [{ id }] = await db('product_reviews').insert({ order_item_id: o.items[0].id, order_id: o.id, store_id: tashkent, product_id: o.items[0].product_id, rating: 2, fit: 'small', text: 'Kichik' }).returning('id');
     return id;
   };
+  // Task 47: a receiving and a count of the Tashkent store (keys as the phone makes them).
+  const uid = () => `walk-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+  const session = async (kind) => (await admin('POST', '/stock/sessions', { key: uid(), kind, store_id: tashkent, ...(kind === 'count' && { shelf: 'WALK-1' }) }, ownerToken)).body;
   const recipes = {
+    'POST /stock/sessions': ['stock.open', () => admin('POST', '/stock/sessions', { key: uid(), kind: 'receive', store_id: tashkent, note: 'Faktura 1' }, ownerToken)],
+    'POST /stock/scans': ['stock.receive', async () => {
+      const s = await session('receive');
+      const p = await db('products').where({ store_id: tashkent, category: 'top' }).orderBy('id').first();
+      return admin('POST', '/stock/scans', { key: uid(), session: s.key, product_id: p.id, size: 'M', quantity: 2 }, managerToken);
+    }],
+    'POST /stock/sessions/:id/close': ['stock.close', async () => admin('POST', `/stock/sessions/${(await session('receive')).id}/close`, undefined, ownerToken)],
+    'POST /stock/sessions/:id/confirm': ['stock.count', async () => admin('POST', `/stock/sessions/${(await session('count')).id}/confirm`, { lines: [] }, managerToken)],
     'POST /reviews/:id/hide': ['review.hide', async () => admin('POST', `/reviews/${await newReview()}/hide`, { reason: 'Haqoratli' }, ownerToken)],
     'POST /reviews/:id/show': ['review.show', async () => {
       const id = await newReview();
