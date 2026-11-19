@@ -483,3 +483,15 @@ html .frame.tryon-frame { width: min(100%, calc(44dvh * 3 / 4)); } /* beats the 
 .reviews h2 { font: var(--weight-strong) var(--text-2xl)/var(--leading-tight) var(--font-display); margin: 0 0 var(--s-1); }
 .review-sum { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
 .tile .rating { font-weight: var(--weight-regular); }
+/* Task 48: the item page's size chart; the customer's row is marked. Scrolls inside its frame if it is too wide. */
+.size-chart { margin-top: var(--s-6); }
+.size-chart h2 { font: var(--weight-strong) var(--text-2xl)/var(--leading-tight) var(--font-display); margin-bottom: var(--s-1); }
+.size-chart .chart-wrap { overflow-x: auto; margin-top: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.size-chart table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.size-chart :is(th, td) { padding: var(--s-2) var(--s-3); text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.size-chart thead th { font-size: var(--text-sm); color: var(--ink-2); background: var(--paper); }
+.size-chart tbody tr:last-child > * { border-bottom: 0; }
+.size-chart tr.mine > * { background: var(--accent-soft); font-weight: var(--weight-strong); }
+.size-chart tr.mine th { box-shadow: inset 4px 0 0 var(--accent); }
+.size-chart .badge { margin-left: var(--s-2); }
+.item-info .chart-hint, .items .chart-hint { background: var(--accent-soft); color: var(--ink); }

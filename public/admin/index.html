@@ -50,6 +50,7 @@
           <li><a href="#/products" data-route="products"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><span data-i18n="adm.route.products"></span></a></li>
           <li id="navOffers" hidden><a href="#/offers" data-route="offers"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#sparkle"></use></svg><span data-i18n="adm.route.offers"></span></a></li>
           <li id="navCats" hidden><a href="#/categories" data-route="categories"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#bag"></use></svg><span data-i18n="adm.route.categories"></span></a></li>
+          <li id="navSizes" hidden><a href="#/sizes" data-route="sizes"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#ruler"></use></svg><span data-i18n="adm.route.sizes"></span></a></li>
           <li><a href="#/stats" data-route="stats"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><span data-i18n="adm.route.stats"></span></a></li>
           <li><a href="#/demand" data-route="demand"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trend-up"></use></svg><span data-i18n="adm.route.demand"></span></a></li>
           <li><a href="#/reviews" data-route="reviews"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#star"></use></svg><span data-i18n="adm.route.reviews"></span></a></li>
@@ -221,6 +222,33 @@
             <thead><tr><th data-i18n="field.name"></th><th class="hide-sm" data-i18n="field.cat_role"></th><th class="hide-sm" data-i18n="adm.cats.sizes"></th><th class="num" data-i18n="adm.cats.products"></th><th data-i18n="adm.cats.order"></th></tr></thead>
             <tbody id="catRows"></tbody>
           </table>
+        </div>
+      </section>
+
+      <!-- Task 48: the shop's own size charts (owner / manager / super) -->
+      <section data-page="sizes" hidden>
+        <p class="muted" data-i18n="adm.sizes.sub"></p>
+        <div id="sizesError"></div>
+        <div id="sizesBody">
+          <div class="toolbar">
+            <label class="grow"><span data-i18n="adm.sizes.pick"></span> <select id="sizesScope"></select></label>
+            <div class="seg" role="group" data-i18n-aria-label="field.gender" id="sizesGroup"></div>
+          </div>
+          <p class="notice" id="sizesSource"></p>
+          <form id="sizesForm" novalidate>
+            <div class="table-wrap">
+              <table class="table sizes-table">
+                <caption class="visually-hidden" data-i18n="adm.route.sizes"></caption>
+                <thead><tr id="sizesHead"></tr></thead>
+                <tbody id="sizesRows"></tbody>
+              </table>
+            </div>
+            <p class="field-error" id="sizesFormError" role="alert"></p>
+            <div class="actions">
+              <button type="button" class="ghost danger" id="sizesReset" hidden><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trash"></use></svg><span data-i18n="adm.sizes.reset"></span></button>
+              <button class="primary" id="sizesSave" data-i18n="adm.sizes.save"></button>
+            </div>
+          </form>
         </div>
       </section>
 

@@ -89,6 +89,13 @@ export function cleanWant(w) {
 }
 
 // Form values (strings from the inputs) → the /api/size body and the /api/recommend request, or null if a field is wrong.
+// Task 48: the customer's general sizes as a query (?gender=&top=&bottom=&shoes=), so the item page and the mall search
+// answer with their size in each shop's own size chart; '' without a gender or any size.
+export function sizeQuery(gender, sizes) {
+  const q = Object.entries({ gender, top: sizes?.top, bottom: sizes?.bottom, shoes: sizes?.shoes }).filter(([, v]) => typeof v === 'string' && v);
+  return gender && q.length > 1 ? `?${new URLSearchParams(q)}` : '';
+}
+
 // Height and weight are checked only when the choice needs the size step.
 // Task 40: for a child the sizes come from the child's height here (no /api/size, no photo); body is then null.
 export function toRequest(v, storeId) {

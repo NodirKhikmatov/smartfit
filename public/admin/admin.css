@@ -405,3 +405,9 @@ dialog:not(.drawer) h3 { margin: var(--s-5) 0 var(--s-2); }
 .moves li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-1) var(--s-3); padding-bottom: var(--s-2); border-bottom: 1px solid var(--line); font-size: var(--text-sm); }
 .moves li .grow { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
 .moves li .num { font-variant-numeric: tabular-nums; font-weight: var(--weight-strong); }
+/* Task 48: size chart editor. Two small number inputs per measure; the table scrolls inside its frame on a phone. */
+.sizes-table td, .sizes-table th { padding: var(--s-2) var(--s-3); }
+.sizes-table .range { display: inline-flex; align-items: center; gap: var(--s-1); white-space: nowrap; }
+.sizes-table { width: max-content; min-width: 100%; }
+#sizesRows input { flex: none; width: 4.75rem; min-width: 0; min-height: 2.5rem; padding-inline: var(--s-2); }
+#sizesSource:empty { display: none; }

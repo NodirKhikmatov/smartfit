@@ -209,6 +209,25 @@ form; a mall order's page links to each shop order's form.
 - `npm run seed` adds a few handed-over demo orders with reviews to the first demo shop (older than 30 days, so the
   dashboards don't count them).
 
+## A shop's own size chart (task 48)
+
+The customer's size is still found against the built-in table (photo, usual size, tape or height and weight). A shop
+whose cut differs keeps its own chart in `/admin` → **O'lchamlar jadvali** (owner or manager): per size kind an
+organisation default (Kiyim, Poyabzal, Bolalar kiyimi, Bolalar poyabzali) and, where needed, a category's own chart, which
+wins. Each size gets a range in cm: chest, waist and hips for clothes (men's and women's rows), foot length for shoes,
+height for children's sizes. An empty chart starts as a copy of the built-in table, so a shop only edits what differs;
+ranges must be in order and must not overlap ("O'z jadvalini o'chirish" goes back to the default / built-in one).
+
+- Sizing: the customer's built-in size → the middle of its built-in range → the shop's row that range falls in (tops by
+  chest, bottoms by the larger of waist and hips). The product's fit offset (task 23) still applies on top. A shop
+  without a chart behaves exactly as before.
+- The mall outfit sizes every item with its own shop's chart, so one customer can be M in one shop and L in another;
+  the item says "Bu do'kon jadvali bo'yicha sizga L (odatda M)". The item page shows **O'lchamlar jadvali** with the
+  customer's row marked and that size picked. `GET /api/malls/:id/search` and the item page take the customer's general
+  sizes as `?gender=&top=&bottom=&shoes=` (used only for that answer, never stored or logged).
+- Staff and the mall admin never see or edit a shop's chart; each organisation sees only its own (audited
+  `size_chart.save` / `size_chart.delete`).
+
 ## Shopping malls (several shops, one entry screen)
 
 A mall holds shops of different organisations; each shop keeps its own admin, team, products, prices, orders and

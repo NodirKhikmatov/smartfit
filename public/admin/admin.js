@@ -220,6 +220,7 @@ async function show() {
   $('storeWrap').hidden = !sup;
   $('navOrgs').hidden = $('navMalls').hidden = me.role !== 'super';
   $('navCats').hidden = !['owner', 'super'].includes(me.role); // managers only use the categories
+  $('navSizes').hidden = !['owner', 'manager', 'super'].includes(me.role); // task 48: managers edit size charts too
   $('navOffers').hidden = !['owner', 'super'].includes(me.role) || !feat('offers'); // offers are the owner's, on a plan with them (task 45)
   planBanner();
   for (const li of $('nav').children) if (!li.id || li.id === 'navSettings') li.hidden = mallRole;
@@ -278,6 +279,7 @@ const PAGES = {
   cashier: { title: 'adm.route.cashier', load: loadCashier, poll: () => loadPending(true) },
   products: { title: 'adm.route.products', load: loadProducts },
   categories: { title: 'adm.route.categories', load: loadCategories },
+  sizes: { title: 'adm.route.sizes', load: loadSizes }, // task 48
   offers: { title: 'adm.route.offers', load: loadOffers }, // task 43
   stats: { title: 'adm.route.stats', load: loadStats },
   demand: { title: 'adm.route.demand', load: loadDemand },
@@ -308,7 +310,7 @@ function render() {
   const welcome = me.role === 'owner' && !stores.length;
   const mallRole = me.role === 'mall';
   if ((welcome && !['welcome', 'settings'].includes(route.route)) || (route.route === 'welcome' && me.role !== 'owner') || (['orgs', 'malls'].includes(route.route) && me.role !== 'super')
-    || (['categories', 'offers'].includes(route.route) && !['owner', 'super'].includes(me.role)) || (route.route === 'offers' && !feat('offers')) || (mallRole !== (route.route === 'mall'))) {
+    || (['categories', 'offers'].includes(route.route) && !['owner', 'super'].includes(me.role)) || (route.route === 'sizes' && !['owner', 'manager', 'super'].includes(me.role)) || (route.route === 'offers' && !feat('offers')) || (mallRole !== (route.route === 'mall'))) {
     route = parseHash(welcome ? '#/welcome' : mallRole ? '#/mall' : '#/dashboard');
     history.replaceState(null, '', buildHash(route.route));
   }
@@ -954,6 +956,86 @@ $('catImgRemove').onclick = async () => {
     showCatImage(null);
     loadCategories();
   } catch (err) { $('catImgError').textContent = err.message; }
+};
+
+// ---------- Size charts (task 48): per size kind the organisation's default and per category its own; each size a
+// [from, to] cm range per measure. An empty page starts from what is in force now (the default or the built-in table).
+let sizesState = null; // { org, kinds, charts, cats }
+let sizesScope = 'clothes', sizesGroup = 'male', sizesDraft = null;
+const sizesQs = () => (me.role === 'super' ? `?organization_id=${catOrg()}` : '');
+async function loadSizes() {
+  const seq = (loads.sizes = (loads.sizes || 0) + 1);
+  stateBox($('sizesError'));
+  $('sizesBody').hidden = true;
+  if (!catOrg()) return stateBox($('sizesError'), { message: t('adm.cats.pick_store_text') });
+  try {
+    const [r, all] = await Promise.all([call(`/size-charts${sizesQs()}`), call('/categories')]);
+    if (seq !== loads.sizes) return;
+    sizesState = { org: catOrg(), kinds: r.kinds, charts: r.charts, cats: all.filter((c) => c.organization_id === catOrg() && Object.hasOwn(r.kinds, c.size_kind)) };
+    const opts = [...Object.keys(r.kinds).map((k) => [k, t('adm.sizes.default', { kind: t(`adm.sizes.kind.${k}`) })]), ...sizesState.cats.map((c) => [String(c.id), catText(c)])];
+    if (!opts.some(([v]) => v === sizesScope)) sizesScope = 'clothes';
+    $('sizesScope').replaceChildren(...opts.map(([value, textContent]) => el('option', { value, textContent })));
+    $('sizesScope').value = sizesScope;
+    $('sizesBody').hidden = false;
+    pickSizes(sizesScope);
+  } catch (err) {
+    if (seq === loads.sizes) stateBox($('sizesError'), err, () => loadSizes());
+  }
+}
+// The chart a scope shows: its own, else (a category) the default of its kind, else the built-in table.
+function chartOf(scope) {
+  const { kinds, charts, cats } = sizesState;
+  const cat = cats.find((c) => String(c.id) === scope);
+  const kind = cat ? cat.size_kind : scope;
+  const own = charts.find((c) => c.scope === (cat ? `c${cat.id}` : scope) && c.kind === kind);
+  const def = cat && charts.find((c) => c.scope === kind);
+  const src = own ? t('adm.sizes.src_own') : def ? t('adm.sizes.src_default', { name: t('adm.sizes.default', { kind: t(`adm.sizes.kind.${kind}`) }) }) : t('adm.sizes.src_builtin');
+  return { kind, own, src, data: (own ?? def)?.data ?? kinds[kind].builtin, name: cat ? catText(cat) : t('adm.sizes.default', { kind: t(`adm.sizes.kind.${kind}`) }) };
+}
+function pickSizes(scope) {
+  sizesScope = scope;
+  const c = chartOf(scope);
+  sizesDraft = structuredClone(c.data);
+  const groups = sizesState.kinds[c.kind].groups;
+  if (!groups.includes(sizesGroup)) sizesGroup = groups[0];
+  $('sizesSource').replaceChildren(icon('info'), el('span', { textContent: c.src }));
+  $('sizesReset').hidden = !c.own;
+  $('sizesFormError').textContent = '';
+  drawSizes();
+}
+function drawSizes() {
+  const { kind } = chartOf(sizesScope);
+  const k = sizesState.kinds[kind];
+  $('sizesGroup').hidden = k.groups.length < 2;
+  seg($('sizesGroup'), k.groups.map((g) => [g, t(`gender.${g}`)]), sizesGroup, (g) => { sizesGroup = g; drawSizes(); });
+  $('sizesHead').replaceChildren(el('th', { textContent: t('adm.sizes.size') }), ...k.measures.map((m) => el('th', { textContent: `${t(`common.chart.${m}`)}, ${t('common.cm')}` })));
+  $('sizesRows').replaceChildren(...sizesDraft[sizesGroup].map((row) => el('tr', {}, el('th', { scope: 'row', textContent: row.size }),
+    ...k.measures.map((m) => el('td', {}, el('span', { className: 'range' }, ...[0, 1].flatMap((j) => {
+      const input = el('input', { type: 'number', inputMode: 'decimal', step: '0.1', min: '0', max: '300', value: String(row[m][j]),
+        ariaLabel: t(j ? 'adm.sizes.max_aria' : 'adm.sizes.min_aria', { size: row.size, m: t(`common.chart.${m}`) }) });
+      input.oninput = () => { row[m][j] = input.value === '' ? null : Number(input.value); };
+      return j ? [el('span', { ariaHidden: 'true', textContent: '–' }), input] : [input];
+    })))))));
+}
+$('sizesScope').onchange = () => pickSizes($('sizesScope').value);
+$('sizesForm').onsubmit = async (e) => {
+  e.preventDefault();
+  $('sizesFormError').textContent = '';
+  $('sizesSave').disabled = true;
+  try {
+    await call(`/size-charts/${sizesScope}`, { method: 'PUT', body: { data: sizesDraft, ...(me.role === 'super' && { organization_id: catOrg() }) } });
+    toast(t('adm.sizes.saved'), { tone: 'ok' });
+    await loadSizes();
+  } catch (err) { $('sizesFormError').textContent = err.message; } finally { $('sizesSave').disabled = false; }
+};
+$('sizesReset').onclick = async () => {
+  const c = chartOf(sizesScope);
+  if (!(await confirmDialog({ title: t('adm.sizes.reset_title', { name: c.name }), text: t('adm.sizes.reset_text'), ok: t('common.delete'), danger: true }))) return;
+  try {
+    await call(`/size-charts/${sizesScope}${sizesQs()}`, { method: 'DELETE' });
+    toast(t('adm.sizes.removed'));
+    await loadSizes();
+  } catch (err) { $('sizesFormError').textContent = err.message; }
 };
 
 // ---------- Products
@@ -2105,7 +2187,7 @@ function auditLines(l) {
 }
 const auditSubject = (l) => (l.entity === 'order' ? t('adm.order.title', { id: l.entity_label }) : l.entity === 'fitting' ? t('adm.fit.cabin', { cabin: l.entity_label }) : l.entity_label || '');
 const af = $('auditFilters');
-for (const e of ['product', 'category', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'points', 'review']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
+for (const e of ['product', 'category', 'size_chart', 'order', 'fitting', 'store', 'team', 'account', 'sync_key', 'stock', 'points', 'review']) af.entity.append(el('option', { value: e, textContent: t(`adm.ent.${e}`) }));
 af.entity.onchange = af.admin.onchange = af.from.onchange = af.to.onchange = () =>
   setParams({ tab: 'audit', entity: af.entity.value, admin: af.admin.value, from: af.from.value, to: af.to.value });
 af.onsubmit = (e) => e.preventDefault();

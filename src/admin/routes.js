@@ -7,6 +7,7 @@ import path from 'node:path';
 import { sizesFor, sizesOf, KIDS, KIDS_SHOES } from '../db/seed.js';
 import { builtinRows } from '../db/migrations/023_categories.js';
 import { categoryRoutes, categoryFor, catSizes, productSizes, AUDIENCES } from './categories.js';
+import { sizeChartRoutes } from './size-charts.js';
 import { parseCsv, toCsv } from './csv.js';
 import { hashPassword, verifyPassword, DUMMY_HASH, tokenSecret, signToken, verifyToken } from './auth.js';
 import { releaseExpired, markPaid, orderView, nextStatuses, changeStatus, stamp } from '../cart/cart.js';
@@ -857,6 +858,7 @@ export function createAdminRouter(db, { uploadDir = 'uploads', tryon = false, no
   orgRoutes(r, db, { now }); // task 45: plans, the checklist
   promoRoutes(r, db); // task 26
   categoryRoutes(r, db, { uploadDir }); // task 36
+  sizeChartRoutes(r, db); // task 48
   mallRoutes(r, db, { uploadDir }); // task 37
   offerRoutes(r, db, { uploadDir }); // task 43
   pointsRoutes(r, db, { resolveStore }); // task 34

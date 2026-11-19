@@ -2,7 +2,7 @@ import { watchIdle } from './idle.js';
 import { loadPose, measure, framing, framingHint } from './pose.js';
 import { keypad } from './keypad.js';
 import { kioskShell, attract, kioskDevice, randomId } from './kiosk.js';
-import { CLOTHES, SHOES, KIDS, KIDS_SHOES, ageHint, JEANS, WANT, nextError, fieldError, toRequest, sizeNeeds, sizesReady, cleanWant, setCategories, categoryRoles, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter, tryonItem } from './flow.js';
+import { CLOTHES, SHOES, KIDS, KIDS_SHOES, ageHint, JEANS, WANT, nextError, fieldError, toRequest, sizeQuery, sizeNeeds, sizesReady, cleanWant, setCategories, categoryRoles, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter, tryonItem } from './flow.js';
 import { mallScreen } from './mall.js';
 import { createTryon } from './tryon.js';
 import { offerCard, countOffers, idleSlides } from './offers.js';
@@ -925,6 +925,7 @@ function itemRow(p, swap) {
     priceEl(p),
     el('div', { className: 'meta', textContent: [colorName(p.color), size, p.shelf_location && t('kiosk.shelf', { shelf: p.shelf_location })].filter(Boolean).join(' · ') }),
     shopLine(p),
+    chartHint(p),
     fitHint(p),
     picker(p),
   );
@@ -945,6 +946,10 @@ function shopLine(p) {
   return el('div', { className: 'meta shop-line' }, icon('store'),
     el('span', { textContent: [s.name, s.floor && t('kiosk.mall.floor', { n: s.floor }), s.unit && t('kiosk.mall.unit', { n: s.unit })].filter(Boolean).join(' · ') }));
 }
+
+// Task 48: this shop's own size chart put the customer in another size than their usual one (the screen says which).
+const chartHint = (p) => (p.chart_from ? el('div', { className: 'fit-hint chart-hint' }, icon('ruler'),
+  el('span', { textContent: t('kiosk.chart.shifted', { size: p.chart_size, from: p.chart_from }) })) : '');
 
 // Task 23: this model runs small or big (learnt from buyers' answers and returns); the server already shifted the size.
 function fitHint(p) {
@@ -1223,7 +1228,7 @@ async function loadItem(id) {
   const done = showAfter(300, () => seq === itemSeq && $('itemBody').replaceChildren(skeletonCard(5)));
   let r;
   try {
-    r = await api(`/catalog/${storeId}/items/${id}`);
+    r = await api(`/catalog/${storeId}/items/${id}${sizeQuery(request?.gender, request?.sizes)}`); // task 48: the customer's row
   } catch (err) {
     done();
     if (seq !== itemSeq) return;
@@ -1244,6 +1249,7 @@ function renderItem(p, pairs) {
   const all = p.all_sizes; // task 36: every size it comes in (the shop's own list too)
   chosen.delete(p.id);
   if (all.length === 1) chosen.set(p.id, p.sizes[0]);
+  else if (p.size_chart?.my_size) chosen.set(p.id, p.size_chart.my_size); // task 48: their size in this shop, if it is free
   const other = el('div', { className: 'elsewhere' });
   const err = el('p', { className: 'field-error' });
   const chips = chipRow(all.map((x) => [x, sizeName(x)]), chosen.get(p.id), t('kiosk.size.aria', { name: productName(p) }), (x) => {
@@ -1275,13 +1281,31 @@ function renderItem(p, pairs) {
         ...(description(p) ? [el('p', { textContent: description(p) })] : []),
         // Task 36: the shop's free details ("Mato: 100% paxta"), as text.
         ...(p.details.length ? [el('dl', { className: 'details' }, ...p.details.flatMap((d) => [el('dt', { textContent: d.name }), el('dd', { textContent: d.value })]))] : []),
-        fitHint(p), reviewFit(p), pick, other,
+        chartHint({ chart_from: p.size_chart?.chart_from, chart_size: p.size_chart?.mine }), fitHint(p), reviewFit(p), pick, other,
         addButton([{ ...p, size: null }], page, 'primary wide', 'kiosk.add.btn', null),
         tryon.button(p), // task 41: '' for a child's item, an item without a photo, or when the shop has it off
         ...(scanToken ? [fittingBox([{ ...p, size: null }], page, { scan: scanToken })] : []))), // task 32: in the shop, from a label
+    sizeTable(p.size_chart),
     ...(pairs.length ? [el('section', { className: 'pairs' }, el('h2', { textContent: t('kiosk.item.pairs') }), el('div', { className: 'catalog-grid' }, ...pairs.map(tile)))] : []),
     reviewList(p),
   );
+}
+
+// Task 48: "O'lchamlar jadvali": the shop's own chart (or the built-in one) in cm, the customer's row marked.
+const cm = ([a, b]) => `${fmt.num(a)}–${fmt.num(b)}`;
+function sizeTable(c) {
+  if (!c) return '';
+  const sub = [t(c.own ? 'kiosk.chart.own' : 'kiosk.chart.builtin'), c.gender && t(`gender.${c.gender}`)].filter(Boolean).join(' · ');
+  return el('section', { className: 'size-chart' }, el('h2', { textContent: t('kiosk.chart.title') }), el('p', { className: 'meta', textContent: sub }),
+    el('div', { className: 'chart-wrap' }, el('table', {},
+      el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: t('kiosk.chart.size') }), ...c.measures.map((m) => el('th', { scope: 'col', textContent: t(`common.chart.${m}`) })))),
+      el('tbody', {}, ...c.rows.map((r) => {
+        const mine = r.size === c.mine;
+        const tr = el('tr', { className: mine ? 'mine' : '' }, el('th', { scope: 'row' }, el('span', { textContent: r.size }),
+          ...(mine ? [el('span', { className: 'badge', textContent: t('kiosk.chart.mine') })] : [])), ...c.measures.map((m) => el('td', { textContent: cm(r[m]) })));
+        if (mine) tr.setAttribute('aria-current', 'true');
+        return tr;
+      })))));
 }
 
 // Task 46: the average and count (only from the server's minimum of visible reviews; below it just the count), the

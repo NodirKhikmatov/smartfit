@@ -244,6 +244,31 @@ test('org isolation: an owner of org A never reads or changes org B, on every ad
       const c = await db('categories').where({ organization_id: orgB }).first();
       refused(await admin('DELETE', `/categories/${c.id}/image`, undefined, ownerA));
     },
+    // Task 48: size charts belong to the organisation; org A never reads, writes or resets org B's.
+    'GET /size-charts': async () => {
+      const kinds = (await admin('GET', '/size-charts', undefined, ownerA)).body.kinds;
+      const c = await db('categories').where({ organization_id: orgB, role: 'top' }).first();
+      await db('size_charts').insert({ organization_id: orgB, category_id: c.id, scope: `c${c.id}`, kind: 'clothes', data: JSON.stringify(kinds.clothes.builtin) });
+      for (const q of ['', `?organization_id=${orgB}`, `?store_id=${b1}`]) {
+        const r = await admin('GET', `/size-charts${q}`, undefined, ownerA);
+        assert.equal(r.status, 200);
+        assert.deepEqual(r.body.charts, [], 'org B charts are never listed');
+      }
+    },
+    'PUT /size-charts/:scope': async () => {
+      const kinds = (await admin('GET', '/size-charts', undefined, ownerA)).body.kinds;
+      const c = await db('categories').where({ organization_id: orgB, role: 'top' }).first();
+      refused(await admin('PUT', `/size-charts/${c.id}`, { data: kinds.clothes.builtin }, ownerA));
+      const r = await admin('PUT', '/size-charts/kids', { data: kinds.kids.builtin, organization_id: orgB }, ownerA);
+      assert.equal(r.status, 200);
+      assert.ok(await db('size_charts').where({ organization_id: orgA, scope: 'kids' }).first(), 'saved in org A, not B');
+      assert.equal(await db('size_charts').where({ organization_id: orgB, scope: 'kids' }).first(), undefined);
+    },
+    'DELETE /size-charts/:scope': async () => {
+      const c = await db('categories').where({ organization_id: orgB, role: 'top' }).first();
+      refused(await admin('DELETE', `/size-charts/${c.id}`, undefined, ownerA));
+      assert.ok(await db('size_charts').where({ organization_id: orgB, scope: `c${c.id}` }).first(), 'org B chart kept');
+    },
     'GET /promos': async () => {
       for (const q of ['', `?organization_id=${orgB}`]) {
         const r = await admin('GET', `/promos${q}`, undefined, ownerA);
@@ -491,7 +516,7 @@ test('migration 012: existing stores, owners, managers and invites land in one d
       app.close();
     }
     // Down: back to 011 shape (store-less owners go), and up again.
-    for (let i = 37; i > 12; i--) await m.migrate.down(); // 037 … 013
+    for (let i = 38; i > 12; i--) await m.migrate.down(); // 038 … 013
     await m.migrate.down();
     assert.ok(!('organization_id' in (await m('stores').first())));
     assert.equal(await m('admins').where({ email: 'new.owner@old.uz' }).first(), undefined);

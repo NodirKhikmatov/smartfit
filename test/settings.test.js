@@ -385,6 +385,16 @@ test('every mutating admin route writes an audit row', async () => {
       await admin('POST', `/categories/${c.id}/image`, undefined, ownerToken, { raw: png, type: 'image/png' });
       return admin('DELETE', `/categories/${c.id}/image`, undefined, ownerToken);
     }],
+    // Task 48: size charts (owner or manager).
+    'PUT /size-charts/:scope': ['size_chart.save', async () => {
+      const kinds = (await admin('GET', '/size-charts', undefined, ownerToken)).body.kinds;
+      return admin('PUT', '/size-charts/shoes', { data: kinds.shoes.builtin }, ownerToken);
+    }],
+    'DELETE /size-charts/:scope': ['size_chart.delete', async () => {
+      const kinds = (await admin('GET', '/size-charts', undefined, ownerToken)).body.kinds;
+      await admin('PUT', '/size-charts/kids_shoes', { data: kinds.kids_shoes.builtin }, managerToken);
+      return admin('DELETE', '/size-charts/kids_shoes', undefined, ownerToken);
+    }],
     'POST /orgs': ['org.create', () => admin('POST', '/orgs', { name: 'Audit brand', owner_email: `org${Date.now()}@smartfit.uz` }, superToken)],
     // Task 34: the organisation's cashback setting (owner); a value that changes, so a row is written.
     'PATCH /points': ['org.points', async () => {

@@ -15,7 +15,7 @@ import { qrSvg, publicBase } from '../qr.js';
 import { stamp } from '../cart/cart.js';
 import { dbTime } from '../recommend/routes.js';
 import { visible } from '../recommend/engine.js';
-import { COLS, inStock, genders, withSizes, audienceOf } from '../catalog.js';
+import { COLS, inStock, genders, withSizes, audienceOf, customerOf, mySizes } from '../catalog.js';
 import { ONLINE_MS } from '../kiosk.js';
 import { mallOffers } from './offers.js';
 import { trialRow, closedOrgs, openOrgs } from '../plans.js';
@@ -532,10 +532,18 @@ export function createMallRouter(db) {
     const rows = shown(visible(db('products as p')).join('stores as st', 'st.id', 'p.store_id'), m.id, await closedOrgs(db)).whereExists(inStock(db))
       .where((w) => w.whereILike('p.name', like).orWhereILike('p.name_ru', like).orWhereILike('c.name', like).orWhereILike('c.name_ru', like))
       .orderBy([{ column: 'st.name' }, { column: 'p.id', order: 'desc' }]).limit(SEARCH_MAX)
-      .select(...COLS, 'p.store_id', 'st.name as store_name', 'st.mall_floor as floor', 'st.mall_unit as unit');
+      .select(...COLS, 'p.store_id', 'p.fit_offset', 'st.name as store_name', 'st.mall_floor as floor', 'st.mall_unit as unit');
     if (gender) rows.whereIn('p.gender', genders(gender));
     rows.where('p.audience', audience);
-    res.json({ items: await withRatings(db, await withSizes(db, await rows)) }); // task 46: the same visible rating as the catalogue
+    const found = await rows;
+    // Task 48: with the customer's sizes (?top=&bottom=&shoes=), each item's size in its own shop's chart, if it is free.
+    const who = customerOf({ ...req.query, gender });
+    const mine = await mySizes(db, found, who);
+    const items = (await withRatings(db, await withSizes(db, found))).map(({ fit_offset, ...p }) => {
+      const m = mine.get(p.id);
+      return who ? { ...p, my_size: m && p.sizes.includes(m.size) ? m.size : null, chart_from: m?.chart_from ?? null } : p;
+    });
+    res.json({ items }); // task 46: the same visible rating as the catalogue
   });
   return r;
 }

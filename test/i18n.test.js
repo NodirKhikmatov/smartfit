@@ -80,6 +80,7 @@ test('every key used in code exists, and every dictionary key is used', () => {
     'adm.ent': AUDIT_ENTITIES, 'adm.act': AUDIT_ACTIONS,
     'kiosk.style': STYLES,
     'kiosk.points.kind': ['earn', 'spend', 'refund', 'clawback', 'return', 'expire', 'adjust'],
+    'adm.sizes.kind': ['clothes', 'shoes', 'kids', 'kids_shoes'], 'common.chart': ['chest', 'waist', 'hips', 'foot', 'height'], // task 48
   };
   const all = Object.values(sources).join('\n');
   for (const [prefix, members] of Object.entries(FAMILIES)) {

@@ -6,7 +6,7 @@ export const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 // shortcut: anthropometric guesses, not fitted to real customers yet; recalibrate after the pilot's 20-person check (SPEC).
 // Each row: the value at XS and the step per size, so index = (value - xs) / step, 0 = XS … 5 = XXL.
 // Photo widths (shoulder, hip) are joint-to-joint cm; chest/waist/hip are tape girths in cm; jeans is the waist in inches.
-const CHART = {
+export const CHART = {
   male: { shoulder: [36, 2], hip: [30, 1.8], bmi: [18, 2.5], height: 176, jeans: [28, 2], chest: [86, 6], waist: [72, 6], hips: [88, 6] },
   female: { shoulder: [32, 2], hip: [31, 2], bmi: [17.5, 2.5], height: 164, jeans: [25, 2], chest: [80, 6], waist: [62, 6], hips: [86, 6] },
 };

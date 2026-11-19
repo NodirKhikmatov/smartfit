@@ -4,8 +4,9 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { fail, CATEGORIES } from './admin/routes.js';
 import { sizesOf } from './db/seed.js';
-import { unitPrice, pairWith, visible } from './recommend/engine.js';
-import { fitOf } from './size/size.js';
+import { unitPrice, pairWith, visible, sizeKey } from './recommend/engine.js';
+import { fitOf, shiftSize } from './size/size.js';
+import { CHART_KINDS, chartLookup, groupOf, kindOf, shopSize } from './size/chart.js';
 import { logMissed } from './demand.js';
 import { hold, customer, insertOrder, orderView, releaseExpired, storeOf, planInstalments } from './cart/cart.js';
 import { termsOf, plan } from './cart/instalment.js';
@@ -38,6 +39,29 @@ export async function withSizes(db, rows) {
   return rows.map(({ temp_min, temp_max, style, ...p }) => ({
     ...p, unit_price: unitPrice(p), sizes: sizesOf(p).filter((s) => stock.some((x) => x.product_id === p.id && x.size === s)),
   })).filter((p) => p.sizes.length);
+}
+
+// Task 48: ?gender=male|female&top=&bottom=&shoes= = the customer's general (built-in) sizes, all optional; anything
+// else is ignored. Only used for this answer: never stored or logged.
+export function customerOf(q) {
+  const gender = ['male', 'female'].includes(q.gender) ? q.gender : null;
+  const sizes = Object.fromEntries(['top', 'bottom', 'shoes'].map((k) => [k, typeof q[k] === 'string' && SIZE.test(q[k]) ? q[k] : null]));
+  return gender && Object.values(sizes).some(Boolean) ? { gender, sizes } : null;
+}
+// rows (id, store_id, category, category_id, audience, sizes, fit_offset) → Map id → { mine: the customer's size in
+// that item's shop (its size chart), size: mine after the item's fit offset, chart_from: the general size when the
+// shop's chart moved it }; items the customer has no size for are left out.
+export async function mySizes(db, rows, who) {
+  const out = new Map();
+  if (!who || !rows.length) return out;
+  const [charts, fits] = await Promise.all([chartLookup(db, rows.map((p) => p.store_id)), fitOf(db, rows)]);
+  for (const p of rows) {
+    const general = who.sizes[sizeKey[p.category]];
+    if (!general) continue;
+    const mine = shopSize(charts, p, { audience: p.audience, gender: who.gender, own: general });
+    out.set(p.id, { mine, size: shiftSize(sizesOf(p), mine, fits.get(p.id).offset), chart_from: mine !== general ? general : null });
+  }
+  return out;
 }
 
 async function storeById(db, id) {
@@ -95,9 +119,21 @@ export function createCatalogRouter(db, { link = () => null, maxOpen = 0 } = {})
       .whereExists(inStock(db)).orderBy('p.id').select(COLS);
     const pairs = pairWith(row, pool).map((p) => p.id);
     const { fit_offset, details, ...rest } = item;
+    // Task 48: "O'lchamlar jadvali": the shop's chart for this item (else the built-in one) and the customer's row.
+    const kind = kindOf(row.category, row.audience);
+    let size_chart = null;
+    if (kind) {
+      const who = customerOf(req.query);
+      const gender = who?.gender ?? (row.gender === 'female' ? 'female' : 'male');
+      const data = (await chartLookup(db, [store.id]))(store.id, row.category_id, kind);
+      const me = (await mySizes(db, [{ ...row, store_id: store.id }], who)).get(id);
+      const group = groupOf(kind, gender);
+      size_chart = { kind, own: Boolean(data), gender: group === 'all' ? null : group, measures: CHART_KINDS[kind].measures, rows: (data ?? CHART_KINDS[kind].builtin)[group],
+        mine: me && CHART_KINDS[kind].sizes.includes(me.mine) ? me.mine : null, my_size: me && item.sizes.includes(me.size) ? me.size : null, chart_from: me?.chart_from ?? null };
+    }
     // Task 46: the visible average, count and fit summary (null below REVIEW_MIN) and the newest visible reviews.
     res.json({
-      item: { ...rest, all_sizes: sizesOf(row), rating: (await ratingsOf(db, [id])).get(id), reviews: await publicReviews(db, id), details: details ? JSON.parse(details) : [], fit_offset: (await fitOf(db, [row])).get(id).offset,
+      item: { ...rest, all_sizes: sizesOf(row), size_chart, rating: (await ratingsOf(db, [id])).get(id), reviews: await publicReviews(db, id), details: details ? JSON.parse(details) : [], fit_offset: (await fitOf(db, [row])).get(id).offset,
         ...(termsOf(store) && { instalments: plan(termsOf(store), rest.unit_price) }) }, // task 35: per-month figures, server-made
       pairs: await withRatings(db, await withSizes(db, pool.filter((p) => pairs.includes(p.id)).sort((a, b) => pairs.indexOf(a.id) - pairs.indexOf(b.id)))),
     });

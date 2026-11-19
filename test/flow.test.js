@@ -182,3 +182,12 @@ test('inline validation: an error clears as soon as the field is fine (no stale 
   assert.equal(toRequest({ ...FORM, height: '99' }, 1), null);
   assert.equal(toRequest({ ...FORM, shoes: '99' }, 1).request.sizes.shoes, null, 'unknown shoe size is dropped');
 });
+
+test('task 48: sizeQuery sends the customer\'s general sizes only with a gender and at least one size', async () => {
+  const { sizeQuery } = await import('../public/app/flow.js');
+  assert.equal(sizeQuery('male', { top: 'M', bottom: 'L', shoes: null }), '?gender=male&top=M&bottom=L');
+  assert.equal(sizeQuery('female', { top: '116', bottom: '116', shoes: '30' }), '?gender=female&top=116&bottom=116&shoes=30');
+  assert.equal(sizeQuery(null, { top: 'M' }), '');
+  assert.equal(sizeQuery('male', null), '');
+  assert.equal(sizeQuery('male', { top: '', bottom: null }), '');
+});

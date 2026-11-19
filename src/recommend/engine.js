@@ -1,5 +1,6 @@
 import { sizesOf } from '../db/seed.js';
 import { fitOf, wantSize } from '../size/size.js';
+import { chartLookup, shopSize } from '../size/chart.js';
 
 // Rule-based outfits. filterCandidates is the only source of items: task 7 sends its output to Claude as CANDIDATES.
 
@@ -35,9 +36,12 @@ export async function filterCandidates(db, { storeId, storeIds = null, gender, s
   // Task 23: a product that runs small or big is offered one size up or down (clamped to its sizes), and only if that
   // size has free stock: never the customer's own size, which is known not to fit.
   const fits = await fitOf(db, [...new Map(rows.map((r) => [r.id, r])).values()]);
+  // Task 48: the customer's size in each item's own shop (its size chart; none = the built-in size, as before).
+  const charts = await chartLookup(db, storeIds ?? [storeId]);
   const byId = new Map();
   for (const { fit_offset, size_list, ...r } of rows) {
-    const own = sizes[sizeKey[r.category]];
+    const general = sizes[sizeKey[r.category]];
+    const own = shopSize(charts, r, { storeId: r.store_id ?? storeId, audience, gender, own: general });
     const offset = fits.get(r.id).offset;
     const { base, want } = own ? wantSize(sizesOf({ category: r.category, sizes: size_list }), r.category, own, offset, fit) : {};
     if (want && r.size !== want) continue;
@@ -48,7 +52,7 @@ export async function filterCandidates(db, { storeId, storeIds = null, gender, s
       continue;
     }
     byId.set(r.id, { ...r, waterproof: Boolean(r.waterproof), size: known ? r.size : null, ...(known ? {} : { sizes: [r.size] }), unit_price: unitPrice(r),
-      fit_offset: offset, fit_from: want && want !== base ? base : null });
+      fit_offset: offset, fit_from: want && want !== base ? base : null, ...(own !== general && { chart_from: general, chart_size: own }) });
   }
   return [...byId.values()];
 }
@@ -67,12 +71,14 @@ export async function missedItems(db, { storeId, gender, sizes, temperature, fit
   const rows = await q
     .whereRaw('p.temp_min <= cast(? as real) and p.temp_max >= cast(? as real)', [temperature, temperature])
     .orderBy(['p.id', 's.id'])
-    .select('p.id', 'p.category', 'p.sizes', 'p.fit_offset', 's.size', db.raw('s.quantity - s.reserved as free'));
+    .select('p.id', 'p.category', 'p.category_id', 'p.sizes', 'p.fit_offset', 's.size', db.raw('s.quantity - s.reserved as free'));
   const free = new Map(rows.map((r) => [`${r.id}:${r.size}`, Number(r.free)]));
   const products = [...new Map(rows.map((r) => [r.id, r])).values()];
   const fits = await fitOf(db, products);
+  const charts = await chartLookup(db, [storeId]);
   return products.flatMap((p) => {
-    const size = wantSize(sizesOf(p), p.category, sizes[sizeKey[p.category]], fits.get(p.id).offset, fit).want;
+    const own = shopSize(charts, p, { storeId, audience, gender, own: sizes[sizeKey[p.category]] });
+    const size = wantSize(sizesOf(p), p.category, own, fits.get(p.id).offset, fit).want;
     return (free.get(`${p.id}:${size}`) ?? 0) > 0 ? [] : [{ product_id: p.id, size }];
   });
 }
