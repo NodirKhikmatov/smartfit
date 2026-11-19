@@ -111,7 +111,7 @@ test('no Uzbek or Russian text outside the dictionary (pages, browser JS, server
     const markup = text.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<!--[\s\S]*?-->/g, '');
     for (const m of markup.matchAll(/>([^<]+)</g)) {
       const s = m[1].trim();
-      if (s && !['Smart Fit', 'Smart Fit — Admin', '№', 'Telegram', 'Click', 'Payme', 'Excel', 'API', 'Open-Meteo', '© 2026 Smart Fit'].includes(s)) hits.push(`${f} text: ${s.slice(0, 60)}`);
+      if (s && !['Smart Fit', 'Smart Fit — Admin', '№', 'Telegram', 'Click', 'Payme', 'Excel', 'API', 'Open-Meteo', 'Click · Payme', 'Claude', 'FASHN', '© 2026 Smart Fit'].includes(s)) hits.push(`${f} text: ${s.slice(0, 60)}`);
     }
     // A format hint like the phone placeholder has no words to translate.
     for (const m of markup.matchAll(/\s(aria-label|title|placeholder|alt)="([^"]+)"/g)) if (/\p{L}/u.test(m[2])) hits.push(`${f} ${m[1]}: ${m[2]}`);

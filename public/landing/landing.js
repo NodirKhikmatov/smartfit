@@ -1,6 +1,8 @@
-// Landing page (task 22): language switch, the live outfit card (the real engine's pick per temperature, from
-// /landing/looks.json), the band switches, the demo request form, Tashkent time, and section entrances.
+// Landing page (tasks 22, 55): language switch, the live outfit card (the real engine's pick per temperature, from
+// /landing/looks.json), the plans (/landing/plans.json, from src/plans.js), the demo request form, Tashkent time,
+// and section entrances.
 import { t, fmt, initLang, getLang, langSwitch, productName, colorName } from '/shared/i18n.js';
+import { icon } from '/shared/ui.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => {
@@ -14,7 +16,7 @@ document.documentElement.classList.add('js-motion');
 initLang();
 const title = () => { document.title = `${t('land.doc_title')} · Smart Fit`; };
 title();
-$('lang').append(langSwitch(() => { title(); drawLook(false); }, { short: true }));
+$('lang').append(langSwitch(() => { title(); drawLook(false); drawPlans(); }, { short: true }));
 
 // ---------- The outfit card: pick a temperature, the card answers with what the kiosk would show.
 let looks = [], at = 2; // 15 °C first: the spring/autumn look most stores sell
@@ -66,14 +68,26 @@ fetch('/landing/looks.json').then((r) => r.json()).then((data) => {
   drawLook(false);
 }).catch(() => {});
 
-// ---------- Bands: each switch opens the sentence's consequence.
-for (const s of document.querySelectorAll('#bands .switch')) {
-  s.onclick = () => {
-    const on = s.getAttribute('aria-checked') !== 'true';
-    s.setAttribute('aria-checked', String(on));
-    s.closest('.band').toggleAttribute('data-on', on);
-  };
+// ---------- Plans: limits and features as the server enforces them. No price in src/plans.js → "ask".
+let plans = null;
+const LIMIT = { stores: 'land.plans.stores', products: 'land.plans.products', kiosks: 'land.plans.kiosks', team: 'land.plans.team' };
+function drawPlans() {
+  if (!plans) return;
+  const name = (p) => t(`adm.plan.n_${p}`);
+  $('plansTrial').textContent = t('land.plans.trial', { n: plans.trial_days, plan: name(plans.trial_plan) });
+  $('plansGrace').textContent = `${t('land.plans.grace', { n: plans.grace_days })} ${t('land.plans.keys')}`;
+  $('planList').replaceChildren(...plans.plans.map((p) => el('article', { className: 'tier' },
+    el('h3', { textContent: name(p.name) }),
+    p.name === plans.trial_plan && el('span', { className: 'badge ok', textContent: t('land.plans.trial_here') }),
+    el('ul', { className: 'tier-limits' }, ...Object.entries(LIMIT).map(([k, key]) => el('li', { className: 'num', textContent: t(key, { n: p[k], count: fmt.num(p[k]) }) }))),
+    el('ul', { className: 'tier-features' }, ...plans.features.map((f) => {
+      const on = p.features.includes(f);
+      return el('li', { className: on ? '' : 'off' }, icon(on ? 'check' : 'minus'), el('span', { textContent: t(`adm.plan.f_${f}`) }),
+        !on && el('span', { className: 'visually-hidden', textContent: ` (${t('land.plans.no')})` }));
+    })),
+    p.price ? el('p', { className: 'tier-price num', textContent: fmt.som(p.price) }) : el('a', { className: 'button big', href: '#demo', textContent: t('land.plans.ask') }))));
 }
+fetch('/landing/plans.json').then((r) => r.json()).then((data) => { plans = data; drawPlans(); }).catch(() => {});
 
 // ---------- Demo request: the server validates and answers { code, error } in the page's language.
 const f = $('demoForm');
@@ -120,7 +134,7 @@ setInterval(tick, 15_000);
 
 // ---------- Entrances: heading, then text, then picture, 80 ms apart, once per section.
 // The hero is not here: the first screen never waits for a script or an animation.
-const parts = '.bands .section-h, .screens .section-h, .calls .section-h, .ask .section-h, .screens-head p, .shot, .call, .call-final, .tile, .ask-prompt, #demoForm, .ask-links > div, .foot-tile';
+const parts = '.side .side-head, .points li, .plans .section-h, .screens .section-h, .calls .section-h, .ask .section-h, .screens-head p, .shot, .call, .call-final, .tile, .ask-prompt, #demoForm, .ask-links > div, .foot-tile';
 const groups = new Map();
 for (const n of document.querySelectorAll(parts)) {
   const sec = n.closest('section, footer');

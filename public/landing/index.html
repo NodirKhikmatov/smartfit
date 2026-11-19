@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Smart Fit</title>
-<meta name="description" content="Smart Fit — kiyim do'konlari uchun kiosk va telefon ilovasi: bugungi ob-havoga mos uchta obraz, faqat do'konda bor kiyimlardan.">
+<meta name="description" content="Smart Fit — savdo markazlari va kiyim do'konlari uchun kiosk va telefon ilovasi: ob-havoga mos obrazlar faqat javonda bor kiyimlardan.">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/shared/favicon.svg" type="image/svg+xml">
 <link rel="preload" href="/shared/fonts/onest-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
@@ -18,8 +18,9 @@
 <header class="bar wrap">
   <a class="wordmark" href="/"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#logo"></use></svg>Smart Fit</a>
   <nav class="bar-links" data-i18n-aria-label="land.nav">
-    <a href="#screens" data-i18n="land.nav.screens"></a>
-    <a href="#start" data-i18n="land.nav.start"></a>
+    <a href="#mall" data-i18n="land.nav.mall"></a>
+    <a href="#shop" data-i18n="land.nav.shop"></a>
+    <a href="#plans" data-i18n="land.nav.plans"></a>
     <a href="#demo" data-i18n="land.nav.demo"></a>
   </nav>
   <div class="bar-end">
@@ -36,8 +37,11 @@
       <p class="lead" data-i18n="land.hero.lead"></p>
       <div class="hero-actions">
         <a class="button primary big" href="#demo" data-i18n="land.cta"></a>
-        <a class="arrow-link" href="/kiosk?store=1"><span data-i18n="land.try_kiosk"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></a>
       </div>
+      <ul class="doors">
+        <li><a href="#mall"><span data-i18n="land.door.mall"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chevron-down"></use></svg></a></li>
+        <li><a href="#shop"><span data-i18n="land.door.shop"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chevron-down"></use></svg></a></li>
+      </ul>
     </div>
     <div class="stage">
       <article class="look" data-ui aria-labelledby="lookTitle">
@@ -58,16 +62,47 @@
     </div>
   </section>
 
-  <!-- What the kiosk does: sentences with switches that open the consequence -->
-  <section class="bands" aria-labelledby="bandsTitle">
-    <h2 class="wrap section-h" id="bandsTitle" data-i18n="land.bands.title"></h2>
-    <ul class="band-list" id="bands">
-      <li class="band" data-tone="a" data-on><div class="wrap band-in"><div class="band-text"><p class="band-s" id="b1" data-i18n="land.band1"></p><p class="band-c" data-i18n="land.band1_c"></p></div><button type="button" class="switch" role="switch" aria-checked="true" aria-labelledby="b1" data-ui><span></span></button></div></li>
-      <li class="band" data-tone="b"><div class="wrap band-in"><div class="band-text"><p class="band-s" id="b2" data-i18n="land.band2"></p><p class="band-c" data-i18n="land.band2_c"></p></div><button type="button" class="switch" role="switch" aria-checked="false" aria-labelledby="b2" data-ui><span></span></button></div></li>
-      <li class="band" data-tone="c" data-on><div class="wrap band-in"><div class="band-text"><p class="band-s" id="b3" data-i18n="land.band3"></p><p class="band-c" data-i18n="land.band3_c"></p></div><button type="button" class="switch" role="switch" aria-checked="true" aria-labelledby="b3" data-ui><span></span></button></div></li>
-      <li class="band" data-tone="d"><div class="wrap band-in"><div class="band-text"><p class="band-s" id="b4" data-i18n="land.band4"></p><p class="band-c" data-i18n="land.band4_c"></p></div><button type="button" class="switch" role="switch" aria-checked="false" aria-labelledby="b4" data-ui><span></span></button></div></li>
-      <li class="band" data-tone="a"><div class="wrap band-in"><div class="band-text"><p class="band-s" id="b5" data-i18n="land.band5"></p><p class="band-c" data-i18n="land.band5_c"></p></div><button type="button" class="switch" role="switch" aria-checked="false" aria-labelledby="b5" data-ui><span></span></button></div></li>
-    </ul>
+  <!-- Two buyers: the mall and the shop. Each finds its part in one read. -->
+  <section class="side wrap" id="mall" aria-labelledby="mallTitle">
+    <div class="side-head">
+      <p class="kicker" data-i18n="land.mall.kicker"></p>
+      <h2 class="section-h" id="mallTitle" data-i18n="land.mall.title"></h2>
+      <p class="side-lead" data-i18n="land.mall.lead"></p>
+      <div class="side-links">
+        <a class="arrow-link" href="/m?mall=1"><span data-i18n="land.try_mall_phone"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></a>
+        <a class="arrow-link" href="/kiosk?mall=1"><span data-i18n="land.try_mall_kiosk"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></a>
+      </div>
+      <figure class="side-shot">
+        <img src="/landing/img/mall-phone.jpg" width="480" height="1037" alt="" loading="lazy">
+        <figcaption data-i18n="land.mall.shot"></figcaption>
+      </figure>
+    </div>
+    <ol class="points">
+      <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#map-pin"></use></svg><h3 data-i18n="land.mall.dir"></h3><p data-i18n="land.mall.dir_c"></p></li>
+      <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#bag"></use></svg><h3 data-i18n="land.mall.cart"></h3><p data-i18n="land.mall.cart_c"></p></li>
+      <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#sparkle"></use></svg><h3 data-i18n="land.mall.offers"></h3><p data-i18n="land.mall.offers_c"></p></li>
+      <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#chart"></use></svg><h3 data-i18n="land.mall.stats"></h3><p data-i18n="land.mall.stats_c"></p></li>
+    </ol>
+  </section>
+
+  <section class="side wrap" id="shop" aria-labelledby="shopTitle">
+    <div class="side-head">
+      <p class="kicker" data-i18n="land.shop.kicker"></p>
+      <h2 class="section-h" id="shopTitle" data-i18n="land.shop.title"></h2>
+      <p class="side-lead" data-i18n="land.shop.lead"></p>
+      <div class="side-links">
+        <a class="arrow-link" href="/kiosk?store=1"><span data-i18n="land.try_kiosk"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></a>
+        <a class="arrow-link" href="/m?store=1"><span data-i18n="land.try_phone"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></a>
+        <a class="arrow-link" href="/staff/"><span data-i18n="land.try_staff"></span><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#arrow-right"></use></svg></a>
+      </div>
+    </div>
+    <ol class="points">
+      <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#ruler"></use></svg><h3 data-i18n="land.shop.fit"></h3><p data-i18n="land.shop.fit_c"></p></li>
+      <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#hanger"></use></svg><h3 data-i18n="land.shop.catalog"></h3><p data-i18n="land.shop.catalog_c"></p></li>
+      <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#cash"></use></svg><h3 data-i18n="land.shop.cashier"></h3><p data-i18n="land.shop.cashier_c"></p></li>
+      <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#qr"></use></svg><h3 data-i18n="land.shop.staff"></h3><p data-i18n="land.shop.staff_c"></p></li>
+      <li><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#trend-up"></use></svg><h3 data-i18n="land.shop.owner"></h3><p data-i18n="land.shop.owner_c"></p></li>
+    </ol>
   </section>
 
   <!-- The three screens, as they are -->
@@ -125,17 +160,27 @@
     </div>
   </section>
 
+  <!-- Plans: limits from src/plans.js (/landing/plans.json); no prices are set, so each asks -->
+  <section class="plans wrap" id="plans" aria-labelledby="plansTitle">
+    <div class="plans-head">
+      <h2 class="section-h" id="plansTitle" data-i18n="land.plans.title"></h2>
+      <p id="plansTrial"></p>
+    </div>
+    <div class="tier-list" id="planList"></div>
+    <p class="plans-note" id="plansGrace"></p>
+  </section>
+
   <!-- What it works with -->
   <section class="tiles wrap" aria-labelledby="tilesTitle">
     <div class="tile tile-head"><h2 class="section-h" id="tilesTitle" data-i18n="land.tiles.title"></h2><p data-i18n="land.tiles.lead"></p></div>
-    <div class="tile"><p class="tile-name">Click</p><p data-i18n="land.tile.click"></p></div>
-    <div class="tile"><p class="tile-name">Payme</p><p data-i18n="land.tile.payme"></p></div>
-    <div class="tile"><p class="tile-name">Telegram</p><p data-i18n="land.tile.telegram"></p></div>
-    <div class="tile"><p class="tile-name">Excel</p><p data-i18n="land.tile.excel"></p></div>
-    <div class="tile"><p class="tile-name">API</p><p data-i18n="land.tile.api"></p></div>
-    <div class="tile"><p class="tile-name">Open-Meteo</p><p data-i18n="land.tile.weather"></p></div>
-    <div class="tile"><p class="tile-name" data-i18n="land.tile.langs_name"></p><p data-i18n="land.tile.langs"></p></div>
-    <div class="tile"><p class="tile-name" data-i18n="land.tile.tablet_name"></p><p data-i18n="land.tile.tablet"></p></div>
+    <div class="tile"><p class="tile-name">Excel</p><p data-i18n="land.tile.excel"></p><span class="badge ok" data-i18n="land.tile.ready"></span></div>
+    <div class="tile"><p class="tile-name">API</p><p data-i18n="land.tile.api"></p><span class="badge ok" data-i18n="land.tile.ready"></span></div>
+    <div class="tile"><p class="tile-name">Open-Meteo</p><p data-i18n="land.tile.weather"></p><span class="badge ok" data-i18n="land.tile.ready"></span></div>
+    <div class="tile"><p class="tile-name" data-i18n="land.tile.tablet_name"></p><p data-i18n="land.tile.tablet"></p><span class="badge ok" data-i18n="land.tile.ready"></span></div>
+    <div class="tile"><p class="tile-name">Telegram</p><p data-i18n="land.tile.telegram"></p><span class="badge off" data-i18n="land.tile.connect"></span></div>
+    <div class="tile"><p class="tile-name">Click · Payme</p><p data-i18n="land.tile.pay"></p><span class="badge off" data-i18n="land.tile.connect"></span></div>
+    <div class="tile"><p class="tile-name">Claude</p><p data-i18n="land.tile.claude"></p><span class="badge off" data-i18n="land.tile.connect"></span></div>
+    <div class="tile"><p class="tile-name">FASHN</p><p data-i18n="land.tile.fashn"></p><span class="badge off" data-i18n="land.tile.connect"></span></div>
   </section>
 
   <!-- Demo request -->
@@ -161,6 +206,8 @@
     <dl class="ask-links">
       <div><dt data-i18n="land.demo.kiosk"></dt><dd><a href="/kiosk?store=1" data-i18n="land.try_kiosk"></a></dd></div>
       <div><dt data-i18n="land.demo.phone_demo"></dt><dd><a href="/m?store=1" data-i18n="land.try_phone"></a></dd></div>
+      <div><dt data-i18n="land.demo.mall_demo"></dt><dd><a href="/m?mall=1" data-i18n="land.try_mall_phone"></a></dd></div>
+      <div><dt data-i18n="land.demo.staff_demo"></dt><dd><a href="/staff/" data-i18n="land.try_staff"></a></dd></div>
       <div><dt data-i18n="land.demo.owners"></dt><dd><a href="/admin/" data-i18n="land.signin"></a></dd></div>
     </dl>
   </section>
@@ -171,6 +218,8 @@
   <nav class="foot-tile foot-nav" data-i18n-aria-label="land.nav">
     <a href="/kiosk?store=1" data-i18n="land.try_kiosk"></a>
     <a href="/m?store=1" data-i18n="land.try_phone"></a>
+    <a href="/m?mall=1" data-i18n="land.try_mall_phone"></a>
+    <a href="#plans" data-i18n="land.nav.plans"></a>
     <a href="#demo" data-i18n="land.cta"></a>
     <a href="/admin/" data-i18n="land.signin"></a>
   </nav>

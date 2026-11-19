@@ -5,8 +5,10 @@ in this store and in stock in the customer's size are suggested and sold. The cu
 in the browser, the photo is never stored), the outfits fit today's weather and budget, and the customer can put a whole
 outfit in the cart, pick it up and pay at the cashier, or order delivery and pay with Click/Payme.
 
-- Landing page: `/` (uz/ru): what it does, a live outfit card, the kiosk and phone demo links (`/kiosk?store=1`,
-  `/m?store=1`) and a "Demo so'rash" form (stored, shown to the super-admin, sent to the product owner's Telegram)
+- Landing page: `/` (uz/ru): a live outfit card, what a mall and what a shop get (task 55), the kiosk, phone and mall
+  demo links (`/kiosk?store=1`, `/m?store=1`, `/m?mall=1`, `/kiosk?mall=1`), the plans with their limits from
+  `src/plans.js`, which integrations are ready and which are connected with a key, and a "Demo so'rash" form (stored,
+  shown to the super-admin, sent to the product owner's Telegram)
 - Customer app: `/kiosk?store=<id>` (kiosk, big buttons, resets after 90 s idle) and `/m?store=<id>` (phone)
 - Admin: `/admin` (dashboard, products, stock, CSV import, orders, returns, cashier, QR codes, stats and the pilot
   report, Talab (missed demand), promo codes, settings, team, audit log; super-admin: organisations and demo requests)
@@ -610,7 +612,11 @@ the 2-week pilot.
 - [ ] After the migration, all existing stores sit in one organisation named "Smart Fit": rename it if needed (SQL for
       now, `update organizations set name = … where id = 1`) and check Sozlamalar → Jamoa: every former store owner is
       now an owner of the whole organisation and can manage all its stores. Demote or disable anyone who should not.
-- [ ] Replace the landing screenshots (`public/landing/img/*.jpg`, taken from the demo store) with photos or
+- [ ] Task 55: the mall demo links open `/m?mall=1` and `/kiosk?mall=1` (the seed's demo mall). On production, make
+      sure mall 1 is a demo mall you want strangers to browse, or change the links in `public/landing/index.html`.
+- [ ] Task 55: the plans block says "Narxni so'rang" because `src/plans.js` has no prices. To show a price, add
+      `price` (integer so'm) to a plan there; the landing card then shows it instead of the button.
+- [ ] Replace the landing screenshots (`public/landing/img/*.jpg`, taken from the demo store and the demo mall) with photos or
       screenshots of a real store when there is one, and confirm the sample texts in the onboarding fragment
       ("Bunyodkor ko'chasi 1", the 52-item count) still read right.
 
