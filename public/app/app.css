@@ -529,3 +529,7 @@ dialog.mirror:not([open]) { display: none; }
   .mirror-rail { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
   .mirror-item { flex: 0 0 6.5rem; }
 }
+/* Task 61: the live AR layer sits exactly over the video (same box, same contain fit, same mirroring). */
+.mirror-stage > .mirror-live, .mirror-stage > .mirror-ar { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.mirror-ar { transform: scaleX(-1); pointer-events: none; }
+.mirror-wait.mirror-text { max-width: none; }

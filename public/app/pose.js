@@ -70,3 +70,52 @@ export function poseRatios(lm, w, h) {
   const r = (v) => Math.round((v / span) * 1000) / 1000;
   return kind === 'upper' ? { kind, shoulder: r(shoulders) } : { kind, shoulder: r(shoulders), hip: r(dist(px(23), px(24))) };
 }
+
+// Task 61, the live AR mirror: the landmarks of one video frame, the same model run on the <video> itself.
+export async function track(video) {
+  return (await loadPose()).detect(video).landmarks[0] ?? null;
+}
+
+// Pure, task 61: how to draw a garment picture over a w × h frame so its own shoulder (or waist) line sits on the body's:
+// { x, y, w, h, ox, oy, angle } — translate to (x, y) (the body's shoulder or hip centre), rotate by angle (that line's
+// tilt), then draw the whole picture w × h with its anchor point (ox, oy, as shares of the picture) at the origin.
+// null when that part of the body isn't in view (or for roles the mirror doesn't draw).
+// shortcut: the anchors are the demo drawings' layout (demo/make-images.js, 400 × 400: tops' shoulders 122–278 at y 90,
+// hem ~320; trousers' waistband 138–262 at y 70, hem 342); real cut-out photos need a per-product fit box.
+export const GARMENT_ART = {
+  top: { ox: 0.5, oy: 0.225, width: 0.39, hem: 0.8 },
+  outerwear: { ox: 0.5, oy: 0.225, width: 0.39, hem: 0.8 },
+  bottom: { ox: 0.5, oy: 0.175, width: 0.31, hem: 0.855 },
+};
+export function garmentBox(lm, role, w, h) {
+  const art = GARMENT_ART[role];
+  if (!lm || !art) return null;
+  const P = (i) => ({ x: lm[i].x * w, y: lm[i].y * h, v: lm[i].visibility ?? 1 });
+  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const tilt = (a, b) => { const [l, r] = a.x <= b.x ? [a, b] : [b, a]; return Math.atan2(r.y - l.y, r.x - l.x); };
+  const seen = (...ps) => ps.every((p) => p.v > 0.5);
+  const [s1, s2, h1, h2, a1, a2, k1, k2] = [11, 12, 23, 24, 27, 28, 25, 26].map(P);
+  // to: the body's anchor; across: the garment's shoulder (waist) width on the body; down: anchor to hem on the body.
+  let to, across, down, angle;
+  if (role === 'bottom') {
+    if (!seen(h1, h2)) return null;
+    const hm = mid(h1, h2);
+    const foot = seen(a1, a2) ? mid(a1, a2) : seen(k1, k2) ? { x: mid(k1, k2).x, y: hm.y + (mid(k1, k2).y - hm.y) * 2 } : null;
+    if (!foot) return null;
+    const leg = dist(hm, foot);
+    to = { x: hm.x, y: hm.y - leg * 0.08 }; // the waistband sits above the hip joints
+    across = dist(h1, h2) * 1.9;
+    down = leg * 1.1;
+    angle = tilt(h1, h2);
+  } else {
+    if (!seen(s1, s2)) return null;
+    const sw = dist(s1, s2), sm = mid(s1, s2);
+    const torso = seen(h1, h2) ? dist(sm, mid(h1, h2)) : sw * 1.25;
+    to = { x: sm.x, y: sm.y - torso * 0.06 };
+    across = sw * 1.2; // the garment's shoulder seams sit a little outside the joints
+    down = torso * (role === 'outerwear' ? 1.3 : 1.15);
+    angle = tilt(s1, s2);
+  }
+  return { x: to.x, y: to.y, w: across / art.width, h: down / (art.hem - art.oy), ox: art.ox, oy: art.oy, angle };
+}
