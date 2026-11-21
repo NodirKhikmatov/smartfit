@@ -18,7 +18,7 @@ export function limitConfig() {
     catalog: env('RATE_CATALOG_PER_MIN', 300), // catalogue browsing, item pages and other-store reservations
     mall: env('RATE_MALL_PER_MIN', 300), // task 37: the mall screen's directory and search (a mall's kiosks share one IP)
     login: env('RATE_LOGIN_PER_MIN', 20),
-    kiosk: env('RATE_KIOSK_PER_MIN', 30), // heartbeat: 1/min per kiosk
+    kiosk: env('RATE_KIOSK_PER_MIN', 600), // heartbeat: 1/min per kiosk; a mall's kiosks (many shops × KIOSKS_MAX) share one IP
     pin: env('RATE_PIN_PER_MIN', 5), // staff exit PIN tries: a 4-digit PIN takes ~33 h to guess from one IP
     funnel: env('RATE_FUNNEL_PER_MIN', 120), // ≤ 5 events per customer visit, every device on the shop IP shares it
     scan: env('RATE_SCAN_PER_MIN', 120), // task 32: garment label scans (logged; over the limit still redirected, not logged)

@@ -129,6 +129,7 @@ test('limits come from env (0 = off), with defaults that leave room for a whole 
   }
   const d = limitConfig();
   assert.ok(d.recommend >= 60 && d.cart >= 300 && d.openCarts >= 30 && d.login >= 10);
+  assert.ok(d.kiosk >= 600, 'a mall full of kiosks behind one IP still gets every heartbeat through');
 });
 
 test('a normal kiosk session (five customers in a row) never meets a limit at the defaults', async () => {
