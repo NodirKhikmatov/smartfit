@@ -276,7 +276,7 @@ export function createTryon({ storeId, kiosk, snapshot }) {
       if (!pics.has(p.id)) pics.set(p.id, artOf(p));
       sync();
       liveFoot();
-      note.textContent = wornList().length ? wornList().map(productName).join(' + ') : t('kiosk.mirror.live_hint');
+      note.textContent = wornList().length ? wornList().map((p) => productName(p)).join(' + ') : t('kiosk.mirror.live_hint');
     }
     async function live() {
       o.photo = null;
@@ -375,7 +375,7 @@ export function createTryon({ storeId, kiosk, snapshot }) {
       const chosen = wornList().length ? wornList() : list.filter((p) => railOf([p]).length).slice(0, 1);
       const send = railOf(chosen);
       if (!send.length) { msg.textContent = t('kiosk.mirror.ai_none'); return liveFoot(); }
-      await request(outfitMode ? send : [tryonItem(send) ?? send[0]], photo, send.map(productName).join(' + '));
+      await request(outfitMode ? send : [tryonItem(send) ?? send[0]], photo, send.map((p) => productName(p)).join(' + '));
     }
     // From a photo (no camera): one item per tap.
     async function dress(p, b) {
@@ -390,7 +390,7 @@ export function createTryon({ storeId, kiosk, snapshot }) {
       [...(addButton ? [addButton(picked)] : []), ...(o.photo ? [] : [btn('primary', t('kiosk.mirror.back_live'), backLive, 'camera')])], name);
     }
     function backLive() {
-      show([video, canvas], [], wornList().length ? wornList().map(productName).join(' + ') : t('kiosk.mirror.live_hint'));
+      show([video, canvas], [], wornList().length ? wornList().map((p) => productName(p)).join(' + ') : t('kiosk.mirror.live_hint'));
       liveFoot();
     }
     async function request(picked, photo, name) {

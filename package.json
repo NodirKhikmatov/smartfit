@@ -10,7 +10,7 @@
     "start": "node src/server.js",
     "seed": "node src/db/seed.js",
     "vendor": "node src/vendor.js",
-    "test": "ANTHROPIC_API_KEY= FASHN_API_KEY= node --test",
+    "test": "ANTHROPIC_API_KEY= FASHN_API_KEY= GEMINI_API_KEY= AI_PROVIDER= TRYON_PROVIDER= HF_TOKEN= node --test",
     "admin:create": "node src/admin/create-admin.js",
     "store:create": "node src/admin/create-store.js"
   },

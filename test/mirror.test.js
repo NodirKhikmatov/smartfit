@@ -51,3 +51,10 @@ test('nothing to draw when that part of the body is out of view, or for shoes', 
   assert.equal(garmentBox(body(), 'shoes', 1000, 1000), null);
   assert.ok(garmentBox(body({ 23: off, 24: off }), 'top', 1000, 1000), 'a waist-up frame still gets the top');
 });
+
+test('productName is never handed to .map() directly (the index would arrive as the language)', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs');
+  for (const f of readdirSync(new URL('../public/app/', import.meta.url)).filter((x) => x.endsWith('.js'))) {
+    assert.ok(!/\.map\(productName\)/.test(readFileSync(new URL(`../public/app/${f}`, import.meta.url), 'utf8')), f);
+  }
+});
