@@ -109,6 +109,8 @@ docker stop smartfit-testpg
 | `PAYME_CHECKOUT_URL` | `https://test.paycom.uz` | Set `https://checkout.paycom.uz` for live payments. |
 | `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY` | empty | Click SHOP API. Off until all three are set. |
 | `FASHN_API_KEY` | empty | AI try-on "O'zimda ko'rish" (see below). Empty → the feature is off and the app looks as before. |
+| `TRYON_PROVIDER` | empty | `gemini` → the try-on dresses the **whole outfit** with Google's image model through `GEMINI_API_KEY` (task 58). Empty → FASHN (one garment) as before. Never on by itself: the stylist's Gemini key alone doesn't switch pictures on. |
+| `GEMINI_TRYON_MODEL` | `gemini-nano-banana-2.1` | Image model for the Gemini try-on (Interactions API). Needs billing on the key: image models have no free tier. |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` | empty | Order status messages to customers, and the customer profile (task 27: "Profilimni saqlash", kiosk "Profil bilan kirish", bot commands `/profile` and `/delete`). Both needed; empty → no messages and no profile buttons. The profile page link in the bot chat needs `PUBLIC_URL`. |
 | `TELEGRAM_OWNER_CHAT_ID` | empty | Your own Telegram chat id (the product owner): every landing-page demo request is sent there once. Empty → requests wait in `/admin` → Tashkilotlar and are sent once it is set. Needs the bot above. |
 | `POSTGRES_PASSWORD` | — | docker compose only: the database password (compose builds `DATABASE_URL` from it, so letters and digits only, e.g. `openssl rand -hex 24`). Required by compose. |
@@ -366,6 +368,15 @@ company other than Anthropic.
   The demo seed's SVG drawings don't qualify, so the button only appears once a shop uploads real product photos.
   On an outfit it tries the outer layer first (outerwear, then top, then bottom). Never on shoes, accessories, a shop's
   role-less categories or anything in the children's path (task 40).
+- **Whole outfit with Gemini (task 58):** with `TRYON_PROVIDER=gemini` the outfit card's button sends every item of the
+  outfit (outerwear, top, bottom, shoes, accessory; at most 6) and Google's image model (`gemini-nano-banana-2.1`,
+  REST Interactions API) returns one picture of the customer wearing all of it; on an item page it dresses that one item.
+  The demo SVG drawings qualify too: the browser draws each as a ≤ 512 px PNG and sends it along; the server takes such a
+  PNG only for a product whose own image is an SVG (checked by its bytes, ≤ 300 KB), and always reads real photos from
+  its own uploads. One picture counts once against the shop's daily limit. The consent text names Google, says paid
+  requests aren't used to train its AI, that Google may keep the request for a limited time for abuse checks, and that
+  the picture carries an invisible SynthID mark. **Billing must be on for the key** (live check 2026-11-21 with the free
+  key: 429 "limit: 0 … on Free Tier"); about $0.034 per 1K picture.
 - **Privacy:** the customer agrees every time, in a dialog that names FASHN and says the picture is approximate. The
   photo (a ≤ 1280 px JPEG made in the browser) goes to our server and on to FASHN in memory only; the picture comes back
   as bytes, is shown as a `blob:` image and is never stored. Neither is written to disk, the database or any log (only a
@@ -579,6 +590,10 @@ the 2-week pilot.
       in Sozlamalar shows it. Check the status path `/v1/status/<id>` and the base64 output shape against the live API
       (the docs don't show a full example of either).
 - [ ] Read FASHN's current Terms and Data Retention page once more and keep the consent text in step with them.
+- [ ] Gemini whole-outfit try-on (task 58): enable billing on the Google key, set `TRYON_PROVIDER=gemini`, switch one shop
+      on; kiosk and phone: outfit → "O'zimda ko'rish" → consent → photo → one picture with the whole outfit. Check the
+      answer shape (`output_image` or a `model_output` step) against the live API, the time it takes, and Google's
+      current data-use terms against the consent text.
 
 **Plans and billing (task 45)**
 - [ ] Set the prices and send the first invoices; after each payment set the plan and the paid-until day in

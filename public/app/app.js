@@ -2,7 +2,7 @@ import { watchIdle } from './idle.js';
 import { loadPose, measure, framing, framingHint } from './pose.js';
 import { keypad } from './keypad.js';
 import { kioskShell, attract, kioskDevice, randomId } from './kiosk.js';
-import { CLOTHES, SHOES, KIDS, KIDS_SHOES, ageHint, JEANS, WANT, nextError, fieldError, toRequest, sizeQuery, sizeNeeds, sizesReady, cleanWant, setCategories, categoryRoles, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter, tryonItem } from './flow.js';
+import { CLOTHES, SHOES, KIDS, KIDS_SHOES, ageHint, JEANS, WANT, nextError, fieldError, toRequest, sizeQuery, sizeNeeds, sizesReady, cleanWant, setCategories, categoryRoles, saveRoute, loadRoute, clearRoute, allowedScreen, createRouter } from './flow.js';
 import { mallScreen } from './mall.js';
 import { createTryon } from './tryon.js';
 import { offerCard, countOffers, idleSlides } from './offers.js';
@@ -287,7 +287,7 @@ async function loadStore() {
     $('startLabel').textContent = t('kiosk.start.go');
     return;
   }
-  tryon.setProvider(store.tryon); // task 41: the provider's name, absent when try-on is off here (no key, switched off, today's limit)
+  tryon.setProvider(store.tryon, store.tryon_outfit); // task 41: the provider's name, absent when try-on is off here (no key, switched off, today's limit)
   setCategories(store.categories.map((c) => [c.id, c.role]));
   renderWantChips(formWant());
   restoredWant = null;
@@ -1077,7 +1077,7 @@ function fittingBox(items, card, from = { rec: request?.rec }) {
 function outfitCard(o, n) {
   const c = card(o.title ? t('kiosk.outfit.n_title', { n, title: o.title }) : t('kiosk.outfit.n', { n }), o.items, o.total, o.reason, (p, li, b) => swapBox(o, n, p, li, b));
   c.dataset.outfit = n;
-  if (!lastResult?.audience) c.querySelector('.outfit-foot').append(tryon.button(tryonItem(o.items))); // task 41: never for a child
+  if (!lastResult?.audience) c.querySelector('.outfit-foot').append(tryon.button(o.items)); // task 41: never for a child; task 58: the whole outfit with Gemini
   // R5: the cheaper variant is one compact "swap X for Y, save N" row, not a second outfit.
   if (o.alternative) {
     const swap = o.alternative.items.find((p) => !o.items.some((x) => x.id === p.id));

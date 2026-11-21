@@ -323,7 +323,7 @@ export function createStoreRouter(db, { weather, profiles = false, tryon = null 
     res.json({ id: store.id, name: store.name, city: store.city, weather: w, looks, profile: profiles && store.organization_id != null,
       categories: await shownCategories(db, id),
       offers: await storeOffers(db, id), // task 43: the shop's own current offers (no mall approval needed on its own screen)
-      ...((await tryonOpen(db, tryon, store)) && { tryon: tryon.name }) }); // task 41: the provider's name, for the consent text
+      ...((await tryonOpen(db, tryon, store)) && { tryon: tryon.name, ...(tryon.outfit && { tryon_outfit: true }) }) }); // task 58: whole outfits // task 41: the provider's name, for the consent text
   });
   return r;
 }

@@ -25,7 +25,7 @@ import { createCatalogRouter } from './catalog.js';
 import { VENDOR, MODEL } from './vendor.js';
 import { createProfileRouter } from './profile.js';
 import { createScanRoute } from './labels.js';
-import { createFashn, createTryonRouter } from './tryon.js';
+import { pickTryon, createTryonRouter } from './tryon.js';
 
 // X1: same-origin only, plus OpenStreetMap tiles for the delivery map. 'wasm-unsafe-eval' lets MediaPipe compile its wasm
 // (it can't run JS from strings). No 'unsafe-inline': styles are files or CSSOM, scripts are modules.
@@ -44,7 +44,7 @@ const SECURITY_HEADERS = {
 const IMMUTABLE = { maxAge: '365d', immutable: true, index: false }; // /vendor paths carry the version
 
 // uploadDir holds product images only. Customer photos are never written anywhere.
-export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads', weather = createWeather(), stylist = pickStylist(), stylistTimeoutMs, tryon = createFashn(), tryonTimeoutMs, payments = paymentConfig(), telegram = telegramConfig(), trustProxy = process.env.TRUST_PROXY, logRequests = false, limits = {}, now } = {}) {
+export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads', weather = createWeather(), stylist = pickStylist(), stylistTimeoutMs, tryon = pickTryon(), tryonTimeoutMs, payments = paymentConfig(), telegram = telegramConfig(), trustProxy = process.env.TRUST_PROXY, logRequests = false, limits = {}, now } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use((req, res, next) => {
@@ -67,7 +67,7 @@ export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads',
   app.use('/api/pay', createPaymentRouter(db, payments)); // Click/Payme callbacks parse their own bodies
   // /api/recommend may carry one small customer photo for the stylist (capped again in stylist.js); everything else 100 kb.
   app.use('/api/recommend', express.json({ limit: '400kb' }));
-  app.use('/api/tryon', express.json({ limit: '1600kb' })); // task 41: one customer photo for the try-on (capped again in tryon.js)
+  app.use('/api/tryon', express.json({ limit: '3600kb' })); // task 41: one customer photo; task 58: plus up to 6 drawn garments (capped again in tryon.js)
   app.use(express.json({ limit: '100kb' }));
 
   const api = express.Router();

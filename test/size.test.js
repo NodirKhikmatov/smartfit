@@ -219,6 +219,8 @@ test('no image or base64 data reaches disk, the DB or the logs', async () => {
       .replace(/sessionStorage\.(getItem|removeItem)\(CART_KEY\)|sessionStorage\.setItem\(CART_KEY, t\)/g, '')
       .replace(/storage = globalThis\.sessionStorage/g, '');
     assert.ok(!/toBlob|FormData|readAsDataURL|getImageData|btoa\(|localStorage|sessionStorage|indexedDB/.test(src), f);
-    assert.equal(src.match(/toDataURL/g)?.length ?? 0, f === 'app.js' ? 1 : 0, f);
+    // Task 58: tryon.js has one more, for the shop's own SVG drawings only (drawn from p.image_url, never a camera or file).
+    assert.equal(src.match(/toDataURL/g)?.length ?? 0, f === 'app.js' || f === 'tryon.js' ? 1 : 0, f);
+    if (f === 'tryon.js') assert.match(src, /img\.src = p\.image_url;[\s\S]{0,700}out\[p\.id\] = c\.toDataURL\('image\/png'\)/, 'only a product drawing is encoded');
   }
 });

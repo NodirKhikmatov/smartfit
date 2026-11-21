@@ -202,5 +202,10 @@ export function createRouter(win, { render, allowed }) {
 export const TRYON_ROLES = { outerwear: 'tops', top: 'tops', bottom: 'bottoms' }; // our role → the provider's category
 export const tryonGarment = (p) => (p?.audience ?? 'adult') === 'adult' && Object.hasOwn(TRYON_ROLES, p?.category ?? '')
   && /^\/uploads\/products\/[\w-]+\.(jpg|png|webp)$/.test(p?.image_url ?? '');
+// Task 58: an outfit provider (Gemini) dresses the whole outfit, shoes and accessories too, and also takes the demo SVG
+// drawings (the browser draws them as PNG). The server checks the same function.
+export const OUTFIT_TRYON_ROLES = ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
+export const tryonOutfitItem = (p) => (p?.audience ?? 'adult') === 'adult' && OUTFIT_TRYON_ROLES.includes(p?.category ?? '')
+  && /^\/uploads\/products\/[\w-]+\.(jpg|png|webp|svg)$/.test(p?.image_url ?? '');
 // On an outfit: the most visible garment that has a usable photo.
 export const tryonItem = (items) => ['outerwear', 'top', 'bottom'].map((c) => items.find((p) => p.category === c && tryonGarment(p))).find(Boolean) ?? null;

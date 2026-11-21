@@ -133,7 +133,8 @@ test('consent every time, a strict body and a JPEG photo', async () => {
   }
   assert.equal((await call('POST', '/api/tryon', null, { raw: '[1]' })).status, 400);
   assert.equal((await tryon({ photo: photoOf(1_200_000) })).status, 400, 'over the photo cap');
-  assert.equal((await tryon({ photo: photoOf(1_300_000) })).status, 413, 'over the JSON limit');
+  assert.equal((await tryon({ photo: photoOf(1_300_000) })).status, 400, 'over the photo cap (task 58 raised the JSON limit for drawn garments)');
+  assert.equal((await tryon({ photo: photoOf(2_800_000) })).status, 413, 'over the JSON limit');
   assert.equal(await used(), before, 'nothing refused was counted');
 });
 
@@ -301,7 +302,7 @@ test('org scoping of the setting and the counter', async () => {
 
 test("the child path never gets the button: no garment of a child's, outfits of a child's result skipped", () => {
   const app = readFileSync(new URL('../public/app/app.js', import.meta.url), 'utf8');
-  assert.match(app, /if \(!lastResult\?\.audience\) c\.querySelector\('\.outfit-foot'\)\.append\(tryon\.button\(tryonItem\(o\.items\)\)\)/);
+  assert.match(app, /if \(!lastResult\?\.audience\) c\.querySelector\('\.outfit-foot'\)\.append\(tryon\.button\(o\.items\)\)/);
   assert.match(app, /tryon\.clear\(\); \/\/ the photo and the picture go before anything else/, 'the kiosk reset clears it');
   assert.match(app, /track\(name\);\n {2}tryon\.clear\(\);/, 'every screen change (Boshiga too) clears it');
   const outfit = [{ ...top, category: 'bottom', id: 2 }, { ...top, id: 1 }, { ...top, category: 'shoes', id: 3 }];
