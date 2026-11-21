@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { testDb } from './helpers/db.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
-import { createGeminiTryon, pickTryon, GEMINI_TRYON_MODEL, OUTFIT_MAX } from '../src/tryon.js';
+import { createGeminiTryon, createHfDemoTryon, pickTryon, GEMINI_TRYON_MODEL, OUTFIT_MAX } from '../src/tryon.js';
 import { tryonOutfitItem } from '../public/app/flow.js';
 
 const db = testDb();
@@ -165,4 +165,29 @@ test('Gemini adapter: Interactions request, key in a header, the picture from th
   }
   await assert.rejects(g.tryOn({ person: 'data:image/gif;base64,R0lG', garments }), { message: 'gemini bad input' });
   assert.equal(createGeminiTryon({ apiKey: '' }), null);
+});
+
+test('Hugging Face test provider (task 59): never in production, the outer layer, Gradio upload → call → events → file', async () => {
+  assert.equal(pickTryon({ TRYON_PROVIDER: 'hf-demo', NODE_ENV: 'production' }), null, 'a public demo server: never in production');
+  assert.deepEqual([pickTryon({ TRYON_PROVIDER: 'hf-demo' }).name, pickTryon({ TRYON_PROVIDER: 'hf-demo' }).outfit], ['Hugging Face', true]);
+  const calls = [];
+  let events = 'event: generating\ndata: null\n\nevent: complete\ndata: [{"path":"/tmp/out.webp","url":"https://yisol-idm-vton.hf.space/file=/tmp/out.webp"},null]\n\n';
+  const fetch = async (url, init = {}) => {
+    calls.push({ url, init });
+    if (url.endsWith('/upload')) return { ok: true, json: async () => ['/tmp/p.jpg', '/tmp/g.png'] };
+    if (url.endsWith('/call/tryon')) return { ok: true, json: async () => ({ event_id: 'ev1' }) };
+    if (url.endsWith('/call/tryon/ev1')) return { ok: true, text: async () => events };
+    return { ok: true, arrayBuffer: async () => JPEG.buffer.slice(JPEG.byteOffset, JPEG.byteOffset + JPEG.length) };
+  };
+  const hf = createHfDemoTryon({ fetch, env: {} });
+  const garments = [{ image: PNG_URL, category: 'top' }, { image: PNG_URL, category: 'outerwear' }, { image: PNG_URL, category: 'bottom' }];
+  assert.deepEqual(await hf.tryOn({ person: PHOTO, garments }), JPEG);
+  assert.equal(calls[0].init.body.getAll('files').length, 2, 'the photo and one garment');
+  const job = JSON.parse(calls[1].init.body);
+  assert.equal(job.data[1].path, '/tmp/g.png');
+  assert.equal(job.data[2], 'jacket', 'outerwear goes over the top');
+  assert.equal(calls[3].url, 'https://yisol-idm-vton.hf.space/file=/tmp/out.webp');
+  events = 'event: error\ndata: "GPU quota exceeded"\n\n';
+  await assert.rejects(hf.tryOn({ person: PHOTO, garments }), { message: 'hf failed' });
+  await assert.rejects(hf.tryOn({ person: PHOTO, garments: [{ image: PNG_URL, category: 'shoes' }] }), { message: 'hf no upper garment' });
 });

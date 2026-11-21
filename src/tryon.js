@@ -104,9 +104,53 @@ export function createGeminiTryon({ apiKey = process.env.GEMINI_API_KEY?.trim(),
   };
 }
 
+// Task 59, testing only: the public IDM-VTON demo Space on Hugging Face (free, no key, a queue, ~25 s). The photo goes to
+// a public demo server, so this provider never exists in production. shortcut: it dresses one upper-body garment (the
+// outer layer: outerwear, else the top) and ignores the rest; switch to Gemini (billing) for the whole outfit.
+const HF_SPACE = 'https://yisol-idm-vton.hf.space';
+const HF_WHAT = { outerwear: 'jacket', top: 'shirt' };
+const blobOf = (url) => {
+  const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(url);
+  if (!m) throw new Error('hf bad input');
+  return new Blob([Buffer.from(m[2], 'base64')], { type: m[1] });
+};
+export function createHfDemoTryon({ fetch = globalThis.fetch, env = process.env } = {}) {
+  if (env.NODE_ENV === 'production') return null;
+  return {
+    name: 'Hugging Face',
+    outfit: true,
+    async tryOn({ person, garments }, signal) {
+      const g = garments.find((x) => x.category === 'outerwear') ?? garments.find((x) => x.category === 'top');
+      if (!g) throw new Error('hf no upper garment');
+      const form = new FormData();
+      form.append('files', blobOf(person), 'person.jpg');
+      form.append('files', blobOf(g.image), 'garment.png');
+      const up = await fetch(`${HF_SPACE}/upload`, { method: 'POST', body: form, signal });
+      if (!up.ok) throw new Error(`hf http ${up.status}`);
+      const [pPath, gPath] = await up.json();
+      const file = (path) => ({ path, meta: { _type: 'gradio.FileData' } });
+      // Gradio 4: start the job, then read its server-sent events until "complete" or "error".
+      const call = await fetch(`${HF_SPACE}/call/tryon`, {
+        method: 'POST', signal, headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ data: [{ background: file(pPath), layers: [], composite: null }, file(gPath), HF_WHAT[g.category], true, true, 30, 42] }),
+      });
+      if (!call.ok) throw new Error(`hf http ${call.status}`);
+      const { event_id: id } = await call.json();
+      const events = await (await fetch(`${HF_SPACE}/call/tryon/${encodeURIComponent(id)}`, { signal })).text();
+      const done = /event: complete\ndata: (.+)/.exec(events);
+      if (!done) throw new Error('hf failed'); // a queue limit or a model error; its text never reaches a log
+      const out = JSON.parse(done[1])?.[0];
+      const pic = await fetch(out?.url ?? `${HF_SPACE}/file=${out?.path}`, { signal });
+      if (!pic.ok) throw new Error(`hf http ${pic.status}`);
+      return Buffer.from(await pic.arrayBuffer());
+    },
+  };
+}
+
 // Task 58: TRYON_PROVIDER=gemini picks Gemini (it needs a billed GEMINI_API_KEY); otherwise FASHN as before (off without its key).
 // Explicit, so the stylist's Gemini key never turns paid pictures on by itself.
 export function pickTryon(env = process.env) {
+  if (env.TRYON_PROVIDER === 'hf-demo') return createHfDemoTryon({ env }); // task 59: free, testing only
   if (env.TRYON_PROVIDER === 'gemini') return createGeminiTryon({ apiKey: env.GEMINI_API_KEY?.trim(), model: env.GEMINI_TRYON_MODEL || GEMINI_TRYON_MODEL });
   return createFashn({ apiKey: env.FASHN_API_KEY?.trim() });
 }
@@ -125,7 +169,7 @@ async function claim(db, store, day) {
 }
 
 // Only our own short reasons reach the log, never a provider message or body (it could echo the request).
-const reasonOf = (err) => (/^((?:fashn|gemini) [\w ]{1,40}|timeout|aborted)$/.test(err?.message) ? err.message : err?.name ?? 'Error');
+const reasonOf = (err) => (/^((?:fashn|gemini|hf) [\w ]{1,40}|timeout|aborted)$/.test(err?.message) ? err.message : err?.name ?? 'Error');
 
 // A demo drawing (SVG) turned into a PNG by the browser (task 58): only for a product whose own image is an SVG, a PNG by its
 // bytes, size-capped. A real photo is always read from our own uploads, never taken from the client.

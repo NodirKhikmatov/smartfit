@@ -10,7 +10,7 @@ const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.crea
 const PHOTO_PX = 1280, PHOTO_Q = 0.85; // the provider works at 864 × 1296; the server takes ≤ ~1.1 MB
 const COUNTDOWN = 3;
 const DRAW_PX = 512; // a demo drawing (SVG) is drawn as a PNG this big for an outfit provider (task 58)
-const CONSENT = { Gemini: 'kiosk.tryon.consent_gemini' }; // the provider's own terms; FASHN keeps the task 41 text
+const CONSENT = { Gemini: 'kiosk.tryon.consent_gemini', 'Hugging Face': 'kiosk.tryon.consent_test' }; // task 59: the test provider // the provider's own terms; FASHN keeps the task 41 text
 
 // Task 58: the demo SVG drawings as PNG data URLs, { id: url }, or undefined when the items all have real photos.
 async function drawings(items) {
