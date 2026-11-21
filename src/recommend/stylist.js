@@ -33,7 +33,7 @@ export const SUBMIT_OUTFITS = {
     type: 'object',
     required: ['outfits'],
     properties: {
-      style_guess: { type: 'string' },
+      style_guess: { type: 'string', description: "1-2 so'z, title va reason bilan bir tilda (masalan: klassik, sport, kundalik)" },
       outfits: {
         type: 'array', minItems: 1, maxItems: 3,
         items: {
@@ -71,7 +71,7 @@ export const SUBMIT_RANKING = {
     type: 'object',
     required: ['product_ids'],
     properties: {
-      style_guess: { type: 'string' },
+      style_guess: { type: 'string', description: "1-2 so'z, title va reason bilan bir tilda (masalan: klassik, sport, kundalik)" },
       product_ids: { type: 'array', items: { type: 'integer' } },
     },
   },
