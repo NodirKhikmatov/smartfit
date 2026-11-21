@@ -10,8 +10,8 @@ import { estimateSize } from '../src/size/size.js';
 import { poseRatios, MEDIAPIPE, MODEL as POSE_MODEL } from '../public/app/pose.js';
 import { VENDOR, MODEL } from '../src/vendor.js';
 
-// Ratios that the size chart reads as M for a 176 cm man (shoulder 40 cm, hip 33.7 cm).
-const M_POSE = { shoulder: 0.227, hip: 0.145 };
+// Ratios that the size chart reads as M for a 176 cm man (shoulder 40 cm, hip 33.6 cm).
+const M_POSE = { shoulder: 0.227, hip: 0.105 };
 
 test('no photo, no weight: size from height only, low confidence', () => {
   assert.deepEqual(estimateSize({ gender: 'male', height: 176 }), { sizes: { top: 'M', bottom: 'M' }, confidence: 'low', source: 'height', method: 'body', measured: [], measurements: null });
@@ -49,12 +49,12 @@ test('photo: shoulder → top, hip → bottom, converted to cm with the height',
   assert.deepEqual(r.sizes, { top: 'M', bottom: 'M' });
   assert.equal(r.confidence, 'medium');
   assert.equal(r.source, 'photo');
-  assert.deepEqual(r.measurements, { shoulder_cm: 40, hip_cm: 33.7 });
+  assert.deepEqual(r.measurements, { shoulder_cm: 40, hip_cm: 33.6 });
 
   // Same ratios on a taller body are more centimetres, so a bigger size.
   assert.deepEqual(estimateSize({ gender: 'male', height: 196, pose: M_POSE }).sizes, { top: 'XL', bottom: 'XL' });
   // Broad shoulders, narrow hips: top and bottom are sized separately.
-  assert.deepEqual(estimateSize({ gender: 'male', height: 176, pose: { shoulder: 0.25, hip: 0.135 } }).sizes, { top: 'XL', bottom: 'S' });
+  assert.deepEqual(estimateSize({ gender: 'male', height: 176, pose: { shoulder: 0.25, hip: 0.099 } }).sizes, { top: 'XL', bottom: 'S' });
 });
 
 test('photo + weight: blended, high confidence only when they agree within one size', () => {
@@ -143,7 +143,7 @@ after(async () => {
 test('POST /api/size: photo, weight-only and height-only modes', async () => {
   let r = await post('/api/size', { gender: 'male', height: 176, weight: 72, pose: M_POSE });
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body, { sizes: { top: 'M', bottom: 'M' }, confidence: 'high', source: 'photo+weight', method: 'full', measured: ['top', 'bottom'], measurements: { shoulder_cm: 40, hip_cm: 33.7 } });
+  assert.deepEqual(r.body, { sizes: { top: 'M', bottom: 'M' }, confidence: 'high', source: 'photo+weight', method: 'full', measured: ['top', 'bottom'], measurements: { shoulder_cm: 40, hip_cm: 33.6 } });
   r = await post('/api/size', { gender: 'female', height: 164, weight: 58, pose: null });
   assert.deepEqual([r.status, r.body.sizes, r.body.source], [200, { top: 'M', bottom: 'M' }, 'weight']);
   r = await post('/api/size', { gender: 'male', height: 176, weight: null });

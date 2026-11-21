@@ -77,7 +77,7 @@ test('live framing hint: the parts seen and what to say', () => {
 });
 
 // Ratios the chart reads as M for a 176 cm man (as in size.test.js).
-const M = { shoulder: 0.227, hip: 0.145 };
+const M = { shoulder: 0.227, hip: 0.105 };
 const man = { gender: 'male', height: 176 };
 
 test('size per kind: what is measured, the rest from height+weight, confidence full > torso > upper', () => {
@@ -289,4 +289,15 @@ test('accuracy per method on the Talab page: customers per way and their "how di
   // Another store's view sees none of it.
   const o = (await call('GET', `/api/admin/demand?store_id=${other}`, undefined, superToken)).body;
   assert.ok(o.methods.every((m) => m.customers === 0 && m.answers === 0));
+});
+
+// Task 57: real MediaPipe output, not the fixture body above. A public-domain photo of a 183 cm, 88 kg man, legs behind
+// a chair (torso), gave these ratios through pose.js; with the old hip factor 1.45 the trousers came out S (hip 26.3 cm).
+test('real torso photo of a 183/88 man: trousers L or XL, not S', () => {
+  for (const pose of [{ kind: 'torso', shoulder: 0.219, hip: 0.107 }, { kind: 'torso', shoulder: 0.21, hip: 0.109 }]) {
+    const r = estimateSize({ gender: 'male', height: 183, weight: 88, pose });
+    assert.ok(['L', 'XL'].includes(r.sizes.bottom), `bottom ${r.sizes.bottom} for hip ${r.measurements.hip_cm} cm`);
+    assert.ok(['L', 'XL'].includes(r.sizes.top), `top ${r.sizes.top}`);
+    assert.ok(r.measurements.hip_cm > 33 && r.measurements.hip_cm < 40, `hip ${r.measurements.hip_cm} cm is an adult man's hip width`);
+  }
 });

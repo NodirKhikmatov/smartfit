@@ -12,7 +12,7 @@ export const CHART = {
 };
 const EYE_TO_HEEL = 0.91; // eye-to-heel distance as a share of stature
 const SHOULDER_FACTOR = 1.1; // shoulder landmarks sit at the joints, a little inside the shoulder edge
-const HIP_FACTOR = 1.45; // hip landmarks are joint centres; body hip width is wider
+const HIP_FACTOR = 2.0; // hip landmarks are joint centres, about half the body hip width apart (task 57: 1.45 made every photo XS-S)
 // Task 29: how much each way of finding a size counts against height+weight when the weight is known (shortcut: guesses,
 // recalibrate with the pilot's per-method fit answers). A partial photo is scaled from a shorter segment, so it counts less.
 const INPUT_WEIGHT = { full: 0.6, torso: 0.45, upper: 0.4, usual: 0.7, tape: 0.7 };
