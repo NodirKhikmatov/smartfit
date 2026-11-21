@@ -91,7 +91,7 @@ export const dbTime = (ms) => `${new Date(ms).toISOString().replace('T', ' ').sl
 
 // Public: POST /api/recommend { store_id, gender, sizes: { top, bottom, shoes? }, budget?, fit?, method?, photo?, want?, own?, occasion? }
 // With want (task 30) the answer has `groups` (single items per category) and no outfits.
-// stylist (task 7) is null without ANTHROPIC_API_KEY → rules only.
+// stylist (task 7, Gemini since task 56) is null without an AI key → rules only.
 export function createRecommendRouter(db, { weather, stylist = null, stylistTimeoutMs = TIMEOUT_MS }) {
   const r = express.Router();
   const hits = new Map();

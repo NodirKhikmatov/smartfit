@@ -102,6 +102,9 @@ docker stop smartfit-testpg
 | `PUBLIC_URL` | empty | Public address, e.g. `https://fit.example.uz`. Used in the store QR codes and the Click/Payme return link. **Set it in production.** |
 | `ANTHROPIC_API_KEY` | empty | Claude stylist. Empty → rule-based recommendations only (the app works fully without it). |
 | `ANTHROPIC_MODEL` | `claude-haiku-5-5` | Must accept a forced `tool_choice` and answer within 8 s. |
+| `GEMINI_API_KEY` | empty | Gemini stylist (task 56), the same prompt, tool and checks as Claude's. Key from aistudio.google.com/apikey. **Free tier: Google may use the content (including the customer photo) to improve its products** — demos only; enable billing on the key for real customers. |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Must take images, support forced function calling (mode `ANY`) and `thinkingLevel: LOW`, and answer within 8 s. |
+| `AI_PROVIDER` | empty | `claude` or `gemini`. Empty → Claude if `ANTHROPIC_API_KEY` is set, else Gemini, else rules only. |
 | `PAYME_MERCHANT_ID`, `PAYME_KEY` | empty | Payme Merchant API. Off (and hidden in the app) until both are set. Use the TEST_KEY while testing. |
 | `PAYME_CHECKOUT_URL` | `https://test.paycom.uz` | Set `https://checkout.paycom.uz` for live payments. |
 | `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY` | empty | Click SHOP API. Off until all three are set. |
@@ -566,8 +569,8 @@ the 2-week pilot.
 - [ ] Print the store QR on the real printer.
 - [ ] The kiosk QR on the order screen scans to the Telegram bot.
 
-**Claude stylist**
-- [ ] Live `ANTHROPIC_API_KEY`: run real requests, check the answer comes within the 8 s limit and the Uzbek titles and
+**AI stylist (Claude or Gemini)**
+- [ ] Live `ANTHROPIC_API_KEY` or `GEMINI_API_KEY` (with `AI_PROVIDER`): run real requests, check the answer comes within the 8 s limit and the Uzbek titles and
       reasons read well. Turn the internet / key off once and check the rule-based fallback.
 
 **AI try-on (task 41, only if a shop wants it)**

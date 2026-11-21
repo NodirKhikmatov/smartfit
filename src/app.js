@@ -5,7 +5,7 @@ import { createAdminRouter } from './admin/routes.js';
 import { createSyncRouter } from './admin/sync.js';
 import { createRecommendRouter, createStoreRouter } from './recommend/routes.js';
 import { createWeather } from './recommend/weather.js';
-import { createStylist } from './recommend/stylist.js';
+import { pickStylist } from './recommend/stylist.js';
 import { createSizeRouter } from './size/size.js';
 import { createCartRouter, createOrderRouter } from './cart/cart.js';
 import { createMallCartRouter, createOrderGroupRouter } from './cart/mall.js';
@@ -44,7 +44,7 @@ const SECURITY_HEADERS = {
 const IMMUTABLE = { maxAge: '365d', immutable: true, index: false }; // /vendor paths carry the version
 
 // uploadDir holds product images only. Customer photos are never written anywhere.
-export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads', weather = createWeather(), stylist = createStylist(), stylistTimeoutMs, tryon = createFashn(), tryonTimeoutMs, payments = paymentConfig(), telegram = telegramConfig(), trustProxy = process.env.TRUST_PROXY, logRequests = false, limits = {}, now } = {}) {
+export function createApp(db, { uploadDir = process.env.UPLOAD_DIR || 'uploads', weather = createWeather(), stylist = pickStylist(), stylistTimeoutMs, tryon = createFashn(), tryonTimeoutMs, payments = paymentConfig(), telegram = telegramConfig(), trustProxy = process.env.TRUST_PROXY, logRequests = false, limits = {}, now } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use((req, res, next) => {

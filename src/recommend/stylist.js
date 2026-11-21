@@ -1,4 +1,4 @@
-// Claude stylist (task 7). Claude only picks product IDs from CANDIDATES; the server re-checks every ID,
+// AI stylist: Claude (task 7) or Gemini (task 56). The model only picks product IDs from CANDIDATES; the server re-checks every ID,
 // fills missing categories by the rules and prices everything from the DB. Any failure → caller uses the rules.
 import Anthropic from '@anthropic-ai/sdk';
 import { fail } from '../admin/routes.js';
@@ -7,6 +7,7 @@ import { t } from '../../public/shared/i18n.js';
 
 export const TIMEOUT_MS = 8000;
 export const DEFAULT_MODEL = 'claude-haiku-5-5'; // fast, takes images, and still accepts a forced tool_choice
+export const GEMINI_MODEL = 'gemini-3.8-flash'; // stable, takes images, free tier available (task 56)
 export const PHOTO_MAX = 300_000;
 // Task 33: added only when the customer picked an occasion, so a request without one sends the same message as before.
 // Task 40: added only for a child, so an adult request sends the same message as before. The candidates are already
@@ -76,35 +77,44 @@ export const SUBMIT_RANKING = {
   },
 };
 
+// Shared by both providers: the system prompt, the tool and the user text for one request.
+// lang: the customer's UI language. The spec prompt stays Uzbek; a Russian customer gets one extra line and Russian names.
+// mode 'single' (task 30): the ranking prompt and tool, plus WANT and OWN.
+// occasion (task 33): one of the fixed codes or null; the model gets its Uzbek name and one extra line, never free text.
+function buildPrompt({ photo, weather, sizes, budget, candidates, lang = 'uz', mode = 'outfit', want = null, own = [], occasion = null, audience = 'adult' }) {
+  const child = audience === 'child';
+  const single = mode === 'single';
+  const data = {
+    WEATHER: { temperature: weather.temperature, apparent_temperature: weather.apparent_temperature, raining: weather.raining, wind_speed: weather.wind_speed },
+    SIZES: sizes,
+    BUDGET: budget,
+    ...(single && { WANT: want, OWN: own }),
+    ...(occasion && { OCCASION: t(`kiosk.occasion.${occasion}`, {}, 'uz') }),
+    ...(child && { AUDIENCE: 'bola' }),
+    CANDIDATES: candidates.map((p) => ({ product_id: p.id, name: (lang === 'ru' && p.name_ru) || p.name, category: p.category, color: p.color, style: p.style, price: p.unit_price, waterproof: p.waterproof, ...(p.shop && { shop: p.shop }) })), // shop: task 42, mall outfit only
+  };
+  return {
+    system: single ? SINGLE_PROMPT : SYSTEM_PROMPT,
+    tool: single ? SUBMIT_RANKING : SUBMIT_OUTFITS,
+    text: (photo ? 'Mijoz rasmi yuqorida.' : "Mijoz rasmi yo'q (rasmsiz rejim).") + '\n' + (LANG_LINE[lang] ?? '') + (occasion ? `${OCCASION_LINE}\n` : '') + (child ? `${CHILD_LINE}\n` : '') + JSON.stringify(data),
+  };
+}
+
 // Returns ask(input, signal) → the submit_outfits input or null, or null when there is no key (rules only).
 export function createStylist({ client, apiKey = process.env.ANTHROPIC_API_KEY, model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL } = {}) {
   if (!client && !apiKey) return null;
   client ??= new Anthropic({ apiKey });
-  // lang: the customer's UI language. The spec prompt stays Uzbek; a Russian customer gets one extra line and Russian names.
-  // mode 'single' (task 30): the ranking prompt and tool, plus WANT and OWN.
-  // occasion (task 33): one of the fixed codes or null; Claude gets its Uzbek name and one extra line, never free text.
-  return async ({ photo, weather, sizes, budget, candidates, lang = 'uz', mode = 'outfit', want = null, own = [], occasion = null, audience = 'adult' }, signal) => {
-    const child = audience === 'child';
-    const single = mode === 'single';
-    const tool = single ? SUBMIT_RANKING : SUBMIT_OUTFITS;
-    const data = {
-      WEATHER: { temperature: weather.temperature, apparent_temperature: weather.apparent_temperature, raining: weather.raining, wind_speed: weather.wind_speed },
-      SIZES: sizes,
-      BUDGET: budget,
-      ...(single && { WANT: want, OWN: own }),
-      ...(occasion && { OCCASION: t(`kiosk.occasion.${occasion}`, {}, 'uz') }),
-      ...(child && { AUDIENCE: 'bola' }),
-      CANDIDATES: candidates.map((p) => ({ product_id: p.id, name: (lang === 'ru' && p.name_ru) || p.name, category: p.category, color: p.color, style: p.style, price: p.unit_price, waterproof: p.waterproof, ...(p.shop && { shop: p.shop }) })), // shop: task 42, mall outfit only
-    };
+  const ask = async (input, signal) => {
+    const { system, tool, text } = buildPrompt(input);
     const content = [
-      ...(photo ? [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: photo } }] : []),
-      { type: 'text', text: (photo ? 'Mijoz rasmi yuqorida.' : "Mijoz rasmi yo'q (rasmsiz rejim).") + '\n' + (LANG_LINE[lang] ?? '') + (occasion ? `${OCCASION_LINE}\n` : '') + (child ? `${CHILD_LINE}\n` : '') + JSON.stringify(data) },
+      ...(input.photo ? [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: input.photo } }] : []),
+      { type: 'text', text },
     ];
     const msg = await client.messages.create(
       {
         model,
         max_tokens: 2048,
-        system: single ? SINGLE_PROMPT : SYSTEM_PROMPT,
+        system,
         tools: [tool],
         tool_choice: { type: 'tool', name: tool.name },
         output_config: { effort: 'low' },
@@ -115,6 +125,45 @@ export function createStylist({ client, apiKey = process.env.ANTHROPIC_API_KEY, 
     if (msg.stop_reason === 'refusal') return null;
     return msg.content.find((b) => b.type === 'tool_use' && b.name === tool.name)?.input ?? null;
   };
+  return Object.assign(ask, { provider: 'claude' });
+}
+
+// Task 56: the same stylist on Google Gemini (REST generateContent, no SDK). Same prompt, same tool, forced call
+// (mode ANY); the answer goes through the same applyStylist / applyRanking checks as Claude's.
+// The key goes in a header, never in the URL, so it can't reach a proxy or access log.
+export function createGeminiStylist({ apiKey = process.env.GEMINI_API_KEY, model = process.env.GEMINI_MODEL || GEMINI_MODEL, fetchFn = fetch } = {}) {
+  if (!apiKey) return null;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const ask = async (input, signal) => {
+    const { system, tool, text } = buildPrompt(input);
+    const res = await fetchFn(url, {
+      method: 'POST',
+      signal,
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [...(input.photo ? [{ inlineData: { mimeType: 'image/jpeg', data: input.photo } }] : []), { text }] }],
+        tools: [{ functionDeclarations: [{ name: tool.name, parameters: tool.input_schema }] }],
+        toolConfig: { functionCallingConfig: { mode: 'ANY', allowedFunctionNames: [tool.name] } },
+        // LOW is the lowest thinking level gemini-3.8-flash accepts; thinking tokens count toward maxOutputTokens.
+        generationConfig: { maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: 'LOW' } },
+      }),
+    });
+    if (!res.ok) throw Object.assign(new Error('gemini request failed'), { status: res.status }); // never the body: it may echo the request
+    const body = await res.json();
+    const call = (body.candidates?.[0]?.content?.parts ?? []).find((p) => p.functionCall?.name === tool.name)?.functionCall;
+    return call?.args ?? null; // blocked prompt, safety stop or no call → null → rules
+  };
+  return Object.assign(ask, { provider: 'gemini' });
+}
+
+// Task 56: AI_PROVIDER=claude|gemini picks one; unset (or unknown) → Claude when its key is set, else Gemini, else none.
+export function pickStylist(env = process.env) {
+  const claude = () => createStylist({ apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL || DEFAULT_MODEL });
+  const gemini = () => createGeminiStylist({ apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL || GEMINI_MODEL });
+  if (env.AI_PROVIDER === 'gemini') return gemini();
+  if (env.AI_PROVIDER === 'claude') return claude();
+  return claude() ?? gemini();
 }
 
 // Runs fn(signal) with a hard deadline; on timeout the request is aborted and this rejects.
