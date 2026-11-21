@@ -7,7 +7,7 @@ import { t } from '../../public/shared/i18n.js';
 
 export const TIMEOUT_MS = 8000;
 export const DEFAULT_MODEL = 'claude-haiku-5-5'; // fast, takes images, and still accepts a forced tool_choice
-export const GEMINI_MODEL = 'gemini-3.8-flash'; // stable, takes images, free tier available (task 56)
+export const GEMINI_MODEL = 'gemini-3.5-flash-lite'; // takes images, free tier, ~1–3 s; the bigger Flash models answered 503 "high demand" on 2026-11-21
 export const PHOTO_MAX = 300_000;
 // Task 33: added only when the customer picked an occasion, so a request without one sends the same message as before.
 // Task 40: added only for a child, so an adult request sends the same message as before. The candidates are already

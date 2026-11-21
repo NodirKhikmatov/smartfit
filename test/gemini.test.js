@@ -15,7 +15,7 @@ test('pickStylist: AI_PROVIDER wins, else Claude, else Gemini, else none', () =>
   assert.equal(pickStylist({ ANTHROPIC_API_KEY: 'a', GEMINI_API_KEY: 'g', AI_PROVIDER: 'claude' }).provider, 'claude');
   assert.equal(pickStylist({ ANTHROPIC_API_KEY: 'a', AI_PROVIDER: 'gemini' }), null, 'chosen provider without its key → rules');
   assert.equal(createGeminiStylist({ apiKey: '' }), null);
-  assert.equal(GEMINI_MODEL, 'gemini-3.8-flash');
+  assert.equal(GEMINI_MODEL, 'gemini-3.5-flash-lite');
 });
 
 const calls = [];

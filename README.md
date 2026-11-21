@@ -103,7 +103,7 @@ docker stop smartfit-testpg
 | `ANTHROPIC_API_KEY` | empty | Claude stylist. Empty → rule-based recommendations only (the app works fully without it). |
 | `ANTHROPIC_MODEL` | `claude-haiku-5-5` | Must accept a forced `tool_choice` and answer within 8 s. |
 | `GEMINI_API_KEY` | empty | Gemini stylist (task 56), the same prompt, tool and checks as Claude's. Key from aistudio.google.com/apikey. **Free tier: Google may use the content (including the customer photo) to improve its products** — demos only; enable billing on the key for real customers. |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | Must take images, support forced function calling (mode `ANY`) and `thinkingLevel: LOW`, and answer within 8 s. |
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | Must take images, support forced function calling (mode `ANY`) and `thinkingLevel: LOW`, and answer within 8 s. |
 | `AI_PROVIDER` | empty | `claude` or `gemini`. Empty → Claude if `ANTHROPIC_API_KEY` is set, else Gemini, else rules only. |
 | `PAYME_MERCHANT_ID`, `PAYME_KEY` | empty | Payme Merchant API. Off (and hidden in the app) until both are set. Use the TEST_KEY while testing. |
 | `PAYME_CHECKOUT_URL` | `https://test.paycom.uz` | Set `https://checkout.paycom.uz` for live payments. |
