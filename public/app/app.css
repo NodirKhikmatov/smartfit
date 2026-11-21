@@ -495,3 +495,37 @@ html .frame.tryon-frame { width: min(100%, calc(44dvh * 3 / 4)); } /* beats the 
 .size-chart tr.mine th { box-shadow: inset 4px 0 0 var(--accent); }
 .size-chart .badge { margin-left: var(--s-2); }
 .item-info .chart-hint, .items .chart-hint { background: var(--accent-soft); color: var(--ink); }
+
+/* Task 60: "AI ko'zgu", the try-on mirror. Full screen; the photo is the mirror, the items run down the side
+   (along the bottom on a narrow phone). The live camera is mirrored like a real mirror; the photo and pictures are not. */
+.mirror-btn { width: 100%; margin-bottom: var(--s-4); }
+dialog.mirror {
+  width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: var(--s-4);
+  border-radius: 0; display: grid; grid-template-rows: auto 1fr auto; gap: var(--s-3); background: var(--paper);
+}
+dialog.mirror:not([open]) { display: none; }
+.mirror-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); }
+.mirror-head h2 { margin: 0; }
+.mirror-main { display: grid; grid-template-columns: 1fr minmax(7rem, 22%); gap: var(--s-3); min-height: 0; }
+.mirror-left { display: grid; grid-template-rows: 1fr auto auto; gap: var(--s-2); min-height: 0; }
+.mirror-stage { position: relative; min-height: 0; border-radius: var(--r-lg); background: var(--ink); overflow: hidden; display: grid; place-items: center; }
+.mirror-stage > video, .mirror-pic { width: 100%; height: 100%; object-fit: contain; display: block; }
+.mirror-live { transform: scaleX(-1); }
+.mirror-fig { margin: 0; width: 100%; height: 100%; position: relative; }
+.mirror-fig figcaption { position: absolute; left: var(--s-3); bottom: var(--s-3); right: var(--s-3); padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: rgb(29 28 25 / .72); color: var(--accent-ink); font-size: var(--text-sm); }
+.mirror-text { padding: var(--s-5); max-width: 36rem; color: var(--accent-ink); }
+.mirror-text .meta { color: rgb(255 255 255 / .75); }
+.mirror-wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: var(--s-3); background: rgb(29 28 25 / .55); color: var(--accent-ink); font-weight: var(--weight-medium); text-align: center; padding: var(--s-4); }
+.mirror-note { margin: 0; color: var(--ink-2); min-height: 1.5em; }
+.mirror-rail { display: flex; flex-direction: column; gap: var(--s-2); overflow-y: auto; min-height: 0; padding: 2px; }
+.mirror-item { display: grid; gap: var(--s-1); padding: var(--s-2); height: auto; border-radius: var(--r-md); background: var(--surface); text-align: center; font-size: var(--text-sm); line-height: 1.25; white-space: normal; }
+.mirror-item img { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: var(--r-sm); background: var(--sunken); }
+.mirror-item[aria-pressed="true"] { outline: 3px solid var(--accent); outline-offset: 0; }
+.mirror-item:disabled { opacity: .45; }
+.mirror-foot { display: flex; flex-wrap: wrap; gap: var(--s-3); justify-content: flex-end; align-items: flex-start; }
+.mirror-foot .add { flex: 1 1 14rem; max-width: 22rem; }
+@media (max-width: 40rem) {
+  .mirror-main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .mirror-rail { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+  .mirror-item { flex: 0 0 6.5rem; }
+}

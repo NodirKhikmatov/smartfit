@@ -2,7 +2,7 @@
 // Every string is redacted first: secrets from .env, data: URLs, long base64 runs and 32+ hex tokens
 // (cart, order and recommendation tokens) never reach the log. Customer photos are never logged in the first place.
 
-const SECRET_VARS = ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'PAYME_KEY', 'CLICK_SECRET_KEY', 'TELEGRAM_BOT_TOKEN', 'ADMIN_TOKEN_SECRET', 'DATABASE_URL', 'POSTGRES_PASSWORD', 'ERROR_WEBHOOK_URL', 'FASHN_API_KEY'];
+const SECRET_VARS = ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'HF_TOKEN', 'PAYME_KEY', 'CLICK_SECRET_KEY', 'TELEGRAM_BOT_TOKEN', 'ADMIN_TOKEN_SECRET', 'DATABASE_URL', 'POSTGRES_PASSWORD', 'ERROR_WEBHOOK_URL', 'FASHN_API_KEY'];
 const LEVELS = { log: 'info', info: 'info', warn: 'warn', error: 'error' };
 const WEBHOOK_PER_MINUTE = 10;
 

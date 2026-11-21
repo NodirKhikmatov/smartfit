@@ -34,8 +34,11 @@ async function drawings(items) {
 export function createTryon({ storeId, kiosk, snapshot }) {
   let provider = null; // the provider's name when try-on is on in this shop (store info), else null: no buttons
   let outfitMode = false; // task 58: the provider dresses whole outfits (Gemini); else one garment (FASHN)
+  let roles = null; // task 60: the categories the provider can draw (the free test model: outerwear and tops), null = any
   // The items one button sends: the whole outfit for an outfit provider, else its most visible usable garment.
   const pick = (items) => (outfitMode ? items.filter(tryonOutfitItem) : [tryonItem(items)].filter(Boolean));
+  // Task 60: the mirror's rail, every item this provider can put on the photo one by one.
+  const railOf = (items) => items.filter((p) => (outfitMode ? tryonOutfitItem(p) : tryonGarment(p)) && (!roles || roles.includes(p.category)));
   let open = null; // the one dialog: { dlg, ac, stream, timer, url }
 
   function clear() {
@@ -46,6 +49,7 @@ export function createTryon({ storeId, kiosk, snapshot }) {
     clearInterval(o.timer);
     o.stream?.getTracks().forEach((x) => x.stop());
     if (o.url) URL.revokeObjectURL(o.url);
+    for (const u of o.urls?.values() ?? []) URL.revokeObjectURL(u); // task 60: the mirror's pictures
     if (o.dlg.open) o.dlg.close();
     o.dlg.remove();
   }
@@ -190,11 +194,167 @@ export function createTryon({ storeId, kiosk, snapshot }) {
     consent();
   }
 
-  function setProvider(name, outfit = false) {
+  // Task 60: "AI ko'zgu", a try-on mirror like the in-store ones: full screen, the customer's photo big, the items on the
+  // side; a tap puts that item on the photo (or shows the picture already made for it). One photo per opening; the photo
+  // and the pictures live in this view's memory only and go on close, screen change or the kiosk reset (clear()).
+  // addButton(p) → the app's own "Savatga qo'shish" for that item.
+  function mirrorButton(items, addButton) {
+    items = items.filter(Boolean);
+    if (!items.some((p) => tryonGarment(p) || tryonOutfitItem(p))) return '';
+    const b = el('button', { type: 'button', className: 'secondary tryon-btn mirror-btn', hidden: !provider || !railOf(items).length }, icon('sparkle'), t('kiosk.mirror.btn'));
+    b.tryonItems = items;
+    b.mirror = true;
+    b.onclick = () => { const list = railOf(items); if (list.length) mirror(list, b, addButton); };
+    return b;
+  }
+
+  function mirror(list, opener, addButton) {
+    clear();
+    const dlg = el('dialog', { className: 'mirror' });
+    const o = (open = { dlg, ac: new AbortController(), stream: null, timer: null, url: null, urls: new Map(), photo: null, busy: false });
+    const h = el('h2', { id: 'mirrorTitle', textContent: t('kiosk.mirror.title') });
+    const close = el('button', { type: 'button', className: 'ghost icon-btn', ariaLabel: t('common.close'), onclick: () => clear() }, icon('close'));
+    const stage = el('div', { className: 'mirror-stage' });
+    const note = el('p', { className: 'mirror-note', role: 'status' });
+    const msg = el('p', { className: 'field-error', role: 'alert' });
+    const foot = el('div', { className: 'mirror-foot' });
+    const rail = el('div', { className: 'mirror-rail' }, ...list.map((p) => {
+      const b = el('button', { type: 'button', className: 'mirror-item', disabled: true, ariaPressed: 'false' },
+        el('img', { src: p.image_url, alt: '' }), el('span', { textContent: productName(p) }));
+      b.onclick = () => dress(p, b);
+      return b;
+    }));
+    dlg.setAttribute('aria-labelledby', h.id);
+    dlg.append(el('div', { className: 'mirror-head' }, h, close), el('div', { className: 'mirror-main' }, el('div', { className: 'mirror-left' }, stage, note, msg), rail), foot);
+    dlg.addEventListener('close', () => {
+      if (open === o) clear();
+      if (opener.isConnected) opener.focus();
+    });
+    document.body.append(dlg);
+    dlg.showModal();
+
+    const btn = (className, text, onclick, ic) => el('button', { type: 'button', className, onclick }, ...(ic ? [icon(ic)] : []), text);
+    const show = (nodes, buttons, text = '') => { msg.textContent = ''; note.textContent = text; stage.replaceChildren(...nodes); foot.replaceChildren(...buttons); };
+    const items = () => [...rail.children];
+    const stopCamera = () => { clearInterval(o.timer); o.stream?.getTracks().forEach((x) => x.stop()); o.stream = null; };
+
+    function consent() {
+      stopCamera();
+      items().forEach((b) => { b.disabled = true; b.ariaPressed = 'false'; });
+      show([el('div', { className: 'mirror-text' }, el('p', { textContent: t(CONSENT[provider] ?? 'kiosk.tryon.consent', { provider }) }), el('p', { className: 'meta', textContent: t('kiosk.tryon.approx') }))],
+        [btn('', t('common.cancel'), clear), btn('primary', t('kiosk.tryon.agree'), () => (kiosk ? camera() : picker()))]);
+      foot.lastChild.focus();
+    }
+
+    function picker() {
+      const input = (capture) => {
+        const i = el('input', { type: 'file', accept: 'image/*', hidden: true });
+        if (capture) i.setAttribute('capture', 'user');
+        i.onchange = async () => {
+          const file = i.files[0];
+          i.value = '';
+          if (!file || open !== o) return;
+          let bmp;
+          try {
+            bmp = await createImageBitmap(file);
+          } catch {
+            msg.textContent = t('kiosk.camera.bad_file');
+            return;
+          }
+          const photo = snapshot(bmp, bmp.width, bmp.height, PHOTO_PX, PHOTO_Q);
+          bmp.close();
+          ready(photo);
+        };
+        return i;
+      };
+      const cam = input(true), gal = input(false);
+      show([el('div', { className: 'mirror-text' }, el('p', { textContent: t('kiosk.tryon.photo_hint') })), cam, gal],
+        [btn('', t('common.cancel'), clear), btn('secondary', t('kiosk.tryon.gallery'), () => gal.click(), 'image'), btn('primary', t('kiosk.tryon.shoot'), () => cam.click(), 'camera')]);
+    }
+
+    async function camera() {
+      const video = el('video', { muted: true, playsInline: true, className: 'mirror-live' });
+      const count = el('div', { className: 'count' });
+      const shoot = btn('primary', t('kiosk.tryon.shoot'), null, 'camera');
+      shoot.disabled = true;
+      show([video, count], [btn('', t('common.cancel'), clear), shoot], t('kiosk.tryon.photo_hint'));
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 1280 } }, audio: false });
+        if (open !== o) return s.getTracks().forEach((x) => x.stop());
+        o.stream = s;
+      } catch (err) {
+        if (open !== o) return;
+        clear();
+        return toast(t(err?.name === 'NotAllowedError' ? 'kiosk.camera.denied' : 'kiosk.camera.broken'), { tone: 'danger', ms: 6000 });
+      }
+      video.srcObject = o.stream;
+      await video.play().catch(() => {});
+      shoot.disabled = false;
+      shoot.onclick = () => {
+        shoot.disabled = true;
+        let left = COUNTDOWN;
+        count.textContent = left;
+        o.timer = setInterval(() => {
+          left -= 1;
+          count.textContent = left || '';
+          if (left > 0 || open !== o) return;
+          clearInterval(o.timer);
+          const photo = snapshot(video, video.videoWidth, video.videoHeight, PHOTO_PX, PHOTO_Q);
+          stopCamera();
+          ready(photo);
+        }, 1000);
+      };
+    }
+
+    // The photo is taken: show it, open the rail.
+    function ready(photo) {
+      o.photo = photo;
+      for (const u of o.urls.values()) URL.revokeObjectURL(u);
+      o.urls.clear();
+      items().forEach((b) => { b.disabled = false; b.ariaPressed = 'false'; });
+      show([el('img', { className: 'mirror-pic', src: photo, alt: t('kiosk.mirror.yours') })], [btn('', t('kiosk.mirror.retake'), consent, 'camera')], t('kiosk.mirror.pick'));
+      items()[0]?.focus();
+    }
+
+    // A tap on an item: its picture from memory, or a new one from the provider (one at a time).
+    async function dress(p, b) {
+      if (o.busy || !o.photo) return;
+      items().forEach((x) => (x.ariaPressed = String(x === b)));
+      const picture = (url) => show([el('figure', { className: 'mirror-fig' }, el('img', { className: 'mirror-pic', src: url, alt: t('kiosk.tryon.alt', { name: productName(p) }) }),
+        el('figcaption', {}, el('span', { className: 'badge', textContent: t('kiosk.tryon.label') }), ' ', t('kiosk.tryon.label_note')))],
+      [btn('', t('kiosk.mirror.retake'), consent, 'camera'), ...(addButton ? [addButton(p)] : [])], productName(p));
+      if (o.urls.has(p.id)) return picture(o.urls.get(p.id));
+      o.busy = true;
+      stage.append(el('div', { className: 'mirror-wait', role: 'status' }, el('span', { className: 'spinner', ariaHidden: 'true' }), t('kiosk.mirror.loading', { name: productName(p) })));
+      try {
+        const body = outfitMode ? { store_id: storeId, product_ids: [p.id], photo: o.photo, consent: true, garments: await drawings([p]) }
+          : { store_id: storeId, product_id: p.id, photo: o.photo, consent: true };
+        const res = await fetch('/api/tryon', {
+          method: 'POST', signal: o.ac.signal, headers: { 'accept-language': getLang(), 'content-type': 'application/json' }, body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || t('common.error'));
+        const blob = await res.blob();
+        if (open !== o) return;
+        o.urls.set(p.id, URL.createObjectURL(blob));
+        picture(o.urls.get(p.id));
+      } catch (err) {
+        if (open !== o) return;
+        stage.querySelector('.mirror-wait')?.remove();
+        b.ariaPressed = 'false';
+        msg.textContent = err.message || t('common.error');
+      } finally {
+        o.busy = false;
+      }
+    }
+    consent();
+  }
+
+  function setProvider(name, outfit = false, canDraw = null) {
     provider = name || null;
     outfitMode = !!(provider && outfit);
+    roles = provider && Array.isArray(canDraw) ? canDraw : null;
     if (!provider) clear();
-    for (const b of document.querySelectorAll('.tryon-btn')) b.hidden = !provider || !pick(b.tryonItems ?? []).length;
+    for (const b of document.querySelectorAll('.tryon-btn')) b.hidden = !provider || !(b.mirror ? railOf(b.tryonItems ?? []) : pick(b.tryonItems ?? [])).length;
   }
-  return { button, clear, setProvider };
+  return { button, mirrorButton, clear, setProvider };
 }

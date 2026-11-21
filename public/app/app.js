@@ -287,7 +287,7 @@ async function loadStore() {
     $('startLabel').textContent = t('kiosk.start.go');
     return;
   }
-  tryon.setProvider(store.tryon, store.tryon_outfit); // task 41: the provider's name, absent when try-on is off here (no key, switched off, today's limit)
+  tryon.setProvider(store.tryon, store.tryon_outfit, store.tryon_roles); // task 41: the provider's name, absent when try-on is off here (no key, switched off, today's limit)
   setCategories(store.categories.map((c) => [c.id, c.role]));
   renderWantChips(formWant());
   restoredWant = null;
@@ -772,6 +772,8 @@ function renderResults(r) {
     ...(r.notice === 'no_outerwear' ? [warn('kiosk.results.no_outerwear')] : []),
     ...(r.relaxed ? [el('p', { className: 'muted', textContent: t('kiosk.results.relaxed', { n: r.relaxed }) })] : []),
     ...(r.over_budget > 0 ? [warn('kiosk.results.over_budget', { sum: som(r.over_budget) })] : []),
+    // Task 60: "AI ko'zgu" over every item of these outfits (never for a child), the in-store try-on mirror.
+    ...(r.audience ? [] : [tryon.mirrorButton([...new Map(r.outfits.flatMap((o) => o.items).map((p) => [p.id, p])).values()].filter((p) => sizeOf(p)), (p) => addButton([p], $('results')))]),
     el('div', { className: 'outfits' }, ...(r.partial ? [partialCard(r.partial)] : []), ...r.outfits.map((o, i) => outfitCard(o, i + 1))),
     ...(mallLook ? [] : [triedCard()]), // task 42: "Kiyib ko'rdim" belongs to one shop's results screen
     ...(store?.profile && !kiosk && !r.audience ? [profileBox(r.outfits.map((o) => o.items.map((i) => i.id)))] : []), // phone flow: keep sizes + these looks (an adult's: a child's sizes never go into the profile)

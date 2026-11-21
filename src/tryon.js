@@ -116,31 +116,34 @@ const blobOf = (url) => {
 };
 export function createHfDemoTryon({ fetch = globalThis.fetch, env = process.env } = {}) {
   if (env.NODE_ENV === 'production') return null;
+  // A free Hugging Face account token raises the anonymous GPU quota (a couple of pictures, then errors for a while).
+  const auth = env.HF_TOKEN?.trim() ? { authorization: `Bearer ${env.HF_TOKEN.trim()}` } : {};
   return {
     name: 'Hugging Face',
     outfit: true,
+    roles: ['outerwear', 'top'], // task 60: what the app may offer in the mirror
     async tryOn({ person, garments }, signal) {
       const g = garments.find((x) => x.category === 'outerwear') ?? garments.find((x) => x.category === 'top');
       if (!g) throw new Error('hf no upper garment');
       const form = new FormData();
       form.append('files', blobOf(person), 'person.jpg');
       form.append('files', blobOf(g.image), 'garment.png');
-      const up = await fetch(`${HF_SPACE}/upload`, { method: 'POST', body: form, signal });
+      const up = await fetch(`${HF_SPACE}/upload`, { method: 'POST', body: form, signal, headers: auth });
       if (!up.ok) throw new Error(`hf http ${up.status}`);
       const [pPath, gPath] = await up.json();
       const file = (path) => ({ path, meta: { _type: 'gradio.FileData' } });
       // Gradio 4: start the job, then read its server-sent events until "complete" or "error".
       const call = await fetch(`${HF_SPACE}/call/tryon`, {
-        method: 'POST', signal, headers: { 'content-type': 'application/json' },
+        method: 'POST', signal, headers: { 'content-type': 'application/json', ...auth },
         body: JSON.stringify({ data: [{ background: file(pPath), layers: [], composite: null }, file(gPath), HF_WHAT[g.category], true, true, 30, 42] }),
       });
       if (!call.ok) throw new Error(`hf http ${call.status}`);
       const { event_id: id } = await call.json();
-      const events = await (await fetch(`${HF_SPACE}/call/tryon/${encodeURIComponent(id)}`, { signal })).text();
+      const events = await (await fetch(`${HF_SPACE}/call/tryon/${encodeURIComponent(id)}`, { signal, headers: auth })).text();
       const done = /event: complete\ndata: (.+)/.exec(events);
       if (!done) throw new Error('hf failed'); // a queue limit or a model error; its text never reaches a log
       const out = JSON.parse(done[1])?.[0];
-      const pic = await fetch(out?.url ?? `${HF_SPACE}/file=${out?.path}`, { signal });
+      const pic = await fetch(out?.url ?? `${HF_SPACE}/file=${out?.path}`, { signal, headers: auth });
       if (!pic.ok) throw new Error(`hf http ${pic.status}`);
       return Buffer.from(await pic.arrayBuffer());
     },
